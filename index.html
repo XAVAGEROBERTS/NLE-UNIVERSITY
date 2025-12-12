@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NLE University LMS - Student Portal</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- CRITICAL FOR VERCEL SPA ROUTING -->
+    <base href="/" />
+    
+    <!-- PWA/SEO Meta Tags -->
+    <meta name="description" content="NLE University Learning Management System - Student Portal">
+    <meta name="theme-color" content="#4361ee">
+    <meta property="og:title" content="NLE University LMS">
+    <meta property="og:description" content="Student Portal for accessing courses, tutorials, and academic resources">
+    <meta property="og:image" content="/images/og-image.jpg">
+    <meta property="og:url" content="https://lms-vite.vercel.app">
+    
+    <!-- Prevent iOS/Safari zoom on focus -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    
+    <!-- iOS PWA Support -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="NLE LMS">
+    
+    <!-- Windows PWA Support -->
+    <meta name="msapplication-TileColor" content="#4361ee">
+    <meta name="msapplication-TileImage" content="/icons/ms-icon-144x144.png">
+    
+    <!-- Favicons -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+    <link rel="manifest" href="/manifest.json">
+    
+    <!-- Critical CSS for initial load -->
+    <style>
+      /* Prevent FOUC (Flash of Unstyled Content) */
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        width: 100%;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        overflow-x: hidden;
+      }
+      
+      #root {
+        height: 100%;
+        width: 100%;
+      }
+      
+      /* Loading animation for initial app load */
+      .app-loading {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+      }
+      
+      .app-loading-spinner {
+        border: 4px solid rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        border-top: 4px solid white;
+        width: 50px;
+        height: 50px;
+        animation: spin 1s linear infinite;
+        margin-bottom: 20px;
+      }
+      
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      
+      /* Ensure images don't overflow */
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      
+      /* Better box-sizing */
+      *, *::before, *::after {
+        box-sizing: border-box;
+      }
+    </style>
+    
+    <!-- Vercel Analytics (Optional) -->
+    <!-- <script defer src="/_vercel/insights/script.js"></script> -->
+  </head>
+  <body>
+    <!-- Loading fallback for slow connections -->
+    <noscript>
+      <div style="
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: #f8f9fa;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+        padding: 20px;
+        z-index: 9999;
+      ">
+        <div>
+          <h1 style="color: #2c3e50; margin-bottom: 20px;">JavaScript Required</h1>
+          <p style="color: #7f8c8d; margin-bottom: 30px;">
+            NLE University LMS requires JavaScript to run. Please enable JavaScript in your browser settings.
+          </p>
+          <a href="/" style="
+            padding: 12px 24px;
+            background: #3498db;
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: 600;
+          ">
+            Refresh Page
+          </a>
+        </div>
+      </div>
+    </noscript>
+    
+    <!-- Main React App Mount -->
+    <div id="root">
+      <!-- Loading screen shown until React hydrates -->
+      <div class="app-loading">
+        <div class="app-loading-spinner"></div>
+        <h2 style="margin: 0 0 10px 0;">NLE University LMS</h2>
+        <p style="margin: 0; opacity: 0.8;">Loading Student Portal...</p>
+      </div>
+    </div>
+    
+    <!-- Main app script - This MUST be at the bottom -->
+    <script type="module" src="/src/main.jsx"></script>
+    
+    <!-- Service Worker Registration (Optional for PWA) -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('/service-worker.js').then(
+            function(registration) {
+              console.log('ServiceWorker registration successful');
+            },
+            function(err) {
+              console.log('ServiceWorker registration failed: ', err);
+            }
+          );
+        });
+      }
+      
+      // Remove loading screen when app is ready
+      window.addEventListener('DOMContentLoaded', function() {
+        const root = document.getElementById('root');
+        if (root && root.children.length > 1) {
+          // React has hydrated, remove loading screen
+          const loadingScreen = root.querySelector('.app-loading');
+          if (loadingScreen) {
+            setTimeout(() => {
+              loadingScreen.style.opacity = '0';
+              loadingScreen.style.transition = 'opacity 0.3s';
+              setTimeout(() => {
+                loadingScreen.remove();
+              }, 300);
+            }, 500);
+          }
+        }
+      });
+    </script>
+  </body>
+</html>
