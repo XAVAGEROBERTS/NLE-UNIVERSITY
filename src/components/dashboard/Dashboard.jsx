@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useStudentAuth } from '../../context/StudentAuthContext'; // CHANGED from useAuth
-
-// Import Chart.js correctly
+import { useStudentAuth } from '../../context/StudentAuthContext';
+import { supabase } from '../../services/supabase';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -15,7 +14,6 @@ import {
   LineController
 } from 'chart.js';
 
-// Register ALL ChartJS components properly
 ChartJS.register(
   LineController,
   CategoryScale,
@@ -28,127 +26,305 @@ ChartJS.register(
   Filler
 );
 
-// Mock data outside component
-const MOCK_LECTURES = [
-  {
-    id: 1,
-    title: 'Internet of Things',
-    date: '2025-06-21',
-    time: '09:00',
-    lecturer: 'Prof. Brown',
-    duration: 60
-  },
-  {
-    id: 2,
-    title: 'Project Management',
-    date: '2025-06-22',
-    time: '11:00',
-    lecturer: 'Dr. Davis',
-    duration: 90
-  },
-  {
-    id: 3,
-    title: 'Machine Learning Lab',
-    date: '2025-06-23',
-    time: '15:00',
-    lecturer: 'Dr. Smith',
-    duration: 120
-  }
-];
-
-// Program progress configuration
-const MANUAL_SEMESTER = {
-  year: 4,
-  semester: 2,
-  intake: 'August',
-  academicYear: '2024/2025'
-};
-
-// Helper functions outside component
-const calculateProgress = () => {
-  const totalSemesters = 8;
-  const completedSemesters = ((MANUAL_SEMESTER.year - 1) * 2) + MANUAL_SEMESTER.semester - 1;
-  
-  if (MANUAL_SEMESTER.year === 4 && MANUAL_SEMESTER.semester === 2) {
-    return 85;
-  }
-  
-  return Math.round((completedSemesters / totalSemesters) * 100);
-};
-
-const getGreeting = () => {
-  const hour = new Date().getHours();
-  if (hour >= 0 && hour < 12) return 'Good Morning';
-  if (hour >= 12 && hour < 17) return 'Good Afternoon';
-  return 'Good Evening';
-};
-
-const formatDateForICS = (date) => {
-  return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-};
-
-// Calculate attendance stats - Pure function
-const calculateAttendanceStats = (data) => {
-  const presentDays = data.filter(day => day === 1).length;
-  const rate = Math.round((presentDays / 5) * 100);
-  return {
-    presentDays,
-    rate,
-    summary: `Last 5 lecture days: ${rate}% (${presentDays}/5 days)`
-  };
-};
-
-// Load attendance data from localStorage - Pure function
-const loadAttendanceData = () => {
-  try {
-    const savedAttendance = localStorage.getItem('lectureAttendance');
-    if (savedAttendance) {
-      return JSON.parse(savedAttendance);
-    }
-  } catch (error) {
-    console.error('Error loading attendance data:', error);
-  }
-  return [1, 1, 0, 1, 1]; // Default data
-};
-
 const Dashboard = () => {
-  const { user } = useStudentAuth(); // CHANGED: from profile to user
+  const { user } = useStudentAuth();
   const [loading, setLoading] = useState(true);
   const [showAdminControls, setShowAdminControls] = useState(false);
-  
-  // Initialize state with data from localStorage directly
-  const [attendanceData, setAttendanceData] = useState(() => loadAttendanceData());
-  
-  // Calculate stats from attendanceData
-  const attendanceStats = calculateAttendanceStats(attendanceData);
-  
-  // Chart state
+  const [attendanceData, setAttendanceData] = useState([1, 1, 0, 1, 1]);
+  const [dashboardStats, setDashboardStats] = useState({
+    programProgress: 85,
+    pendingAssignments: 3,
+    upcomingExams: 2,
+    financialPaid: 7500,
+    financialBalance: 2550,
+    cgpa: 4.5,
+    attendanceRate: 80
+  });
+  const [upcomingLectures, setUpcomingLectures] = useState([]);
+  const [studentDetails, setStudentDetails] = useState(null);
   const [chartError, setChartError] = useState(null);
-  
+
   const calendarContainerRef = useRef(null);
   const chartRef = useRef(null);
   const chartCanvasRef = useRef(null);
 
-  // Initialize attendance chart - WITHOUT setState inside
+  // Calculate GPA from completed courses
+  const calculateGPA = (studentCourses) => {
+    if (!studentCourses || studentCourses.length === 0) return 0;
+    
+    const completedCourses = studentCourses.filter(
+      course => course.status === 'completed' && course.grade_points
+    );
+    
+    if (completedCourses.length === 0) return 0;
+    
+    const totalPoints = completedCourses.reduce(
+      (sum, course) => sum + (course.grade_points * course.credits), 
+      0
+    );
+    
+    const totalCredits = completedCourses.reduce(
+      (sum, course) => sum + course.credits, 
+      0
+    );
+    
+    return totalCredits > 0 ? totalPoints / totalCredits : 0;
+  };
+
+ // ============ REPLACE YOUR EXISTING getProgramDuration FUNCTION WITH THIS ============
+  // Determine program duration based on program type
+  const getProgramDuration = (program) => {
+    if (!program) return { years: 4, semesters: 8 };
+    
+    const programLower = program.toLowerCase();
+    
+    // Match the exact program names
+    if (programLower.includes('bachelor of science in computer engineering')) {
+      return { years: 4, semesters: 8 };
+    } else if (programLower.includes('bachelor of science in computer science')) {
+      return { years: 3, semesters: 6 };
+    } else if (programLower.includes('bachelor of science in software engineering')) {
+      return { years: 4, semesters: 8 };
+    } else if (programLower.includes('bachelor of information technology')) {
+      return { years: 3, semesters: 6 };
+    } else if (programLower.includes('diploma')) {
+      return { years: 2, semesters: 4 };
+    } else if (programLower.includes('certificate')) {
+      return { years: 1, semesters: 2 };
+    } else if (programLower.includes('master') || programLower.includes('msc') || programLower.includes('m.eng')) {
+      return { years: 2, semesters: 4 };
+    } else if (programLower.includes('phd') || programLower.includes('doctor')) {
+      return { years: 3, semesters: 6 };
+    }
+    
+    return { years: 4, semesters: 8 }; // Default
+  };
+  // Fetch all dashboard data
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      try {
+        setLoading(true);
+        
+        if (!user?.email) {
+          console.error('No user logged in');
+          setLoading(false);
+          return;
+        }
+
+        console.log('Fetching dashboard data for:', user.email);
+
+        // 1. Fetch complete student details from database
+        const { data: student, error: studentError } = await supabase
+          .from('students')
+          .select('*')
+          .eq('email', user.email)
+          .single();
+
+        if (studentError) {
+          console.error('Error fetching student:', studentError);
+          throw studentError;
+        }
+
+        if (!student) {
+          console.error('Student not found');
+          throw new Error('Student not found in database');
+        }
+
+        console.log('Student data loaded:', student.full_name);
+        setStudentDetails(student);
+
+        // 2. Fetch student's courses with grades for GPA calculation
+        const { data: studentCourses, error: coursesError } = await supabase
+          .from('student_courses')
+          .select(`
+            *,
+            courses (
+              id,
+              credits
+            )
+          `)
+          .eq('student_id', student.id);
+
+        if (!coursesError && studentCourses) {
+          // Calculate GPA
+          const coursesWithGrades = studentCourses.map(sc => ({
+            ...sc,
+            credits: sc.courses?.credits || 3,
+            grade_points: sc.grade_points || 0
+          }));
+          
+          const gpa = calculateGPA(coursesWithGrades);
+          
+          // 3. Calculate program progress based on completed semesters
+          const programDuration = getProgramDuration(student.program);
+          const calculateProgramProgress = () => {
+            const completedSemesters = ((student.year_of_study - 1) * 2) + (student.semester - 1);
+            const progress = (completedSemesters / programDuration.semesters) * 100;
+            return Math.min(Math.round(progress), 85); // Cap at 85% until final project
+          };
+
+          // 4. Fetch attendance data for the last 5 days
+          const { data: attendanceRecords, error: attendanceError } = await supabase
+            .from('attendance_records')
+            .select('date, status')
+            .eq('student_id', student.id)
+            .order('date', { ascending: false })
+            .limit(5);
+
+          let attendanceArray = [1, 1, 0, 1, 1]; // Default data
+          
+          if (!attendanceError && attendanceRecords && attendanceRecords.length > 0) {
+            attendanceArray = attendanceRecords.reverse().map(record => 
+              record.status === 'present' ? 1 : 0
+            );
+          }
+
+          // 5. Fetch pending assignments count
+          const { data: assignments, error: assignmentsError } = await supabase
+            .from('assignments')
+            .select('id, due_date')
+            .eq('status', 'published')
+            .gt('due_date', new Date().toISOString());
+
+          // 6. Fetch upcoming exams count
+          const { data: exams, error: examsError } = await supabase
+            .from('examinations')
+            .select('id, start_time')
+            .eq('status', 'published')
+            .gt('start_time', new Date().toISOString());
+
+          // 7. Fetch financial summary
+          const { data: financial, error: financialError } = await supabase
+            .from('financial_records')
+            .select('amount, balance_due, status, academic_year')
+            .eq('student_id', student.id)
+            .eq('academic_year', student.academic_year);
+
+          let financialSummary = { paid: 0, balance: 0 };
+          if (!financialError && financial) {
+            financialSummary = {
+              paid: financial
+                .filter(f => f.status === 'paid')
+                .reduce((sum, f) => sum + parseFloat(f.amount || 0), 0),
+              balance: financial
+                .filter(f => f.status === 'partial')
+                .reduce((sum, f) => sum + parseFloat(f.balance_due || 0), 0) +
+                financial
+                  .filter(f => f.status === 'pending')
+                  .reduce((sum, f) => sum + parseFloat(f.amount || 0), 0)
+            };
+          }
+
+          // 8. Fetch upcoming lectures for the week
+          const today = new Date();
+          const nextWeek = new Date();
+          nextWeek.setDate(today.getDate() + 7);
+
+          const { data: lectures, error: lecturesError } = await supabase
+            .from('lectures')
+            .select(`
+              *,
+              courses (course_code, course_name),
+              lecturers (full_name)
+            `)
+            .gte('scheduled_date', today.toISOString().split('T')[0])
+            .lte('scheduled_date', nextWeek.toISOString().split('T')[0])
+            .in('status', ['scheduled', 'ongoing'])
+            .order('scheduled_date', { ascending: true })
+            .order('start_time', { ascending: true });
+
+          let formattedLectures = [];
+          if (!lecturesError && lectures) {
+            console.log('Fetched lectures:', lectures);
+            formattedLectures = lectures.map(lecture => {
+              const startTime = lecture.start_time || '09:00';
+              const endTime = lecture.end_time || '11:00';
+              const startDate = new Date(`2000-01-01T${startTime}`);
+              const endDate = new Date(`2000-01-01T${endTime}`);
+              const duration = Math.round((endDate - startDate) / 60000);
+              
+              return {
+                id: lecture.id,
+                title: lecture.courses?.course_name || lecture.title || 'Untitled Lecture',
+                date: lecture.scheduled_date,
+                time: startTime,
+                endTime: endTime,
+                lecturer: lecture.lecturers?.full_name || 'Unknown Lecturer',
+                duration: duration,
+                courseCode: lecture.courses?.course_code || 'N/A',
+                google_meet_link: lecture.google_meet_link,
+                status: lecture.status
+              };
+            });
+            console.log('Formatted lectures:', formattedLectures);
+          }
+
+          // Update all states
+          setDashboardStats({
+            programProgress: calculateProgramProgress(),
+            pendingAssignments: assignments?.length || 0,
+            upcomingExams: exams?.length || 0,
+            financialPaid: financialSummary.paid,
+            financialBalance: financialSummary.balance,
+            cgpa: parseFloat(gpa.toFixed(2)),
+            attendanceRate: Math.round((attendanceArray.filter(val => val === 1).length / attendanceArray.length) * 100)
+          });
+
+          setAttendanceData(attendanceArray);
+          setUpcomingLectures(formattedLectures);
+          console.log('Dashboard data loaded successfully', {
+            gpa: gpa.toFixed(2),
+            lectures: formattedLectures.length,
+            programProgress: calculateProgramProgress()
+          });
+
+        } else {
+          throw new Error('Failed to fetch student courses');
+        }
+
+      } catch (error) {
+        console.error('Error fetching dashboard data:', error);
+        // Use default data if fetch fails
+        setDashboardStats({
+          programProgress: 85,
+          pendingAssignments: 3,
+          upcomingExams: 2,
+          financialPaid: 7500,
+          financialBalance: 2550,
+          cgpa: 4.5,
+          attendanceRate: 80
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, [user]);
+
+  // Initialize attendance chart
   const initializeAttendanceChart = useCallback(() => {
-    // Destroy existing chart if it exists
     if (chartRef.current) {
       chartRef.current.destroy();
       chartRef.current = null;
     }
 
     const ctx = chartCanvasRef.current;
-    if (!ctx) {
-      console.error('Canvas element not found');
-      return false;
-    }
+    if (!ctx) return false;
 
     try {
-      // Create new chart
+      // Generate labels for last 5 days
+      const labels = [];
+      for (let i = 4; i >= 0; i--) {
+        const date = new Date();
+        date.setDate(date.getDate() - i);
+        labels.push(date.toLocaleDateString('en-US', { weekday: 'short' }));
+      }
+
       const chart = new ChartJS(ctx, {
         type: 'line',
         data: {
-          labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
+          labels: labels,
           datasets: [{
             label: 'Attendance',
             data: attendanceData,
@@ -170,9 +346,7 @@ const Dashboard = () => {
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
-            legend: {
-              display: false
-            },
+            legend: { display: false },
             tooltip: {
               callbacks: {
                 label: function(context) {
@@ -191,14 +365,10 @@ const Dashboard = () => {
                   return value === 1 ? 'Present' : 'Absent';
                 }
               },
-              grid: {
-                drawBorder: false
-              }
+              grid: { drawBorder: false }
             },
             x: {
-              grid: {
-                display: false
-              }
+              grid: { display: false }
             }
           }
         }
@@ -238,7 +408,6 @@ const Dashboard = () => {
           <tr>
     `;
     
-    // Add day headers
     dayNames.forEach(day => {
       calendarHTML += `<th>${day}</th>`;
     });
@@ -252,7 +421,6 @@ const Dashboard = () => {
     let day = 1;
     let startingCell = firstDay.getDay();
     
-    // Create calendar rows
     for (let row = 0; row < 6; row++) {
       calendarHTML += '<tr>';
       
@@ -284,35 +452,36 @@ const Dashboard = () => {
     calendarContainerRef.current.innerHTML = calendarHTML;
   }, []);
 
-  // Handle day attendance toggle
+  // Handle attendance toggle
   const handleToggleDayAttendance = useCallback((index) => {
-    setAttendanceData(prev => {
-      const newData = [...prev];
-      newData[index] = newData[index] === 1 ? 0 : 1;
-      
-      // Save to localStorage
-      try {
-        localStorage.setItem('lectureAttendance', JSON.stringify(newData));
-      } catch (error) {
-        console.error('Error saving attendance:', error);
-      }
-      
-      // Update chart immediately
-      if (chartRef.current) {
-        setTimeout(() => {
-          if (chartRef.current) {
-            chartRef.current.data.datasets[0].data = newData;
-            chartRef.current.data.datasets[0].pointBackgroundColor = newData.map(val => 
-              val === 1 ? 'rgba(46, 204, 113, 1)' : 'rgba(231, 76, 60, 1)'
-            );
-            chartRef.current.update();
-          }
-        }, 0);
-      }
-      
-      return newData;
-    });
-  }, []);
+    if (!studentDetails?.id) return;
+
+    const newData = [...attendanceData];
+    newData[index] = newData[index] === 1 ? 0 : 1;
+    
+    // Update in database
+    const date = new Date();
+    date.setDate(date.getDate() - (4 - index)); // Adjust for last 5 days
+    
+    supabase
+      .from('attendance_records')
+      .upsert({
+        student_id: studentDetails.id,
+        date: date.toISOString().split('T')[0],
+        status: newData[index] === 1 ? 'present' : 'absent',
+        day_of_week: date.getDay(),
+        recorded_by: studentDetails.id
+      }, {
+        onConflict: 'student_id, date'
+      })
+      .then(({ error }) => {
+        if (error) {
+          console.error('Error updating attendance:', error);
+        } else {
+          setAttendanceData(newData);
+        }
+      });
+  }, [attendanceData, studentDetails]);
 
   // Save attendance changes
   const saveAttendanceChanges = useCallback(() => {
@@ -320,150 +489,94 @@ const Dashboard = () => {
     setShowAdminControls(false);
   }, []);
 
-  // Show custom alert
-  const showCustomAlert = useCallback((message, isError = true) => {
-    // Check if alert already exists
-    const existingAlert = document.querySelector('.custom-alert');
-    if (existingAlert) {
-      existingAlert.remove();
-    }
-
-    const alert = document.createElement('div');
-    alert.className = 'custom-alert';
-    alert.style.cssText = `
-      position: fixed;
-      top: 80px;
-      right: 30px;
-      z-index: 2000;
-      background-color: ${isError ? '#e74c3c' : '#27ae60'};
-      color: white;
-      padding: 12px 20px;
-      border-radius: 4px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      min-width: 300px;
-      animation: slideIn 0.3s ease-out;
-    `;
-    
-    alert.innerHTML = `
-      <span id="alertMessage">${message}</span>
-      <button class="close-alert" style="
-        background: none;
-        border: none;
-        color: white;
-        font-size: 20px;
-        cursor: pointer;
-        margin-left: 10px;
-      ">&times;</button>
-    `;
-    
-    document.body.appendChild(alert);
-    
-    // Add close functionality
-    const closeBtn = alert.querySelector('.close-alert');
-    closeBtn.addEventListener('click', () => {
-      alert.style.animation = 'slideOut 0.3s ease-out';
-      setTimeout(() => {
-        if (alert.parentNode) {
-          alert.remove();
-        }
-      }, 300);
-    });
-    
-    // Auto remove after 5 seconds
-    setTimeout(() => {
-      if (alert.parentNode) {
-        alert.style.animation = 'slideOut 0.3s ease-out';
-        setTimeout(() => {
-          if (alert.parentNode) {
-            alert.remove();
-          }
-        }, 300);
+  // Initialize chart
+  useEffect(() => {
+    if (!loading && chartCanvasRef.current) {
+      const chartCreated = initializeAttendanceChart();
+      if (!chartCreated) {
+        setChartError('Failed to create attendance chart. Please refresh the page.');
+      } else {
+        setChartError(null);
       }
-    }, 5000);
-  }, []);
+    }
+  }, [loading, initializeAttendanceChart]);
 
-  // Add to calendar
-  const addToCalendar = useCallback((lecture) => {
-    // Create calendar event
+  // Initialize calendar
+  useEffect(() => {
+    if (!loading) {
+      initializeCalendar();
+    }
+  }, [loading, initializeCalendar]);
+
+  // Helper functions
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour >= 0 && hour < 12) return 'Good Morning';
+    if (hour >= 12 && hour < 17) return 'Good Afternoon';
+    return 'Good Evening';
+  };
+
+  const formatDate = (dateString) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric'
+    });
+  };
+
+  const formatTime = (timeString) => {
+    if (!timeString) return 'TBD';
+    const [hours, minutes] = timeString.split(':');
+    const hour = parseInt(hours);
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const hour12 = hour % 12 || 12;
+    return `${hour12}:${minutes} ${ampm}`;
+  };
+
+  const calculateAttendanceStats = (data) => {
+    const presentDays = data.filter(day => day === 1).length;
+    const rate = Math.round((presentDays / data.length) * 100);
+    return {
+      presentDays,
+      rate,
+      summary: `Last ${data.length} lecture days: ${rate}% (${presentDays}/${data.length} days)`
+    };
+  };
+
+  const attendanceStats = calculateAttendanceStats(attendanceData);
+
+  const addToCalendar = (lecture) => {
     const event = {
-      title: lecture.title,
+      title: `${lecture.courseCode} - ${lecture.title}`,
       start: new Date(`${lecture.date}T${lecture.time}`),
-      end: new Date(new Date(`${lecture.date}T${lecture.time}`).getTime() + (lecture.duration * 60000)),
+      end: new Date(`${lecture.date}T${lecture.endTime}`),
       description: `Lecture by ${lecture.lecturer}`,
-      location: 'Online'
+      location: lecture.google_meet_link || 'Online'
     };
     
-    // Create iCal content
     const icsContent = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
       'BEGIN:VEVENT',
       `SUMMARY:${event.title}`,
-      `DTSTART:${formatDateForICS(event.start)}`,
-      `DTEND:${formatDateForICS(event.end)}`,
+      `DTSTART:${event.start.toISOString().replace(/[-:]/g, '').split('.')[0]}Z`,
+      `DTEND:${event.end.toISOString().replace(/[-:]/g, '').split('.')[0]}Z`,
       `DESCRIPTION:${event.description}`,
       `LOCATION:${event.location}`,
       'END:VEVENT',
       'END:VCALENDAR'
     ].join('\n');
     
-    // Create and download .ics file
     const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `${lecture.title.replace(/\s+/g, '_')}.ics`;
+    link.download = `${lecture.courseCode.replace(/\s+/g, '_')}_lecture.ics`;
     link.click();
     
-    // Clean up
     URL.revokeObjectURL(link.href);
-    
-    // Show success message
-    showCustomAlert(`${lecture.title} added to calendar!`, false);
-  }, [showCustomAlert]);
-
-  // Initialize components on mount
-  useEffect(() => {
-    // Simulate loading data
-    const timer = setTimeout(() => {
-      setLoading(false);
-    }, 1000);
-    
-    return () => {
-      clearTimeout(timer);
-      // Clean up chart on unmount
-      if (chartRef.current) {
-        chartRef.current.destroy();
-        chartRef.current = null;
-      }
-    };
-  }, []);
-
-  // Initialize chart after data is loaded and component mounts - FIXED
-  useEffect(() => {
-    if (!loading && chartCanvasRef.current) {
-      const chartCreated = initializeAttendanceChart();
-      if (!chartCreated) {
-        // Set chart error state AFTER the effect is complete
-        setTimeout(() => {
-          setChartError('Failed to create attendance chart. Please refresh the page.');
-        }, 0);
-      } else {
-        setTimeout(() => {
-          setChartError(null);
-        }, 0);
-      }
-    }
-  }, [loading, initializeAttendanceChart]);
-
-  // Initialize calendar after component mounts
-  useEffect(() => {
-    if (!loading) {
-      initializeCalendar();
-    }
-  }, [loading, initializeCalendar]);
+    alert(`${lecture.courseCode} added to calendar!`);
+  };
 
   if (loading) {
     return (
@@ -487,14 +600,15 @@ const Dashboard = () => {
     );
   }
 
-  const greeting = getGreeting();
-  const progress = calculateProgress();
+  // Get student name from database or context
+  const studentName = studentDetails?.full_name || user?.name || 'Student';
+  const programDuration = getProgramDuration(studentDetails?.program);
 
   return (
     <div className="content">
       {/* Dashboard Header */}
       <div className="dashboard-header">
-        <h2>{greeting}, {user?.name || 'Robert Mayhem'}</h2> {/* CHANGED: from profile to user */}
+        <h2>{getGreeting()}, {studentName}</h2>
         <div className="date-display" id="currentDate">
           {new Date().toLocaleDateString('en-US', {
             weekday: 'long',
@@ -507,7 +621,7 @@ const Dashboard = () => {
 
       {/* Dashboard Cards */}
       <div className="dashboard-cards">
-        {/* Program Progress Card - FIXED HTML */}
+        {/* Program Progress Card */}
         <div className="card">
           <div className="card-header">
             <h3 className="card-title">My Program</h3>
@@ -516,18 +630,23 @@ const Dashboard = () => {
             </div>
           </div>
           <div className="card-content">
-            {/* FIXED: Removed <p> tag around <h3> */}
             <h3 style={{ margin: '0 0 10px 0', fontSize: '18px', color: '#333' }}>
-              Bachelor of Science in Computer Engineering
+              {studentDetails?.program || 'Bachelor of Science in Computer Engineering'}
             </h3>
-            <p style={{ margin: '5px 0' }}>Duration: 4 years (8 semesters)</p>
-            <p style={{ margin: '5px 0' }}>Intake: <span id="intakeType">{MANUAL_SEMESTER.intake}</span></p>
-            <p style={{ margin: '5px 0' }}>Academic Year: <span id="academicYear">{MANUAL_SEMESTER.academicYear}</span></p>
+            <p style={{ margin: '5px 0' }}>
+              Duration: {programDuration.years} years ({programDuration.semesters} semesters)
+            </p>
+            <p style={{ margin: '5px 0' }}>
+              Intake: <span id="intakeType">{studentDetails?.intake || 'August'}</span>
+            </p>
+            <p style={{ margin: '5px 0' }}>
+              Academic Year: <span id="academicYear">{studentDetails?.academic_year || '2024/2025'}</span>
+            </p>
             <div className="course-progress" style={{ marginTop: '15px' }}>
               <p style={{ margin: '5px 0' }}>
-                Progress: Year <span id="currentYear">{MANUAL_SEMESTER.year}</span>, 
-                Semester <span id="currentSemester">{MANUAL_SEMESTER.semester}</span> 
-                (<span id="progressPercentage">{progress}</span>%)
+                Progress: Year <span id="currentYear">{studentDetails?.year_of_study || 4}</span>, 
+                Semester <span id="currentSemester">{studentDetails?.semester || 2}</span> 
+                (<span id="progressPercentage">{dashboardStats.programProgress}</span>%)
               </p>
               <div className="progress-bar" style={{
                 height: '8px',
@@ -540,7 +659,7 @@ const Dashboard = () => {
                   className="progress-fill" 
                   id="progressFill" 
                   style={{ 
-                    width: `${progress}%`,
+                    width: `${dashboardStats.programProgress}%`,
                     height: '100%',
                     backgroundColor: '#3498db',
                     borderRadius: '4px',
@@ -642,27 +761,32 @@ const Dashboard = () => {
                   gap: '10px',
                   margin: '10px 0'
                 }}>
-                  {['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].map((day, index) => (
-                    <button
-                      key={index}
-                      data-day={index}
-                      className={`day-toggle ${attendanceData[index] === 1 ? 'btn-present' : 'btn-absent'}`}
-                      onClick={() => handleToggleDayAttendance(index)}
-                      style={{
-                        padding: '8px 16px',
-                        border: 'none',
-                        borderRadius: '4px',
-                        cursor: 'pointer',
-                        fontWeight: '500',
-                        transition: 'all 0.3s ease',
-                        backgroundColor: attendanceData[index] === 1 ? '#2ecc71' : '#e74c3c',
-                        color: 'white',
-                        flex: 1
-                      }}
-                    >
-                      {day}
-                    </button>
-                  ))}
+                  {attendanceData.map((attendance, index) => {
+                    const date = new Date();
+                    date.setDate(date.getDate() - (attendanceData.length - 1 - index));
+                    const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+                    
+                    return (
+                      <button
+                        key={index}
+                        className={`day-toggle ${attendance === 1 ? 'btn-present' : 'btn-absent'}`}
+                        onClick={() => handleToggleDayAttendance(index)}
+                        style={{
+                          padding: '8px 16px',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontWeight: '500',
+                          transition: 'all 0.3s ease',
+                          backgroundColor: attendance === 1 ? '#2ecc71' : '#e74c3c',
+                          color: 'white',
+                          flex: 1
+                        }}
+                      >
+                        {dayName}
+                      </button>
+                    );
+                  })}
                 </div>
                 <button 
                   id="saveAttendance" 
@@ -707,63 +831,261 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Upcoming Lectures */}
-      <div className="upcoming-lectures" style={{ marginTop: '30px' }}>
-        <h3 style={{ marginBottom: '15px' }}>Upcoming Lectures This Week</h3>
-        <table style={{
-          width: '100%',
-          borderCollapse: 'collapse',
+      {/* Quick Stats Row */}
+      <div className="stats-row" style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+        gap: '20px',
+        marginTop: '30px'
+      }}>
+        <div className="stat-card" style={{
           backgroundColor: 'white',
+          padding: '20px',
           borderRadius: '8px',
-          overflow: 'hidden',
           boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
         }}>
-          <thead>
-            <tr style={{ backgroundColor: '#f8f9fa' }}>
-              <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Date</th>
-              <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Time</th>
-              <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Course</th>
-              <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Lecturer</th>
-              <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {MOCK_LECTURES.map((lecture) => (
-              <tr 
-                key={lecture.id}
-                style={{ borderBottom: '1px solid #dee2e6' }}
-              >
-                <td style={{ padding: '12px' }}>
-                  {new Date(lecture.date).toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric'
-                  })}
-                </td>
-                <td style={{ padding: '12px' }}>{lecture.time}</td>
-                <td style={{ padding: '12px' }}>{lecture.title}</td>
-                <td style={{ padding: '12px' }}>{lecture.lecturer}</td>
-                <td style={{ padding: '12px' }}>
-                  <button 
-                    className="add-calendar"
-                    onClick={() => addToCalendar(lecture)}
-                    style={{
-                      backgroundColor: '#4285f4',
-                      color: 'white',
-                      border: 'none',
-                      padding: '6px 12px',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      fontSize: '14px'
-                    }}
-                  >
-                    Add to Calendar
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <h4 style={{ margin: '0 0 5px 0', color: '#666' }}>Pending Assignments</h4>
+              <p style={{ margin: 0, fontSize: '24px', fontWeight: 'bold', color: '#e74c3c' }}>
+                {dashboardStats.pendingAssignments}
+              </p>
+              {dashboardStats.pendingAssignments > 0 && (
+                <p style={{ margin: '5px 0 0 0', fontSize: '12px', color: '#666' }}>
+                  Due soon
+                </p>
+              )}
+            </div>
+            <div style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '50%',
+              backgroundColor: '#ffebee',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <i className="fas fa-tasks" style={{ color: '#e74c3c', fontSize: '20px' }}></i>
+            </div>
+          </div>
+        </div>
+
+        <div className="stat-card" style={{
+          backgroundColor: 'white',
+          padding: '20px',
+          borderRadius: '8px',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <h4 style={{ margin: '0 0 5px 0', color: '#666' }}>Upcoming Exams</h4>
+              <p style={{ margin: 0, fontSize: '24px', fontWeight: 'bold', color: '#3498db' }}>
+                {dashboardStats.upcomingExams}
+              </p>
+              {dashboardStats.upcomingExams > 0 && (
+                <p style={{ margin: '5px 0 0 0', fontSize: '12px', color: '#666' }}>
+                  This week
+                </p>
+              )}
+            </div>
+            <div style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '50%',
+              backgroundColor: '#e3f2fd',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <i className="fas fa-clipboard-list" style={{ color: '#3498db', fontSize: '20px' }}></i>
+            </div>
+          </div>
+        </div>
+
+        <div className="stat-card" style={{
+          backgroundColor: 'white',
+          padding: '20px',
+          borderRadius: '8px',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <h4 style={{ margin: '0 0 5px 0', color: '#666' }}>Fees Paid</h4>
+              <p style={{ margin: 0, fontSize: '24px', fontWeight: 'bold', color: '#27ae60' }}>
+                ${dashboardStats.financialPaid.toLocaleString()}
+              </p>
+              <p style={{ margin: '5px 0 0 0', fontSize: '12px', color: '#666' }}>
+                Balance: ${dashboardStats.financialBalance.toLocaleString()}
+              </p>
+            </div>
+            <div style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '50%',
+              backgroundColor: '#e8f6ef',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <i className="fas fa-money-bill-wave" style={{ color: '#27ae60', fontSize: '20px' }}></i>
+            </div>
+          </div>
+        </div>
+
+        <div className="stat-card" style={{
+          backgroundColor: 'white',
+          padding: '20px',
+          borderRadius: '8px',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <h4 style={{ margin: '0 0 5px 0', color: '#666' }}>Current CGPA</h4>
+              <p style={{ margin: 0, fontSize: '24px', fontWeight: 'bold', color: '#9b59b6' }}>
+                {dashboardStats.cgpa.toFixed(2)}
+              </p>
+            </div>
+            <div style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '50%',
+              backgroundColor: '#f3e5f5',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <i className="fas fa-chart-line" style={{ color: '#9b59b6', fontSize: '20px' }}></i>
+            </div>
+          </div>
+        </div>
       </div>
+
+      {/* Upcoming Lectures */}
+      <div className="upcoming-lectures" style={{ marginTop: '30px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+          <h3 style={{ margin: 0 }}>Upcoming Lectures This Week</h3>
+          <span style={{ fontSize: '14px', color: '#666' }}>
+            {upcomingLectures.length} lecture{upcomingLectures.length !== 1 ? 's' : ''} found
+          </span>
+        </div>
+        {upcomingLectures.length === 0 ? (
+          <p style={{ 
+            textAlign: 'center', 
+            padding: '20px', 
+            backgroundColor: 'white',
+            borderRadius: '8px',
+            color: '#666'
+          }}>
+            No upcoming lectures scheduled for this week.
+          </p>
+        ) : (
+          <table style={{
+            width: '100%',
+            borderCollapse: 'collapse',
+            backgroundColor: 'white',
+            borderRadius: '8px',
+            overflow: 'hidden',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+          }}>
+            <thead>
+              <tr style={{ backgroundColor: '#f8f9fa' }}>
+                <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Date</th>
+                <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Time</th>
+                <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Course</th>
+                <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Lecturer</th>
+                <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Duration</th>
+                <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {upcomingLectures.map((lecture) => (
+                <tr 
+                  key={lecture.id}
+                  style={{ 
+                    borderBottom: '1px solid #dee2e6',
+                    backgroundColor: new Date(lecture.date) < new Date() ? '#fff9e6' : 'white'
+                  }}
+                >
+                  <td style={{ padding: '12px' }}>
+                    <div style={{ fontWeight: '500' }}>{formatDate(lecture.date)}</div>
+                    {new Date(lecture.date) < new Date() && (
+                      <span style={{ fontSize: '12px', color: '#e74c3c' }}>Today</span>
+                    )}
+                  </td>
+                  <td style={{ padding: '12px' }}>
+                    <div>{formatTime(lecture.time)}</div>
+                    <div style={{ fontSize: '12px', color: '#666' }}>
+                      to {formatTime(lecture.endTime)}
+                    </div>
+                  </td>
+                  <td style={{ padding: '12px' }}>
+                    <div style={{ fontWeight: '500' }}>{lecture.title}</div>
+                    <div style={{ fontSize: '12px', color: '#666' }}>{lecture.courseCode}</div>
+                  </td>
+                  <td style={{ padding: '12px' }}>{lecture.lecturer}</td>
+                  <td style={{ padding: '12px' }}>{lecture.duration} min</td>
+                  <td style={{ padding: '12px' }}>
+                    <button 
+                      className="add-calendar"
+                      onClick={() => addToCalendar(lecture)}
+                      style={{
+                        backgroundColor: '#f4f4f4',
+                        color: '#333',
+                        border: '1px solid #ddd',
+                        padding: '6px 12px',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '5px'
+                      }}
+                    >
+                      <i className="fas fa-calendar-plus"></i> Add to Calendar
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <style>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        .current-day {
+          background-color: #3498db;
+          color: white;
+          border-radius: 50%;
+          width: 30px;
+          height: 30px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .calendar-table {
+          width: 100%;
+          border-collapse: collapse;
+        }
+        .calendar-table th {
+          padding: 8px;
+          text-align: center;
+          border-bottom: 1px solid #ddd;
+          color: #666;
+        }
+        .calendar-table td {
+          padding: 8px;
+          text-align: center;
+          height: 40px;
+          cursor: pointer;
+        }
+        .calendar-table td:hover {
+          background-color: #f5f5f5;
+        }
+      `}</style>
     </div>
   );
 };

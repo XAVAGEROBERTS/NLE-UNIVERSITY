@@ -1,211 +1,447 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../../services/supabase';
+import { useStudentAuth } from '../../context/StudentAuthContext';
 
 const CourseUnits = () => {
-  const [activeTab, setActiveTab] = React.useState('current');
-  
-  // Initialize state from localStorage directly
-  const [completedCourses, setCompletedCourses] = React.useState(() => {
-    const saved = localStorage.getItem('completedCourses');
-    return saved ? JSON.parse(saved) : {};
+  const [activeTab, setActiveTab] = useState('current');
+  const [completedCourses, setCompletedCourses] = useState({});
+  const [courseData, setCourseData] = useState({
+    current: { title: "Year 4", semesters: [] },
+    previous3: { title: "Year 3", semesters: [] },
+    previous2: { title: "Year 2", semesters: [] },
+    previous1: { title: "Year 1", semesters: [] }
   });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const { user } = useStudentAuth();
 
-  // Course data organized by year
-  const courseData = {
-    current: {
-      title: "Year 4",
-      semesters: [
-        {
-          semester: "Semester 1",
-          courses: [
-            { code: "CS-401", name: "MACHINE LEARNING" },
-            { code: "CS-402", name: "CLOUD COMPUTING" },
-            { code: "CS-403", name: "BIG DATA ANALYTICS" },
-            { code: "CS-404", name: "INTERNET OF THINGS" },
-            { code: "CS-405", name: "PROJECT MANAGEMENT" },
-            { code: "CS-406L", name: "MACHINE LEARNING LAB" }
-          ]
+  useEffect(() => {
+    if (user?.email) {
+      fetchStudentData();
+    }
+  }, [user]);
+
+  const fetchStudentData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      console.log('Fetching data for user:', user.email);
+
+      // Get student with year of study
+      const { data: student, error: studentError } = await supabase
+        .from('students')
+        .select('id, year_of_study, semester, academic_year')
+        .eq('email', user.email)
+        .single();
+
+      if (studentError) {
+        console.error('Student error:', studentError);
+        throw new Error(`Student data error: ${studentError.message}`);
+      }
+
+      if (!student) {
+        throw new Error('Student not found');
+      }
+
+      console.log('Student found:', student);
+
+      // Fetch all courses for Computer Engineering
+      const { data: courses, error: coursesError } = await supabase
+        .from('courses')
+        .select('*')
+        .eq('program', 'Computer Engineering') // Changed from 'Bachelor of Science in Computer Engineering'
+        .order('year', { ascending: false })
+        .order('semester', { ascending: true });
+
+      if (coursesError) {
+        console.error('Courses error:', coursesError);
+        throw new Error(`Courses error: ${coursesError.message}`);
+      }
+
+      console.log('Courses fetched:', courses?.length || 0);
+
+      // Fetch student's course enrollments and grades
+      const { data: studentCourses, error: scError } = await supabase
+        .from('student_courses')
+        .select('course_id, status, grade, marks')
+        .eq('student_id', student.id);
+
+      if (scError) {
+        console.error('Student courses error:', scError);
+        throw new Error(`Student courses error: ${scError.message}`);
+      }
+
+      console.log('Student courses:', studentCourses?.length || 0);
+
+      // Create completed courses map
+      const completedMap = {};
+      if (studentCourses) {
+        studentCourses.forEach(sc => {
+          if (sc.status === 'completed') {
+            completedMap[sc.course_id] = {
+              completed: true,
+              grade: sc.grade,
+              marks: sc.marks
+            };
+          }
+        });
+      }
+
+      // Merge with localStorage
+      const saved = localStorage.getItem('completedCourses');
+      const savedMap = saved ? JSON.parse(saved) : {};
+      const mergedCompleted = { ...savedMap, ...completedMap };
+      setCompletedCourses(mergedCompleted);
+
+      // Get current year from student data
+      const currentYear = student.year_of_study || 4;
+      console.log('Current year of study:', currentYear);
+
+      // Organize courses by year
+      const organizedData = {
+        current: { 
+          title: `Year ${currentYear}`, 
+          semesters: [],
+          academicYear: student.academic_year 
         },
-        {
-          semester: "Semester 2",
-          courses: [
-            { code: "CS-407", name: "DEEP LEARNING" },
-            { code: "CS-408", name: "CYBER SECURITY" },
-            { code: "CS-409", name: "BLOCKCHAIN TECHNOLOGY" },
-            { code: "CS-410P", name: "FINAL YEAR PROJECT" },
-            { code: "CS-411", name: "INDUSTRIAL TRAINING" }
-          ]
-        }
-      ]
-    },
-    previous3: {
-      title: "Year 3",
-      semesters: [
-        {
-          semester: "Semester 1",
-          courses: [
-            { code: "CS-301", name: "ADVANCED DATABASE SYSTEMS" },
-            { code: "CS-302", name: "SOFTWARE ENGINEERING" },
-            { code: "CS-303", name: "WEB TECHNOLOGIES" },
-            { code: "CS-304", name: "MOBILE APPLICATION DEVELOPMENT" },
-            { code: "CS-305", name: "OPERATING SYSTEM CONCEPTS" },
-            { code: "CS-306L", name: "WEB DEVELOPMENT LAB" }
-          ]
+        previous3: { 
+          title: `Year ${Math.max(1, currentYear - 1)}`, // Ensure year doesn't go below 1
+          semesters: [] 
         },
-        {
-          semester: "Semester 2",
-          courses: [
-            { code: "CS-307", name: "DATA MINING" },
-            { code: "CS-308", name: "COMPUTER GRAPHICS" },
-            { code: "CS-309", name: "SOFTWARE TESTING" },
-            { code: "CS-310", name: "DISTRIBUTED SYSTEMS" },
-            { code: "CS-311", name: "HUMAN COMPUTER INTERACTION" },
-            { code: "CS-312P", name: "SOFTWARE DEVELOPMENT PROJECT" }
-          ]
-        }
-      ]
-    },
-    previous2: {
-      title: "Year 2",
-      semesters: [
-        {
-          semester: "Semester 1",
-          courses: [
-            { code: "MATH-201", name: "ENGINEERING MATHEMATICS-III" },
-            { code: "CS-201", name: "COMPUTER ARCHITECTURE" },
-            { code: "CS-202", name: "DATABASE MANAGEMENT SYSTEMS" },
-            { code: "CS-203", name: "OBJECT ORIENTED PROGRAMMING USING JAVA" },
-            { code: "CS-204", name: "MICROPROCESSOR & PC HARDWARE" },
-            { code: "CS-205L", name: "JAVA PROGRAMMING LAB" },
-            { code: "CS-206L", name: "DATABASE DEVELOPMENT LAB" }
-          ]
+        previous2: { 
+          title: `Year ${Math.max(1, currentYear - 2)}`, 
+          semesters: [] 
         },
-        {
-          semester: "Semester 2",
-          courses: [
-            { code: "MATH-202", name: "ENGINEERING MATHEMATICS-IV" },
-            { code: "CS-207", name: "ARTIFICIAL INTELLIGENCE" },
-            { code: "CS-208", name: "PYTHON PROGRAMMING" },
-            { code: "CS-209", name: "COMPUTER NETWORKS" },
-            { code: "CS-210", name: "SOFTWARE ENGINEERING PRACTICE" },
-            { code: "CS-211L", name: "PYTHON APPLICATION LAB" },
-            { code: "CS-212L", name: "NETWORKING LAB" }
-          ]
+        previous1: { 
+          title: `Year ${Math.max(1, currentYear - 3)}`, 
+          semesters: [] 
         }
-      ]
-    },
-    previous1: {
-      title: "Year 1",
-      semesters: [
-        {
-          semester: "Semester 1",
-          courses: [
-            { code: "MATH-101", name: "ENGINEERING MATHEMATICS-I" },
-            { code: "EE-101", name: "FUNDAMENTALS OF ELECTRICAL ENGINEERING" },
-            { code: "PHY-101", name: "ENGINEERING PHYSICS" },
-            { code: "CS-101", name: "PROBLEM SOLVING USING C" },
-            { code: "GEN-101", name: "ENGINEERING PROFESSIONAL SKILLS" },
-            { code: "CS-102L", name: "C PROGRAMMING LAB" }
-          ]
-        },
-        {
-          semester: "Semester 2",
-          courses: [
-            { code: "MATH-102", name: "ENGINEERING MATHEMATICS-II" },
-            { code: "CS-103", name: "OPERATING SYSTEMS" },
-            { code: "CHEM-101", name: "ENGINEERING CHEMISTRY" },
-            { code: "CS-104", name: "DIGITAL SYSTEMS" },
-            { code: "CS-105", name: "DATA STRUCTURES AND ALGORITHMS" },
-            { code: "CS-106L", name: "DATA STRUCTURES LAB" }
-          ]
-        }
-      ]
+      };
+
+      // Group courses by year and semester
+      if (courses && courses.length > 0) {
+        courses.forEach(course => {
+          const yearKey = getYearKey(course.year, currentYear);
+          if (organizedData[yearKey]) {
+            let semesterGroup = organizedData[yearKey].semesters.find(s => 
+              s.semesterNumber === course.semester
+            );
+            
+            if (!semesterGroup) {
+              semesterGroup = {
+                semesterNumber: course.semester,
+                semester: `Semester ${course.semester}`,
+                courses: []
+              };
+              organizedData[yearKey].semesters.push(semesterGroup);
+            }
+            
+            const courseInfo = {
+              id: course.id,
+              code: course.course_code,
+              name: course.course_name,
+              credits: course.credits,
+              isCore: course.is_core,
+              year: course.year
+            };
+
+            // Add grade if completed
+            if (completedMap[course.id]) {
+              courseInfo.grade = completedMap[course.id].grade;
+              courseInfo.marks = completedMap[course.id].marks;
+              courseInfo.completed = true;
+            } else {
+              courseInfo.completed = false;
+            }
+
+            semesterGroup.courses.push(courseInfo);
+          }
+        });
+      }
+
+      // Sort semesters by semester number
+      Object.keys(organizedData).forEach(key => {
+        organizedData[key].semesters.sort((a, b) => a.semesterNumber - b.semesterNumber);
+        // Sort courses within each semester
+        organizedData[key].semesters.forEach(semester => {
+          semester.courses.sort((a, b) => a.code.localeCompare(b.code));
+        });
+      });
+
+      console.log('Organized data:', organizedData);
+      setCourseData(organizedData);
+    } catch (err) {
+      console.error('Error fetching student data:', err);
+      setError(`Failed to load course data: ${err.message}`);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const toggleCourse = (courseId) => {
-    setCompletedCourses(prev => {
-      const newState = {
-        ...prev,
-        [courseId]: !prev[courseId]
-      };
-      localStorage.setItem('completedCourses', JSON.stringify(newState));
-      return newState;
-    });
+  const getYearKey = (courseYear, currentYear) => {
+    if (courseYear === currentYear) return 'current';
+    if (courseYear === currentYear - 1) return 'previous3';
+    if (courseYear === currentYear - 2) return 'previous2';
+    return 'previous1'; // All older years
   };
+
+  const toggleCourse = async (courseId) => {
+    try {
+      if (!user?.email) return;
+
+      // Get student ID
+      const { data: student } = await supabase
+        .from('students')
+        .select('id')
+        .eq('email', user.email)
+        .single();
+
+      const isCurrentlyCompleted = completedCourses[courseId]?.completed || false;
+      const newStatus = !isCurrentlyCompleted;
+
+      // Update in database
+      const { error: updateError } = await supabase
+        .from('student_courses')
+        .upsert({
+          student_id: student.id,
+          course_id: courseId,
+          status: newStatus ? 'completed' : 'in_progress',
+          completion_date: newStatus ? new Date().toISOString().split('T')[0] : null,
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'student_id, course_id'
+        });
+
+      if (updateError) throw updateError;
+
+      // Update local state
+      setCompletedCourses(prev => {
+        const newState = {
+          ...prev,
+          [courseId]: {
+            ...prev[courseId],
+            completed: newStatus,
+            grade: newStatus ? 'A' : null,
+            marks: newStatus ? 85 : null
+          }
+        };
+        localStorage.setItem('completedCourses', JSON.stringify(newState));
+        return newState;
+      });
+
+      // Refresh data
+      fetchStudentData();
+    } catch (error) {
+      console.error('Error updating course status:', error);
+      alert('Failed to update course status. Please try again.');
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="content">
+        <div className="dashboard-header">
+          <h2>Course Units</h2>
+          <div className="date-display">Loading courses...</div>
+        </div>
+        <div className="loading-spinner"></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="content">
+        <div className="dashboard-header">
+          <h2>Course Units</h2>
+          <div className="date-display">Error</div>
+        </div>
+        <div className="error-message">
+          <p>{error}</p>
+          <button 
+            onClick={fetchStudentData}
+            className="retry-button"
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#007bff',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              marginTop: '10px'
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="content">
       <div className="dashboard-header">
         <h2>Course Units</h2>
         <div className="date-display" id="semesterDisplay">
-          Year 4, Semester 2 (August - November) | 2024/2025
+          {courseData.current.title}, Semester {courseData.current.semesters[0]?.semesterNumber || '2'} 
+          ({courseData.current.academicYear || '2024/2025'})
         </div>
       </div>
 
       <div className="tabs">
-        <div 
-          className={`tab ${activeTab === 'current' ? 'active' : ''}`}
-          onClick={() => setActiveTab('current')}
-          data-course-tab="current"
-        >
-          Year 4
-        </div>
-        <div 
-          className={`tab ${activeTab === 'previous3' ? 'active' : ''}`}
-          onClick={() => setActiveTab('previous3')}
-          data-course-tab="previous3"
-        >
-          Year 3
-        </div>
-        <div 
-          className={`tab ${activeTab === 'previous2' ? 'active' : ''}`}
-          onClick={() => setActiveTab('previous2')}
-          data-course-tab="previous2"
-        >
-          Year 2
-        </div>
-        <div 
-          className={`tab ${activeTab === 'previous1' ? 'active' : ''}`}
-          onClick={() => setActiveTab('previous1')}
-          data-course-tab="previous1"
-        >
-          Year 1
-        </div>
-      </div>
-
-      <div className="tab-content active" id={`${activeTab}-courses`}>
-        {courseData[activeTab].semesters.map((semester, semIndex) => (
-          <div key={semIndex}>
-            <h3 style={{ marginBottom: '1rem', marginTop: semIndex > 0 ? '2rem' : '0' }}>
-              {courseData[activeTab].title}, {semester.semester}
-            </h3>
-            {semester.courses.map((course, courseIndex) => {
-              const courseId = `${course.code}-${course.name}`;
-              const isCompleted = completedCourses[courseId];
-              
-              return (
-                <div key={courseIndex} className="course-item">
-                  <div className="course-info">
-                    <i className="fa-solid fa-folder-minus course-folder-icon"></i>
-                    <span className="course-code">{course.code}</span>
-                    <h4>{course.name}</h4>
-                  </div>
-                  <button 
-                    className={`course-toggle ${isCompleted ? 'completed' : ''}`}
-                    data-course={course.name}
-                    onClick={() => toggleCourse(courseId)}
-                  >
-                    {isCompleted ? (
-                      <i className="fas fa-check"></i>
-                    ) : (
-                      <i className="fas fa-lock"></i>
-                    )}
-                  </button>
-                </div>
-              );
-            })}
+        {Object.keys(courseData).map(key => (
+          <div 
+            key={key}
+            className={`tab ${activeTab === key ? 'active' : ''}`}
+            onClick={() => setActiveTab(key)}
+          >
+            {courseData[key].title}
           </div>
         ))}
+      </div>
+
+      <div className="tab-content active">
+        {courseData[activeTab]?.semesters?.length === 0 ? (
+          <div className="no-courses">
+            <p>No courses found for {courseData[activeTab].title}</p>
+            <p>Current year of study: {courseData.current.title.replace('Year ', '')}</p>
+            <button 
+              onClick={fetchStudentData}
+              className="refresh-button"
+              style={{
+                padding: '8px 16px',
+                backgroundColor: '#28a745',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                marginTop: '10px'
+              }}
+            >
+              Refresh Data
+            </button>
+          </div>
+        ) : (
+          courseData[activeTab]?.semesters?.map((semester, semIndex) => (
+            <div key={semIndex}>
+              <h3 style={{ 
+                marginBottom: '1rem', 
+                marginTop: semIndex > 0 ? '2rem' : '0',
+                color: '#333',
+                borderBottom: '2px solid #eee',
+                paddingBottom: '0.5rem'
+              }}>
+                {courseData[activeTab].title}, {semester.semester}
+              </h3>
+              <div className="courses-list">
+                {semester.courses.map((course, courseIndex) => {
+                  const isCompleted = completedCourses[course.id]?.completed || false;
+                  const grade = completedCourses[course.id]?.grade;
+                  const marks = completedCourses[course.id]?.marks;
+                  
+                  return (
+                    <div key={courseIndex} className="course-item" style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      padding: '1rem',
+                      marginBottom: '1rem',
+                      backgroundColor: 'white',
+                      borderRadius: '8px',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                      borderLeft: `4px solid ${isCompleted ? '#28a745' : '#007bff'}`
+                    }}>
+                      <div className="course-info" style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', marginBottom: '0.5rem' }}>
+                          <i className="fa-solid fa-folder-minus course-folder-icon" style={{ 
+                            color: isCompleted ? '#28a745' : '#6c757d',
+                            marginRight: '10px',
+                            fontSize: '1.2rem'
+                          }}></i>
+                          <span className="course-code" style={{
+                            fontWeight: 'bold',
+                            color: '#007bff',
+                            marginRight: '10px'
+                          }}>{course.code}</span>
+                          <h4 style={{ margin: 0, fontSize: '1.1rem' }}>{course.name}</h4>
+                        </div>
+                        <div className="course-details" style={{ 
+                          display: 'flex',
+                          gap: '10px',
+                          flexWrap: 'wrap',
+                          fontSize: '0.9rem',
+                          color: '#666'
+                        }}>
+                          <span className="course-credits" style={{
+                            backgroundColor: '#f8f9fa',
+                            padding: '2px 8px',
+                            borderRadius: '12px'
+                          }}>{course.credits} Credits</span>
+                          {course.isCore && <span className="course-core" style={{
+                            backgroundColor: '#ffc107',
+                            color: '#212529',
+                            padding: '2px 8px',
+                            borderRadius: '12px',
+                            fontWeight: 'bold'
+                          }}>Core</span>}
+                          {grade && (
+                            <span className={`course-grade grade-${grade}`} style={{
+                              backgroundColor: grade === 'A' ? '#28a745' : 
+                                             grade === 'B+' ? '#20c997' : 
+                                             grade === 'B' ? '#17a2b8' : '#6c757d',
+                              color: 'white',
+                              padding: '2px 8px',
+                              borderRadius: '12px',
+                              fontWeight: 'bold'
+                            }}>
+                              Grade: {grade} {marks && `(${marks}%)`}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <button 
+                        className={`course-toggle ${isCompleted ? 'completed' : ''}`}
+                        onClick={() => toggleCourse(course.id)}
+                        title={isCompleted ? 'Mark as in progress' : 'Mark as completed'}
+                        style={{
+                          padding: '8px 16px',
+                          backgroundColor: isCompleted ? '#28a745' : '#6c757d',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                          transition: 'background-color 0.3s'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.target.style.backgroundColor = isCompleted ? '#dc3545' : '#28a745';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.target.style.backgroundColor = isCompleted ? '#28a745' : '#6c757d';
+                        }}
+                      >
+                        {isCompleted ? (
+                          <>
+                            <i className="fas fa-check"></i>
+                            <span className="toggle-text">Completed</span>
+                          </>
+                        ) : (
+                          <>
+                            <i className="fas fa-lock"></i>
+                            <span className="toggle-text">In Progress</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );
