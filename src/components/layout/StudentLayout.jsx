@@ -1,10 +1,13 @@
-// src/components/layout/Layout.jsx
+// src/components/layout/StudentLayout.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { useStudentAuth } from '../../context/StudentAuthContext';
 
-const Layout = () => {
+const StudentLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user, signOut } = useStudentAuth();
+  
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
@@ -37,6 +40,7 @@ const Layout = () => {
   ]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [logoutProgress, setLogoutProgress] = useState(0);
   const [aiMessages, setAiMessages] = useState([
     { id: 1, text: 'Hello! I\'m your AI assistant. How can I help you today?', sender: 'ai', time: 'Just now' }
   ]);
@@ -46,6 +50,7 @@ const Layout = () => {
   const bellIconRef = useRef(null);
   const logoutModalRef = useRef(null);
   const aiChatRef = useRef(null);
+  const logoutProgressRef = useRef(null);
 
   const menuItems = [
     { id: 'dashboard', label: 'Home', icon: 'fas fa-home', path: '/dashboard' },
@@ -60,14 +65,41 @@ const Layout = () => {
     { id: 'settings', label: 'Settings', icon: 'fas fa-cog', path: '/settings' },
   ];
 
+  // EMERGENCY PERSISTENCE FIX
   useEffect(() => {
-    // Calculate unread count
+    const checkAndRestoreAuth = () => {
+      const storedUser = localStorage.getItem('student_user');
+      const storedAuth = localStorage.getItem('student_auth');
+      
+      if (storedUser && storedAuth && !user) {
+        try {
+          const userData = JSON.parse(storedUser);
+          const authData = JSON.parse(storedAuth);
+          
+          const now = Date.now();
+          if (!authData.expires_at || authData.expires_at > now) {
+            setTimeout(() => {
+              if (!user) {
+                window.location.reload();
+              }
+            }, 1000);
+          }
+        } catch (error) {
+          console.error('Error parsing localStorage:', error);
+        }
+      }
+    };
+
+    const timer = setTimeout(checkAndRestoreAuth, 500);
+    return () => clearTimeout(timer);
+  }, [user]);
+
+  useEffect(() => {
     const unread = notifications.filter(n => !n.read).length;
     setUnreadCount(unread);
   }, [notifications]);
 
   useEffect(() => {
-    // Close notifications when clicking outside
     const handleClickOutside = (event) => {
       if (showNotifications && 
           notificationRef.current && 
@@ -77,14 +109,12 @@ const Layout = () => {
         setShowNotifications(false);
       }
 
-      // Close logout modal when clicking outside
       if (showLogoutModal && 
           logoutModalRef.current && 
           !logoutModalRef.current.contains(event.target)) {
         setShowLogoutModal(false);
       }
 
-      // Close AI chat when clicking outside
       if (showAIChat && 
           aiChatRef.current && 
           !aiChatRef.current.contains(event.target)) {
@@ -98,6 +128,23 @@ const Layout = () => {
     };
   }, [showNotifications, showLogoutModal, showAIChat]);
 
+  // Animate logout progress
+  useEffect(() => {
+    if (isLoggingOut && logoutProgressRef.current) {
+      const interval = setInterval(() => {
+        setLogoutProgress(prev => {
+          if (prev >= 100) {
+            clearInterval(interval);
+            return 100;
+          }
+          return prev + 2; // Increase by 2% every interval
+        });
+      }, 100); // Update every 100ms
+
+      return () => clearInterval(interval);
+    }
+  }, [isLoggingOut]);
+
   const handleNavigation = (path) => {
     navigate(path);
   };
@@ -106,20 +153,67 @@ const Layout = () => {
     setShowLogoutModal(true);
   };
 
-  const confirmLogout = () => {
+  const confirmLogout = async () => {
+    console.log('Student logout started');
     setIsLoggingOut(true);
+    setLogoutProgress(0);
     
-    setTimeout(() => {
-      // Clear user session data
-      localStorage.removeItem('userToken');
-      sessionStorage.clear();
+    try {
+      // Start progress animation
+      const progressInterval = setInterval(() => {
+        setLogoutProgress(prev => {
+          if (prev >= 80) {
+            clearInterval(progressInterval);
+            return 80;
+          }
+          return prev + 10;
+        });
+      }, 300);
+
+      // Show animation for at least 2 seconds
+      const animationPromise = new Promise(resolve => setTimeout(resolve, 2000));
       
-      navigate('/login');
-    }, 1500);
+      console.log('Calling signOut()');
+      const signOutPromise = signOut();
+      
+      // Wait for both animation and signout
+      await Promise.all([animationPromise, signOutPromise]);
+      
+      clearInterval(progressInterval);
+      setLogoutProgress(90);
+      
+      console.log('✅ Student logout complete');
+      
+      // Clear localStorage items (just student ones)
+      localStorage.removeItem('student_user');
+      localStorage.removeItem('student_auth');
+      
+      // Final progress
+      setLogoutProgress(100);
+      
+      // Wait a bit more for final animation
+      setTimeout(() => {
+        console.log('Redirecting to /login');
+        window.location.href = '/login';
+      }, 800);
+      
+    } catch (error) {
+      console.error('❌ Student logout error:', error);
+      setLogoutProgress(100);
+      
+      // Still redirect after delay
+      setTimeout(() => {
+        localStorage.removeItem('student_user');
+        localStorage.removeItem('student_auth');
+        window.location.href = '/login';
+      }, 1500);
+    }
   };
 
   const cancelLogout = () => {
-    setShowLogoutModal(false);
+    if (!isLoggingOut) {
+      setShowLogoutModal(false);
+    }
   };
 
   const handleNotificationClick = (event) => {
@@ -155,7 +249,6 @@ const Layout = () => {
   const handleSendMessage = () => {
     if (userInput.trim() === '') return;
 
-    // Add user message
     const newUserMessage = {
       id: Date.now(),
       text: userInput,
@@ -163,7 +256,6 @@ const Layout = () => {
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
-    // Add AI response
     const aiResponses = [
       "I can help you with course materials, assignments, and schedule information.",
       "You have upcoming lectures in Machine Learning and Internet of Things.",
@@ -241,6 +333,7 @@ const Layout = () => {
           alignItems: 'center',
           zIndex: 2000,
           animation: 'fadeIn 0.3s ease-out',
+          pointerEvents: isLoggingOut ? 'none' : 'auto',
         }}>
           <div 
             ref={logoutModalRef}
@@ -254,7 +347,6 @@ const Layout = () => {
               animation: 'slideUp 0.3s ease-out',
             }}
           >
-            {/* Modal Header */}
             <div style={{
               padding: '20px',
               backgroundColor: '#f8f9fa',
@@ -295,7 +387,6 @@ const Layout = () => {
               </div>
             </div>
 
-            {/* Modal Body */}
             <div style={{ padding: '20px' }}>
               <p style={{
                 margin: 0,
@@ -303,11 +394,10 @@ const Layout = () => {
                 fontSize: '15px',
                 lineHeight: '1.5',
               }}>
-                You will be signed out of your account and redirected to the login page.
+                You will be signed out of your student account and redirected to the login page.
               </p>
             </div>
 
-            {/* Modal Footer */}
             <div style={{
               padding: '15px 20px',
               borderTop: '1px solid #e9ecef',
@@ -317,19 +407,28 @@ const Layout = () => {
             }}>
               <button
                 onClick={cancelLogout}
+                disabled={isLoggingOut}
                 style={{
                   padding: '10px 20px',
-                  backgroundColor: '#f8f9fa',
-                  color: '#495057',
+                  backgroundColor: isLoggingOut ? '#f8f9fa' : '#f8f9fa',
+                  color: isLoggingOut ? '#adb5bd' : '#495057',
                   border: '1px solid #dee2e6',
                   borderRadius: '6px',
-                  cursor: 'pointer',
+                  cursor: isLoggingOut ? 'not-allowed' : 'pointer',
                   fontSize: '14px',
                   fontWeight: '500',
                   transition: 'all 0.2s',
                 }}
-                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#e9ecef'}
-                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f8f9fa'}
+                onMouseEnter={(e) => {
+                  if (!isLoggingOut) {
+                    e.currentTarget.style.backgroundColor = '#e9ecef';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isLoggingOut) {
+                    e.currentTarget.style.backgroundColor = '#f8f9fa';
+                  }
+                }}
               >
                 Cancel
               </button>
@@ -348,7 +447,9 @@ const Layout = () => {
                   transition: 'all 0.2s',
                   display: 'flex',
                   alignItems: 'center',
+                  justifyContent: 'center',
                   gap: '8px',
+                  minWidth: '120px',
                 }}
                 onMouseEnter={(e) => {
                   if (!isLoggingOut) {
@@ -399,12 +500,12 @@ const Layout = () => {
           justifyContent: 'center',
           alignItems: 'center',
           zIndex: 3000,
+          animation: 'fadeIn 0.5s ease-out',
         }}>
           <div style={{
             position: 'relative',
             width: '300px',
             height: '300px',
-            animation: 'pulse 1.5s infinite ease-in-out',
             marginBottom: '30px',
           }}>
             <img 
@@ -414,6 +515,7 @@ const Layout = () => {
                 width: '100%',
                 height: '100%',
                 objectFit: 'contain',
+                animation: 'pulse 1.5s infinite ease-in-out',
               }}
             />
             <div style={{
@@ -428,25 +530,58 @@ const Layout = () => {
               animation: 'spin 1s linear infinite',
             }}></div>
           </div>
+          
           <p style={{
             fontSize: '1.2rem',
             fontWeight: 'bold',
             color: '#3498db',
             marginTop: '20px',
+            animation: 'fadeIn 1s ease-out',
           }}>
             Logging out...
           </p>
+          
           <p style={{
             color: '#7f8c8d',
             fontSize: '0.9rem',
             marginTop: '10px',
+            animation: 'fadeIn 1.5s ease-out',
           }}>
             Please wait while we sign you out
+          </p>
+          
+          {/* Progress Bar */}
+          <div style={{
+            marginTop: '20px',
+            width: '200px',
+            height: '4px',
+            backgroundColor: '#e9ecef',
+            borderRadius: '2px',
+            overflow: 'hidden',
+          }}>
+            <div 
+              ref={logoutProgressRef}
+              style={{
+                width: `${logoutProgress}%`,
+                height: '100%',
+                backgroundColor: '#3498db',
+                borderRadius: '2px',
+                transition: 'width 0.3s ease',
+              }}
+            ></div>
+          </div>
+          
+          <p style={{
+            color: '#7f8c8d',
+            fontSize: '0.8rem',
+            marginTop: '8px',
+          }}>
+            {logoutProgress}% complete
           </p>
         </div>
       )}
 
-      {/* AI Chat Container - Floating Overlay */}
+      {/* AI Chat Container */}
       {showAIChat && (
         <div 
           ref={aiChatRef}
@@ -466,7 +601,6 @@ const Layout = () => {
             animation: 'slideInUp 0.3s ease-out',
           }}
         >
-          {/* AI Chat Header */}
           <div style={{
             padding: '15px',
             backgroundColor: '#3498db',
@@ -500,7 +634,6 @@ const Layout = () => {
             </button>
           </div>
 
-          {/* AI Chat Body */}
           <div style={{
             flex: 1,
             padding: '15px',
@@ -541,7 +674,6 @@ const Layout = () => {
             ))}
           </div>
 
-          {/* AI Chat Input */}
           <div style={{
             padding: '10px',
             borderTop: '1px solid #eee',
@@ -607,9 +739,9 @@ const Layout = () => {
           minHeight: '100vh',
           opacity: isLoggingOut ? '0.5' : '1',
           pointerEvents: isLoggingOut ? 'none' : 'auto',
+          transition: 'opacity 0.3s ease',
         }}
       >
-        {/* Header */}
         <header 
           className="layout-header"
           style={{
@@ -634,7 +766,6 @@ const Layout = () => {
               alignItems: 'center',
             }}
           >
-            {/* Logo */}
             <div 
               className="header-logo"
               style={{
@@ -696,14 +827,12 @@ const Layout = () => {
                     margin: 0,
                   }}
                 >
-                  Learning Management System
+                  Student Portal
                 </p>
               </div>
             </div>
 
-            {/* User Info and Notifications */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-              {/* Notification Bell */}
               <div 
                 ref={bellIconRef}
                 className="notification-icon"
@@ -749,7 +878,6 @@ const Layout = () => {
                 )}
               </div>
 
-              {/* User Profile */}
               <div 
                 className="user-info"
                 onClick={() => navigate('/settings')}
@@ -766,7 +894,7 @@ const Layout = () => {
                 onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
               >
                 <img 
-                  src="/images/ROBERT PROFILE.jpg" 
+                  src={user?.avatar || "/images/ROBERT PROFILE.jpg"} 
                   alt="User"
                   style={{
                     width: '36px',
@@ -784,7 +912,7 @@ const Layout = () => {
                       color: '#212529',
                     }}
                   >
-                    Robert Mayhem
+                    {user?.name || 'Robert Mayhem'}
                   </div>
                   <div 
                     style={{
@@ -800,7 +928,6 @@ const Layout = () => {
             </div>
           </div>
 
-          {/* Notification Dropdown */}
           {showNotifications && (
             <div 
               ref={notificationRef}
@@ -819,7 +946,6 @@ const Layout = () => {
                 animation: 'slideDown 0.2s ease-out',
               }}
             >
-              {/* Notification Header */}
               <div style={{
                 padding: '15px',
                 borderBottom: '1px solid #eee',
@@ -878,7 +1004,6 @@ const Layout = () => {
                 </div>
               </div>
 
-              {/* Notification List */}
               <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
                 {notifications.length === 0 ? (
                   <div style={{
@@ -960,7 +1085,6 @@ const Layout = () => {
                 )}
               </div>
 
-              {/* Notification Footer */}
               {notifications.length > 0 && (
                 <div style={{
                   padding: '10px 15px',
@@ -990,7 +1114,6 @@ const Layout = () => {
           )}
         </header>
 
-        {/* Main Content */}
         <div 
           className="main-content"
           style={{
@@ -998,7 +1121,6 @@ const Layout = () => {
             flex: 1,
           }}
         >
-          {/* Sidebar */}
           <aside 
             className="sidebar"
             style={{
@@ -1087,7 +1209,6 @@ const Layout = () => {
                 </div>
               ))}
 
-              {/* AI Chat Button */}
               <div 
                 className="menu-item"
                 style={{ marginBottom: '0.25rem' }}
@@ -1136,7 +1257,6 @@ const Layout = () => {
                 </button>
               </div>
 
-              {/* Logout Button */}
               <div 
                 className="menu-item"
                 style={{ marginBottom: '0.25rem' }}
@@ -1168,7 +1288,6 @@ const Layout = () => {
             </nav>
           </aside>
 
-          {/* Content Area */}
           <main 
             className="content-area"
             style={{
@@ -1183,7 +1302,6 @@ const Layout = () => {
           </main>
         </div>
 
-        {/* Global CSS with Animations */}
         <style>{`
           * {
             margin: 0;
@@ -1208,7 +1326,6 @@ const Layout = () => {
             background-color: #f1f3f5 !important;
           }
           
-          /* AI Chat Animation */
           @keyframes slideInUp {
             from {
               opacity: 0;
@@ -1220,7 +1337,6 @@ const Layout = () => {
             }
           }
           
-          /* Notification Dropdown Animation */
           @keyframes slideDown {
             from {
               opacity: 0;
@@ -1232,7 +1348,6 @@ const Layout = () => {
             }
           }
           
-          /* Logout Modal Animations */
           @keyframes fadeIn {
             from {
               opacity: 0;
@@ -1274,41 +1389,6 @@ const Layout = () => {
             }
           }
           
-          /* Scrollbar styling */
-          .ai-chat-body::-webkit-scrollbar {
-            width: 6px;
-          }
-          
-          .ai-chat-body::-webkit-scrollbar-track {
-            background: #f1f1f1;
-          }
-          
-          .ai-chat-body::-webkit-scrollbar-thumb {
-            background: #888;
-            border-radius: 3px;
-          }
-          
-          .ai-chat-body::-webkit-scrollbar-thumb:hover {
-            background: #555;
-          }
-          
-          .notification-dropdown div::-webkit-scrollbar {
-            width: 6px;
-          }
-          
-          .notification-dropdown div::-webkit-scrollbar-track {
-            background: #f1f1f1;
-          }
-          
-          .notification-dropdown div::-webkit-scrollbar-thumb {
-            background: #888;
-            border-radius: 3px;
-          }
-          
-          .notification-dropdown div::-webkit-scrollbar-thumb:hover {
-            background: #555;
-          }
-          
           @media (max-width: 1200px) {
             .sidebar {
               transform: translateX(-100%);
@@ -1347,4 +1427,4 @@ const Layout = () => {
   );
 };
 
-export default Layout;
+export default StudentLayout;

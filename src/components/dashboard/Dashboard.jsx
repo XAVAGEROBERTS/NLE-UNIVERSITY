@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useAuth } from '../../context/AuthContext';
+import { useStudentAuth } from '../../context/StudentAuthContext'; // CHANGED from useAuth
 
 // Import Chart.js correctly
 import {
@@ -112,7 +112,7 @@ const loadAttendanceData = () => {
 };
 
 const Dashboard = () => {
-  const { profile } = useAuth();
+  const { user } = useStudentAuth(); // CHANGED: from profile to user
   const [loading, setLoading] = useState(true);
   const [showAdminControls, setShowAdminControls] = useState(false);
   
@@ -494,7 +494,7 @@ const Dashboard = () => {
     <div className="content">
       {/* Dashboard Header */}
       <div className="dashboard-header">
-        <h2>{greeting}, {profile?.first_name || 'Robert'} {profile?.last_name || 'Mayhem'}</h2>
+        <h2>{greeting}, {user?.name || 'Robert Mayhem'}</h2> {/* CHANGED: from profile to user */}
         <div className="date-display" id="currentDate">
           {new Date().toLocaleDateString('en-US', {
             weekday: 'long',
