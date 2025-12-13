@@ -1,17 +1,19 @@
 // src/components/layout/StudentLayout.jsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useStudentAuth } from '../../context/StudentAuthContext';
+import { supabase } from '../../services/supabase';
 
 const StudentLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, signOut } = useStudentAuth();
+  const { user, signOut, loading: authLoading } = useStudentAuth();
   
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showAIChat, setShowAIChat] = useState(false);
+  const [studentData, setStudentData] = useState(null);
   const [notifications, setNotifications] = useState([
     {
       id: 1,
@@ -45,6 +47,7 @@ const StudentLayout = () => {
     { id: 1, text: 'Hello! I\'m your AI assistant. How can I help you today?', sender: 'ai', time: 'Just now' }
   ]);
   const [userInput, setUserInput] = useState('');
+  const [isLoadingUser, setIsLoadingUser] = useState(true);
 
   const notificationRef = useRef(null);
   const bellIconRef = useRef(null);
@@ -65,40 +68,73 @@ const StudentLayout = () => {
     { id: 'settings', label: 'Settings', icon: 'fas fa-cog', path: '/settings' },
   ];
 
-  // EMERGENCY PERSISTENCE FIX
-  useEffect(() => {
-    const checkAndRestoreAuth = () => {
-      const storedUser = localStorage.getItem('student_user');
-      const storedAuth = localStorage.getItem('student_auth');
-      
-      if (storedUser && storedAuth && !user) {
-        try {
-          const userData = JSON.parse(storedUser);
-          const authData = JSON.parse(storedAuth);
-          
-          const now = Date.now();
-          if (!authData.expires_at || authData.expires_at > now) {
-            setTimeout(() => {
-              if (!user) {
-                window.location.reload();
-              }
-            }, 1000);
-          }
-        } catch (error) {
-          console.error('Error parsing localStorage:', error);
-        }
+  // Fetch detailed student data
+  const fetchStudentData = useCallback(async () => {
+    try {
+      if (!user?.email) {
+        console.log('No user email found');
+        setIsLoadingUser(false);
+        return;
       }
-    };
 
-    const timer = setTimeout(checkAndRestoreAuth, 500);
-    return () => clearTimeout(timer);
+      console.log('📊 Fetching detailed student data for:', user.email);
+      
+      const { data: student, error } = await supabase
+        .from('students')
+        .select('*')
+        .eq('email', user.email)
+        .single();
+
+      if (error) {
+        console.error('Error fetching student data:', error);
+        // Use auth user data as fallback
+        if (user) {
+          setStudentData({
+            full_name: user.name || 'Student',
+            student_id: user.studentId || 'N/A',
+            program: user.program || 'Unknown Program',
+            year_of_study: user.yearOfStudy || 1,
+            semester: user.semester || 1,
+            phone: user.phone || '',
+            email: user.email || ''
+          });
+        }
+        return;
+      }
+
+      if (student) {
+        console.log('✅ Student data loaded from database:', student.full_name);
+        setStudentData(student);
+      }
+    } catch (error) {
+      console.error('Error in fetchStudentData:', error);
+    } finally {
+      setIsLoadingUser(false);
+    }
   }, [user]);
 
+  // Initialize user data
+  useEffect(() => {
+    if (!authLoading && user) {
+      setIsLoadingUser(true);
+      fetchStudentData();
+    } else if (!authLoading && !user) {
+      setIsLoadingUser(false);
+      // Check if we're already on login page
+      if (location.pathname !== '/login' && !location.pathname.includes('/auth')) {
+        console.log('🚫 No user found, redirecting to login');
+        navigate('/login', { replace: true });
+      }
+    }
+  }, [user, authLoading, fetchStudentData, navigate, location]);
+
+  // Update unread count
   useEffect(() => {
     const unread = notifications.filter(n => !n.read).length;
     setUnreadCount(unread);
   }, [notifications]);
 
+  // Click outside handlers
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (showNotifications && 
@@ -112,7 +148,9 @@ const StudentLayout = () => {
       if (showLogoutModal && 
           logoutModalRef.current && 
           !logoutModalRef.current.contains(event.target)) {
-        setShowLogoutModal(false);
+        if (!isLoggingOut) {
+          setShowLogoutModal(false);
+        }
       }
 
       if (showAIChat && 
@@ -126,7 +164,7 @@ const StudentLayout = () => {
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [showNotifications, showLogoutModal, showAIChat]);
+  }, [showNotifications, showLogoutModal, showAIChat, isLoggingOut]);
 
   // Animate logout progress
   useEffect(() => {
@@ -137,9 +175,9 @@ const StudentLayout = () => {
             clearInterval(interval);
             return 100;
           }
-          return prev + 2; // Increase by 2% every interval
+          return prev + 2;
         });
-      }, 100); // Update every 100ms
+      }, 100);
 
       return () => clearInterval(interval);
     }
@@ -153,8 +191,9 @@ const StudentLayout = () => {
     setShowLogoutModal(true);
   };
 
+  // FIXED LOGOUT FUNCTION
   const confirmLogout = async () => {
-    console.log('Student logout started');
+    console.log('Starting logout process');
     setIsLoggingOut(true);
     setLogoutProgress(0);
     
@@ -162,51 +201,39 @@ const StudentLayout = () => {
       // Start progress animation
       const progressInterval = setInterval(() => {
         setLogoutProgress(prev => {
-          if (prev >= 80) {
+          if (prev >= 90) {
             clearInterval(progressInterval);
-            return 80;
+            return 90;
           }
           return prev + 10;
         });
       }, 300);
 
-      // Show animation for at least 2 seconds
-      const animationPromise = new Promise(resolve => setTimeout(resolve, 2000));
-      
-      console.log('Calling signOut()');
-      const signOutPromise = signOut();
-      
-      // Wait for both animation and signout
-      await Promise.all([animationPromise, signOutPromise]);
+      // Call signOut from context
+      const result = await signOut();
       
       clearInterval(progressInterval);
-      setLogoutProgress(90);
-      
-      console.log('✅ Student logout complete');
-      
-      // Clear localStorage items (just student ones)
-      localStorage.removeItem('student_user');
-      localStorage.removeItem('student_auth');
-      
-      // Final progress
       setLogoutProgress(100);
       
-      // Wait a bit more for final animation
+      console.log('Logout result:', result);
+      
+      // Wait for animation to complete
       setTimeout(() => {
-        console.log('Redirecting to /login');
-        window.location.href = '/login';
-      }, 800);
+        setIsLoggingOut(false);
+        setShowLogoutModal(false);
+      }, 500);
       
     } catch (error) {
-      console.error('❌ Student logout error:', error);
+      console.error('Logout error:', error);
       setLogoutProgress(100);
       
-      // Still redirect after delay
+      // Fallback redirect
       setTimeout(() => {
+        setIsLoggingOut(false);
+        setShowLogoutModal(false);
         localStorage.removeItem('student_user');
-        localStorage.removeItem('student_auth');
         window.location.href = '/login';
-      }, 1500);
+      }, 800);
     }
   };
 
@@ -317,6 +344,51 @@ const StudentLayout = () => {
     }
   };
 
+  // Show loading while auth is initializing
+  if (authLoading) {
+    return (
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        height: '100vh',
+        backgroundColor: '#f5f7fb',
+        flexDirection: 'column',
+        gap: '20px'
+      }}>
+        <img 
+          src="/images/badge.png" 
+          alt="Logo" 
+          style={{
+            width: '100px',
+            height: '100px',
+            objectFit: 'contain',
+          }}
+        />
+        <div style={{
+          width: '50px',
+          height: '50px',
+          border: '5px solid #f3f3f3',
+          borderTop: '5px solid #3498db',
+          borderRadius: '50%',
+          animation: 'spin 1s linear infinite'
+        }}></div>
+        <p style={{ color: '#666', fontSize: '16px' }}>Loading application...</p>
+        <style>{`
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        `}</style>
+      </div>
+    );
+  }
+
+  // If no user and auth is done loading, don't render layout
+  if (!user && !authLoading) {
+    return null; // Will redirect in useEffect
+  }
+
   return (
     <>
       {/* Logout Modal */}
@@ -333,7 +405,6 @@ const StudentLayout = () => {
           alignItems: 'center',
           zIndex: 2000,
           animation: 'fadeIn 0.3s ease-out',
-          pointerEvents: isLoggingOut ? 'none' : 'auto',
         }}>
           <div 
             ref={logoutModalRef}
@@ -410,8 +481,8 @@ const StudentLayout = () => {
                 disabled={isLoggingOut}
                 style={{
                   padding: '10px 20px',
-                  backgroundColor: isLoggingOut ? '#f8f9fa' : '#f8f9fa',
-                  color: isLoggingOut ? '#adb5bd' : '#495057',
+                  backgroundColor: '#f8f9fa',
+                  color: '#495057',
                   border: '1px solid #dee2e6',
                   borderRadius: '6px',
                   cursor: isLoggingOut ? 'not-allowed' : 'pointer',
@@ -500,13 +571,12 @@ const StudentLayout = () => {
           justifyContent: 'center',
           alignItems: 'center',
           zIndex: 3000,
-          animation: 'fadeIn 0.5s ease-out',
         }}>
           <div style={{
             position: 'relative',
-            width: '300px',
-            height: '300px',
-            marginBottom: '30px',
+            width: '200px',
+            height: '200px',
+            marginBottom: '20px',
           }}>
             <img 
               src="/images/badge.png" 
@@ -515,49 +585,26 @@ const StudentLayout = () => {
                 width: '100%',
                 height: '100%',
                 objectFit: 'contain',
-                animation: 'pulse 1.5s infinite ease-in-out',
               }}
             />
-            <div style={{
-              position: 'absolute',
-              top: '-10px',
-              left: '-10px',
-              right: '-10px',
-              bottom: '-10px',
-              border: '4px solid rgba(52, 152, 219, 0.1)',
-              borderTopColor: '#3498db',
-              borderRadius: '50%',
-              animation: 'spin 1s linear infinite',
-            }}></div>
           </div>
           
           <p style={{
             fontSize: '1.2rem',
             fontWeight: 'bold',
             color: '#3498db',
-            marginTop: '20px',
-            animation: 'fadeIn 1s ease-out',
+            marginBottom: '10px',
           }}>
             Logging out...
           </p>
           
-          <p style={{
-            color: '#7f8c8d',
-            fontSize: '0.9rem',
-            marginTop: '10px',
-            animation: 'fadeIn 1.5s ease-out',
-          }}>
-            Please wait while we sign you out
-          </p>
-          
-          {/* Progress Bar */}
           <div style={{
-            marginTop: '20px',
             width: '200px',
             height: '4px',
             backgroundColor: '#e9ecef',
             borderRadius: '2px',
             overflow: 'hidden',
+            marginTop: '20px',
           }}>
             <div 
               ref={logoutProgressRef}
@@ -570,14 +617,6 @@ const StudentLayout = () => {
               }}
             ></div>
           </div>
-          
-          <p style={{
-            color: '#7f8c8d',
-            fontSize: '0.8rem',
-            marginTop: '8px',
-          }}>
-            {logoutProgress}% complete
-          </p>
         </div>
       )}
 
@@ -598,7 +637,6 @@ const StudentLayout = () => {
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
-            animation: 'slideInUp 0.3s ease-out',
           }}
         >
           <div style={{
@@ -625,10 +663,7 @@ const StudentLayout = () => {
                 cursor: 'pointer',
                 padding: '5px',
                 borderRadius: '4px',
-                transition: 'background 0.2s',
               }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.2)'}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
             >
               <i className="fas fa-times"></i>
             </button>
@@ -693,10 +728,7 @@ const StudentLayout = () => {
                   borderRadius: '20px',
                   fontSize: '14px',
                   outline: 'none',
-                  transition: 'border 0.2s',
                 }}
-                onFocus={(e) => e.target.style.borderColor = '#3498db'}
-                onBlur={(e) => e.target.style.borderColor = '#ddd'}
               />
               <button
                 onClick={handleSendMessage}
@@ -710,17 +742,6 @@ const StudentLayout = () => {
                   opacity: userInput.trim() ? 1 : 0.5,
                   padding: '8px',
                   borderRadius: '50%',
-                  transition: 'background 0.2s',
-                }}
-                onMouseEnter={(e) => {
-                  if (userInput.trim()) {
-                    e.currentTarget.style.backgroundColor = '#f0f7ff';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (userInput.trim()) {
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                  }
                 }}
               >
                 <i className="fas fa-paper-plane"></i>
@@ -847,12 +868,6 @@ const StudentLayout = () => {
                   transition: 'all 0.2s',
                   backgroundColor: showNotifications ? 'rgba(0, 0, 0, 0.05)' : 'transparent',
                 }}
-                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.05)'}
-                onMouseLeave={(e) => {
-                  if (!showNotifications) {
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                  }
-                }}
               >
                 <i className="fas fa-bell"></i>
                 {unreadCount > 0 && (
@@ -887,14 +902,38 @@ const StudentLayout = () => {
                   gap: '0.8rem',
                   padding: '0.5rem 0.8rem',
                   borderRadius: '30px',
-                  transition: 'all 0.2s',
                   cursor: 'pointer',
+                  position: 'relative',
                 }}
-                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8f9fa'}
-                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
               >
+                {isLoadingUser && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '-5px',
+                    right: '-5px',
+                    width: '20px',
+                    height: '20px',
+                    borderRadius: '50%',
+                    backgroundColor: '#3498db',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'white',
+                    fontSize: '10px',
+                    border: '2px solid white',
+                  }}>
+                    <div style={{
+                      width: '12px',
+                      height: '12px',
+                      border: '2px solid rgba(255,255,255,0.3)',
+                      borderTopColor: 'white',
+                      borderRadius: '50%',
+                      animation: 'spin 1s linear infinite',
+                    }}></div>
+                  </div>
+                )}
                 <img 
-                  src={user?.avatar || "/images/ROBERT PROFILE.jpg"} 
+                  src="https://ui-avatars.com/api/?name=${encodeURIComponent(studentData?.full_name || user?.name || 'Student')}&background=3498db&color=fff&size=128" 
                   alt="User"
                   style={{
                     width: '36px',
@@ -910,9 +949,22 @@ const StudentLayout = () => {
                       fontSize: '0.85rem',
                       fontWeight: '600',
                       color: '#212529',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
                     }}
                   >
-                    {user?.name || 'Robert Mayhem'}
+                    {studentData?.full_name || user?.name || 'Loading...'}
+                    {isLoadingUser && (
+                      <div style={{
+                        width: '12px',
+                        height: '12px',
+                        border: '2px solid #e9ecef',
+                        borderTopColor: '#3498db',
+                        borderRadius: '50%',
+                        animation: 'spin 1s linear infinite',
+                      }}></div>
+                    )}
                   </div>
                   <div 
                     style={{
@@ -943,7 +995,6 @@ const StudentLayout = () => {
                 zIndex: 1000,
                 border: '1px solid #e9ecef',
                 overflow: 'hidden',
-                animation: 'slideDown 0.2s ease-out',
               }}
             >
               <div style={{
@@ -974,10 +1025,7 @@ const StudentLayout = () => {
                         fontSize: '12px',
                         padding: '4px 8px',
                         borderRadius: '4px',
-                        transition: 'background 0.2s',
                       }}
-                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#e3f2fd'}
-                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                     >
                       Mark all as read
                     </button>
@@ -993,10 +1041,7 @@ const StudentLayout = () => {
                         fontSize: '12px',
                         padding: '4px 8px',
                         borderRadius: '4px',
-                        transition: 'background 0.2s',
                       }}
-                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#ffebee'}
-                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                     >
                       Clear all
                     </button>
@@ -1023,12 +1068,9 @@ const StudentLayout = () => {
                         padding: '15px',
                         display: 'flex',
                         borderBottom: '1px solid #f5f5f5',
-                        transition: 'all 0.2s',
                         backgroundColor: notification.read ? 'white' : '#f8f9fa',
                         cursor: 'pointer',
                       }}
-                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f3f5'}
-                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = notification.read ? 'white' : '#f8f9fa'}
                     >
                       <div style={{
                         width: '40px',
@@ -1228,17 +1270,6 @@ const StudentLayout = () => {
                     cursor: 'pointer',
                     fontSize: '0.9rem',
                     fontWeight: showAIChat ? '600' : '500',
-                    transition: 'all 0.2s',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!showAIChat) {
-                      e.currentTarget.style.backgroundColor = '#f1f3f5';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!showAIChat) {
-                      e.currentTarget.style.backgroundColor = 'transparent';
-                    }
                   }}
                 >
                   <i className="fas fa-robot" style={{ fontSize: '1rem', width: '20px' }}></i>
@@ -1276,10 +1307,7 @@ const StudentLayout = () => {
                     cursor: 'pointer',
                     fontSize: '0.9rem',
                     fontWeight: '500',
-                    transition: 'all 0.2s',
                   }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(247, 37, 133, 0.1)'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                 >
                   <i className="fas fa-sign-out-alt" style={{ fontSize: '1rem', width: '20px' }}></i>
                   {!sidebarCollapsed && <span>Log Out</span>}
@@ -1326,28 +1354,6 @@ const StudentLayout = () => {
             background-color: #f1f3f5 !important;
           }
           
-          @keyframes slideInUp {
-            from {
-              opacity: 0;
-              transform: translateY(20px);
-            }
-            to {
-              opacity: 1;
-              transform: translateY(0);
-            }
-          }
-          
-          @keyframes slideDown {
-            from {
-              opacity: 0;
-              transform: translateY(-10px);
-            }
-            to {
-              opacity: 1;
-              transform: translateY(0);
-            }
-          }
-          
           @keyframes fadeIn {
             from {
               opacity: 0;
@@ -1377,21 +1383,9 @@ const StudentLayout = () => {
             }
           }
           
-          @keyframes pulse {
-            0% {
-              transform: scale(0.95);
-            }
-            50% {
-              transform: scale(1.05);
-            }
-            100% {
-              transform: scale(0.95);
-            }
-          }
-          
           @media (max-width: 1200px) {
             .sidebar {
-              transform: translateX(-100%);
+              width: 70px;
             }
             
             .sidebar-toggle {
@@ -1419,6 +1413,10 @@ const StudentLayout = () => {
             
             .header-logo h1 {
               font-size: 1.1rem !important;
+            }
+            
+            .header-logo p {
+              font-size: 0.7rem !important;
             }
           }
         `}</style>

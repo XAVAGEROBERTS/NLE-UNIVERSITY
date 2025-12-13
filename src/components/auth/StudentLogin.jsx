@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react';
+// src/pages/StudentLogin.jsx - UPDATED
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStudentAuth } from '../../context/StudentAuthContext';
 
 const StudentLogin = () => {
   const navigate = useNavigate();
-  const { signIn, isAuthenticated, loading } = useStudentAuth();
+  const { signIn, isAuthenticated, loading: authLoading } = useStudentAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
@@ -15,53 +16,53 @@ const StudentLogin = () => {
   const [recoveryEmail, setRecoveryEmail] = useState('');
   const [isSendingCode, setIsSendingCode] = useState(false);
   const [codeSent, setCodeSent] = useState(false);
+  
+  const formRef = useRef(null);
+  const submitButtonRef = useRef(null);
 
-  // Load saved credentials on component mount
+  // Load saved EMAIL only (not password) on component mount
   useEffect(() => {
-    const savedCredentials = localStorage.getItem('student_credentials');
+    const savedEmail = localStorage.getItem('student_email');
     const savedRememberMe = localStorage.getItem('student_remember_me');
     
-    if (savedCredentials && savedRememberMe === 'true') {
-      try {
-        const credentials = JSON.parse(savedCredentials);
-        setEmail(credentials.email || '');
-        setPassword(credentials.password || '');
-        setRememberMe(true);
-      } catch (error) {
-        console.error('Error loading saved credentials:', error);
-      }
-    } else if (savedRememberMe === 'false') {
-      setRememberMe(false);
+    if (savedEmail && savedRememberMe === 'true') {
+      setEmail(savedEmail);
+      setRememberMe(true);
     }
   }, []);
 
+  // Redirect if already authenticated
   useEffect(() => {
     if (isAuthenticated) {
       navigate('/dashboard');
     }
   }, [isAuthenticated, navigate]);
 
-  // Handle email change
-  const handleEmailChange = (e) => {
-    setEmail(e.target.value);
-    if (error) setError('');
-  };
-
-  // Handle password change
-  const handlePasswordChange = (e) => {
-    setPassword(e.target.value);
-    if (error) setError('');
-  };
-
+  // Prevent multiple submissions
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // Prevent multiple clicks
+    if (isSubmitting) {
+      console.log('⚠️ Already submitting, ignoring...');
+      return;
+    }
+    
+    console.log('📝 Form submission started');
+    
+    // Disable submit button
+    if (submitButtonRef.current) {
+      submitButtonRef.current.disabled = true;
+    }
+    
     setError('');
-    setIsLoading(true);
+    setIsSubmitting(true);
 
     // Basic validation
     if (!email.trim()) {
       setError('Please enter your email address');
-      setIsLoading(false);
+      setIsSubmitting(false);
+      if (submitButtonRef.current) submitButtonRef.current.disabled = false;
       return;
     }
 
@@ -69,49 +70,68 @@ const StudentLogin = () => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       setError('Please enter a valid email address');
-      setIsLoading(false);
+      setIsSubmitting(false);
+      if (submitButtonRef.current) submitButtonRef.current.disabled = false;
       return;
     }
 
     if (!password.trim()) {
       setError('Please enter your password');
-      setIsLoading(false);
-      return;
-    }
-
-    // Password length validation
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters');
-      setIsLoading(false);
+      setIsSubmitting(false);
+      if (submitButtonRef.current) submitButtonRef.current.disabled = false;
       return;
     }
 
     try {
+      console.log('🔐 Calling signIn function...');
       const result = await signIn(email, password);
       
       if (result.success) {
-        // Save credentials if "Remember Me" is checked
+        console.log('✅ Login successful, saving email only');
+        
+        // Save ONLY email if "Remember Me" is checked (NEVER save password)
         if (rememberMe) {
-          const credentials = {
-            email: email,
-            password: password
-          };
-          localStorage.setItem('student_credentials', JSON.stringify(credentials));
+          localStorage.setItem('student_email', email);
           localStorage.setItem('student_remember_me', 'true');
         } else {
-          clearSavedCredentials();
+          localStorage.removeItem('student_email');
+          localStorage.setItem('student_remember_me', 'false');
         }
         
-        navigate('/dashboard');
+        // Clear password field
+        setPassword('');
+        
+        // Navigate to dashboard
+        navigate('/dashboard', { replace: true });
       } else {
-        // Show simple error message
-        setError('Incorrect credentials');
+        // Show error message
+        console.error('❌ Login failed:', result.error);
+        setError(result.error || 'Invalid email or password');
       }
     } catch (error) {
+      console.error('❌ Login exception:', error);
       setError('An error occurred. Please try again.');
     } finally {
-      setIsLoading(false);
+      setIsSubmitting(false);
+      // Re-enable submit button after delay
+      setTimeout(() => {
+        if (submitButtonRef.current) {
+          submitButtonRef.current.disabled = false;
+        }
+      }, 1000);
     }
+  };
+
+  // Handle input changes
+  const handleEmailChange = (e) => {
+    const newEmail = e.target.value;
+    setEmail(newEmail);
+    if (error) setError('');
+  };
+
+  const handlePasswordChange = (e) => {
+    setPassword(e.target.value);
+    if (error) setError('');
   };
 
   const togglePasswordVisibility = () => {
@@ -171,21 +191,16 @@ const StudentLogin = () => {
     // Save preference immediately
     localStorage.setItem('student_remember_me', isChecked.toString());
     
-    // Clear credentials if user unchecks "Remember Me"
-    if (!isChecked) {
-      clearSavedCredentials();
+    // Save or remove email based on preference
+    if (isChecked && email) {
+      localStorage.setItem('student_email', email);
+    } else if (!isChecked) {
+      localStorage.removeItem('student_email');
     }
   };
 
-  const clearSavedCredentials = () => {
-    localStorage.removeItem('student_credentials');
-    setEmail('');
-    setPassword('');
-    setRememberMe(false);
-    localStorage.setItem('student_remember_me', 'false');
-  };
-
-  if (loading) {
+  // Show loading state
+  if (authLoading) {
     return (
       <div style={styles.loadingContainer}>
         <div style={styles.spinner}></div>
@@ -202,12 +217,16 @@ const StudentLogin = () => {
           src="/images/back G login.jpg" 
           alt="University Campus" 
           style={styles.bgImageImg}
+          onError={(e) => {
+            e.target.style.display = 'none';
+            e.target.parentElement.style.backgroundColor = '#1a365d';
+          }}
         />
       </div>
 
       {/* Main Form Container */}
       <div style={styles.formContainer}>
-        <div style={styles.formWrapper}>
+        <div style={styles.formWrapper} ref={formRef}>
           {/* Password Recovery Modal */}
           {showForgotPassword ? (
             <div style={styles.recoveryModal}>
@@ -222,8 +241,10 @@ const StudentLogin = () => {
                   <>
                     <form onSubmit={handleSendVerificationCode} style={styles.recoveryForm}>
                       <div style={styles.formGroup}>
-                        <label style={styles.label}>Your email</label>
+                        <label htmlFor="recoveryEmail" style={styles.label}>Your email</label>
                         <input
+                          id="recoveryEmail"
+                          name="recoveryEmail"
                           type="email"
                           value={recoveryEmail}
                           onChange={(e) => setRecoveryEmail(e.target.value)}
@@ -231,6 +252,7 @@ const StudentLogin = () => {
                           style={styles.input}
                           required
                           disabled={isSendingCode}
+                          autoComplete="email"
                         />
                       </div>
                       
@@ -245,6 +267,7 @@ const StudentLogin = () => {
                       
                       <button 
                         type="submit" 
+                        id="sendVerificationCode"
                         style={{
                           ...styles.recoveryButton,
                           ...(isSendingCode ? styles.buttonDisabled : {})
@@ -283,14 +306,14 @@ const StudentLogin = () => {
                 )}
                 
                 <div style={styles.recoveryFooter}>
-                  <a 
-                    href="#" 
+                  <button 
                     onClick={handleBackToLogin}
                     style={styles.backToLogin}
+                    id="backToLogin"
                   >
                     <i className="fa-solid fa-arrow-left" style={{ marginRight: '8px' }}></i>
                     Back to login
-                  </a>
+                  </button>
                 </div>
               </div>
             </div>
@@ -302,6 +325,10 @@ const StudentLogin = () => {
                   src="/images/badge.png" 
                   alt="NLE University Logo" 
                   style={styles.logoImg}
+                  onError={(e) => {
+                    e.target.style.display = 'none';
+                    e.target.parentElement.innerHTML = '<div style="font-size: 2rem; color: #1a365d">🎓</div>';
+                  }}
                 />
               </div>
               <h1 style={styles.title}>NLE UNIVERSITY</h1>
@@ -319,67 +346,84 @@ const StudentLogin = () => {
               
               <form onSubmit={handleSubmit} style={styles.form}>
                 <div style={styles.formGroup}>
-                  <label style={styles.label}>Enter your email to login</label>
+                  <label htmlFor="studentEmail" style={styles.label}>Enter your email to login</label>
                   <input
+                    id="studentEmail"
+                    name="studentEmail"
                     type="email"
                     value={email}
                     onChange={handleEmailChange}
                     placeholder="student@nleuniversity.edu"
                     style={styles.input}
                     required
-                    disabled={isLoading}
+                    disabled={isSubmitting}
+                    autoComplete="email"
                   />
                 </div>
                 
                 <div style={styles.formGroup}>
-                  <label style={styles.label}>Password</label>
+                  <label htmlFor="studentPassword" style={styles.label}>Password</label>
                   <div style={styles.passwordInputContainer}>
                     <input
+                      id="studentPassword"
+                      name="studentPassword"
                       type={showPassword ? "text" : "password"}
                       value={password}
                       onChange={handlePasswordChange}
                       placeholder="Enter your password"
                       style={styles.input}
                       required
-                      disabled={isLoading}
+                      disabled={isSubmitting}
+                      autoComplete="current-password"
                     />
-                    <i 
-                      className={`fas ${showPassword ? 'fa-eye' : 'fa-eye-slash'}`}
-                      style={styles.togglePassword}
+                    <button 
+                      type="button"
+                      id="togglePassword"
                       onClick={togglePasswordVisibility}
-                    ></i>
+                      style={styles.togglePasswordButton}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      <i className={`fas ${showPassword ? 'fa-eye' : 'fa-eye-slash'}`}></i>
+                    </button>
                   </div>
                 </div>
                 
                 <div style={styles.loginOptions}>
                   <div style={styles.rememberMe}>
                     <input
-                      type="checkbox"
                       id="rememberMe"
+                      name="rememberMe"
+                      type="checkbox"
                       checked={rememberMe}
                       onChange={handleRememberMeChange}
                       style={styles.checkbox}
+                      disabled={isSubmitting}
                     />
                     <label htmlFor="rememberMe" style={styles.checkboxLabel}>Remember me</label>
                   </div>
-                  <a 
-                    href="#" 
+                  <button 
+                    type="button"
+                    id="forgotPassword"
                     style={styles.forgotPassword}
                     onClick={handleForgotPassword}
+                    disabled={isSubmitting}
                   >
                     Forgot password?
-                  </a>
+                  </button>
                 </div>
                 
                 <button 
                   type="submit" 
+                  id="loginButton"
+                  ref={submitButtonRef}
                   style={{
                     ...styles.button,
-                    ...(isLoading ? styles.buttonDisabled : {})
+                    ...(isSubmitting ? styles.buttonDisabled : {})
                   }}
-                  disabled={isLoading}
+                  disabled={isSubmitting}
+                  aria-label="Login to student portal"
                 >
-                  {isLoading ? (
+                  {isSubmitting ? (
                     <>
                       <i className="fa-solid fa-spinner fa-spin" style={{ marginRight: '10px' }}></i>
                       Logging in...
@@ -412,12 +456,14 @@ const styles = {
     width: '100%',
     height: '100%',
     zIndex: -1,
+    backgroundColor: '#1a365d',
   },
 
   bgImageImg: {
     width: '100%',
     height: '100%',
     objectFit: 'cover',
+    opacity: 0.8,
   },
 
   // Form Container
@@ -426,31 +472,34 @@ const styles = {
     height: '100%',
     display: 'flex',
     alignItems: 'center',
-    paddingLeft: '15%',
+    justifyContent: 'center',
+    padding: '20px',
   },
 
   formWrapper: {
     position: 'relative',
     zIndex: 2,
+    width: '100%',
+    maxWidth: '450px',
   },
 
   // Login Form
   loginForm: {
-    background: 'white',
-    padding: '2rem',
-    borderRadius: '10px',
+    background: 'rgba(255, 255, 255, 0.95)',
+    padding: '40px',
+    borderRadius: '15px',
     boxShadow: '0 10px 30px rgba(0, 0, 0, 0.2)',
-    width: '400px',
     textAlign: 'center',
+    backdropFilter: 'blur(10px)',
   },
 
   // Password Recovery Modal
   recoveryModal: {
-    background: 'white',
-    padding: '2.5rem',
-    borderRadius: '10px',
+    background: 'rgba(255, 255, 255, 0.95)',
+    padding: '40px',
+    borderRadius: '15px',
     boxShadow: '0 10px 40px rgba(0, 0, 0, 0.25)',
-    width: '450px',
+    backdropFilter: 'blur(10px)',
   },
 
   recoveryContent: {
@@ -486,12 +535,12 @@ const styles = {
 
   recoveryButton: {
     width: '100%',
-    padding: '1rem',
+    padding: '12px',
     backgroundColor: '#38a169',
     color: 'white',
     border: 'none',
     borderRadius: '8px',
-    fontSize: '1rem',
+    fontSize: '16px',
     fontWeight: '600',
     cursor: 'pointer',
     transition: 'all 0.3s ease',
@@ -542,14 +591,15 @@ const styles = {
   },
 
   backToLogin: {
+    background: 'none',
+    border: 'none',
     color: '#0066cc',
-    textDecoration: 'none',
     fontSize: '0.95rem',
-    transition: 'color 0.3s',
     cursor: 'pointer',
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
+    padding: '5px 10px',
   },
 
   // Logo
@@ -558,33 +608,35 @@ const styles = {
   },
 
   logoImg: {
-    width: '200px',
-    height: '100px',
+    width: '120px',
+    height: '120px',
     borderRadius: '50%',
     objectFit: 'cover',
+    border: '3px solid #1a365d',
   },
 
   // Title
   title: {
-    marginBottom: '1.5rem',
-    color: '#2c3e50',
-    fontSize: '1.8rem',
+    marginBottom: '0.5rem',
+    color: '#1a365d',
+    fontSize: '2rem',
+    fontWeight: '700',
   },
 
   // Subtitle
   subtitle: {
-    opacity: 0.5,
-    lineHeight: 1,
-    marginBottom: '4rem',
+    opacity: 0.7,
+    marginBottom: '2rem',
     fontSize: '1.1rem',
+    color: '#4a5568',
   },
 
-  // Error Modal - Simple
+  // Error Modal
   errorModal: {
     backgroundColor: 'rgba(255, 87, 87, 0.1)',
     border: '1px solid #ff5757',
-    borderRadius: '6px',
-    padding: '10px 15px',
+    borderRadius: '8px',
+    padding: '12px 15px',
     margin: '15px 0',
   },
 
@@ -619,11 +671,12 @@ const styles = {
 
   input: {
     width: '100%',
-    padding: '0.8rem',
-    border: '1px solid #ddd',
-    borderRadius: '5px',
-    fontSize: '1rem',
-    transition: 'border 0.3s',
+    padding: '12px',
+    border: '2px solid #e2e8f0',
+    borderRadius: '8px',
+    fontSize: '16px',
+    transition: 'all 0.3s',
+    boxSizing: 'border-box',
   },
 
   // Password Input Container
@@ -631,14 +684,17 @@ const styles = {
     position: 'relative',
   },
 
-  togglePassword: {
+  togglePasswordButton: {
     position: 'absolute',
-    right: '15px',
+    right: '10px',
     top: '50%',
     transform: 'translateY(-50%)',
-    cursor: 'pointer',
+    background: 'none',
+    border: 'none',
     color: '#666',
-    zIndex: 2,
+    cursor: 'pointer',
+    padding: '5px',
+    fontSize: '16px',
   },
 
   // Login Options
@@ -658,39 +714,44 @@ const styles = {
   checkbox: {
     marginRight: '8px',
     cursor: 'pointer',
+    width: '16px',
+    height: '16px',
   },
 
   checkboxLabel: {
     cursor: 'pointer',
     color: '#555',
     fontWeight: 'normal',
+    userSelect: 'none',
   },
 
   forgotPassword: {
+    background: 'none',
+    border: 'none',
     color: '#0066cc',
-    textDecoration: 'none',
     fontSize: '0.9rem',
-    transition: 'color 0.3s',
     cursor: 'pointer',
+    padding: '0',
   },
 
   // Button
   button: {
     width: '100%',
-    padding: '0.8rem',
-    backgroundColor: '#3498db',
+    padding: '14px',
+    backgroundColor: '#1a365d',
     color: 'white',
     border: 'none',
-    borderRadius: '5px',
-    fontSize: '1rem',
+    borderRadius: '8px',
+    fontSize: '16px',
     fontWeight: '600',
     cursor: 'pointer',
-    transition: 'background-color 0.3s',
+    transition: 'all 0.3s',
   },
 
   buttonDisabled: {
     opacity: 0.7,
     cursor: 'not-allowed',
+    backgroundColor: '#4a5568',
   },
 
   // Loading State
@@ -721,7 +782,7 @@ style.textContent = `
     100% { transform: rotate(360deg); }
   }
   
-  /* Hover effects */
+  /* Focus styles */
   input:focus {
     border-color: #3498db;
     outline: none;
@@ -729,69 +790,51 @@ style.textContent = `
   }
   
   button:not(:disabled):hover {
-    background-color: #2980b9;
+    opacity: 0.9;
   }
   
-  .recovery-button:not(:disabled):hover {
-    background-color: #2f855a;
-  }
-  
-  a:hover {
+  button[type="button"]:hover {
     text-decoration: underline;
   }
   
   /* Responsive */
-  @media (max-width: 1024px) {
-    .form-container {
-      padding-left: 10%;
-    }
-  }
-  
   @media (max-width: 768px) {
-    .form-container {
-      padding-left: 5%;
-      justify-content: center;
-    }
-    
     .login-form,
     .recovery-modal {
-      width: 90%;
-      max-width: 400px;
-      margin: 0 auto;
+      padding: 30px 20px;
+    }
+    
+    .form-container {
+      padding: 10px;
+    }
+    
+    .logo img {
+      width: 100px;
+      height: 100px;
+    }
+    
+    h1 {
+      font-size: 1.6rem;
+    }
+    
+    .subtitle {
+      font-size: 1rem;
+      margin-bottom: 1.5rem;
     }
   }
   
   @media (max-width: 480px) {
     .login-form,
     .recovery-modal {
-      padding: 1.5rem;
+      padding: 25px 15px;
     }
     
-    .logo img {
-      width: 150px;
-      height: 75px;
-    }
-    
-    h1,
     .recovery-title {
       font-size: 1.5rem;
     }
     
     .recovery-subtitle {
       font-size: 1.1rem;
-    }
-    
-    .subtitle {
-      font-size: 1rem;
-      margin-bottom: 3rem;
-    }
-    
-    .success-icon {
-      font-size: 2.5rem;
-    }
-    
-    .success-title {
-      font-size: 1.2rem;
     }
   }
 `;

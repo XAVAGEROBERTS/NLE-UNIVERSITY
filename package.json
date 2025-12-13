@@ -5,11 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:student": "vite --port 3000",
+    "dev:admin": "vite --port 3001 --config vite.admin.config.js",
     "build": "vite build",
-    "lint": "eslint .",
-    "preview": "vite preview",
-    "deploy": "npm run build && vercel --prod",
-    "vercel-build": "vite build"
+    "build:student": "vite build --config vite.student.config.js",
+    "build:admin": "vite build --config vite.admin.config.js"
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^7.1.0",
@@ -19,10 +19,12 @@
     "date-fns": "^4.1.0",
     "html2canvas": "^1.4.1",
     "jspdf": "^3.0.4",
+    "jspdf-autotable": "^5.0.2",
     "react": "^19.2.0",
     "react-chartjs-2": "^5.3.1",
     "react-dom": "^19.2.0",
     "react-hot-toast": "^2.6.0",
+    "react-modal": "^3.16.3",
     "react-player": "^3.4.0",
     "react-router-dom": "^7.10.1"
   },
