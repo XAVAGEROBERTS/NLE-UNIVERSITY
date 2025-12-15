@@ -18,7 +18,6 @@ const Results = () => {
   const [examDetails, setExamDetails] = useState(null);
   const { user } = useStudentAuth();
 
-  // Check if we came from an exam click
   useEffect(() => {
     if (location.state?.examId) {
       setSpecificExam({
@@ -61,28 +60,17 @@ const Results = () => {
       setLoading(true);
       setError(null);
 
-      console.log('Fetching results for user:', user.email);
-
-      // Get student data
       const { data: student, error: studentError } = await supabase
         .from('students')
         .select('id, full_name, student_id, program, year_of_study, academic_year, semester')
         .eq('email', user.email)
         .single();
 
-      if (studentError) {
-        console.error('Student error:', studentError);
-        throw new Error(`Student data error: ${studentError.message}`);
-      }
+      if (studentError) throw new Error(`Student data error: ${studentError.message}`);
+      if (!student) throw new Error('Student not found');
 
-      if (!student) {
-        throw new Error('Student not found');
-      }
-
-      console.log('Student found:', student.full_name);
       setStudentInfo(student);
 
-      // Fetch student's completed courses
       const { data: studentCourses, error: scError } = await supabase
         .from('student_courses')
         .select('*')
@@ -90,12 +78,7 @@ const Results = () => {
         .eq('status', 'completed')
         .not('grade', 'is', null);
 
-      if (scError) {
-        console.error('Student courses error:', scError);
-        throw new Error(`Student courses error: ${scError.message}`);
-      }
-
-      console.log('Completed courses found:', studentCourses?.length || 0);
+      if (scError) throw new Error(`Student courses error: ${scError.message}`);
 
       if (!studentCourses || studentCourses.length === 0) {
         setResultsData({});
@@ -104,10 +87,7 @@ const Results = () => {
         return;
       }
 
-      // Get all course IDs
       const courseIds = studentCourses.map(sc => sc.course_id);
-
-      // Fetch course details for these IDs
       const { data: courses, error: coursesError } = await supabase
         .from('courses')
         .select('*')
@@ -115,35 +95,22 @@ const Results = () => {
         .order('year', { ascending: true })
         .order('semester', { ascending: true });
 
-      if (coursesError) {
-        console.error('Courses error:', coursesError);
-        throw new Error(`Courses error: ${coursesError.message}`);
-      }
+      if (coursesError) throw new Error(`Courses error: ${coursesError.message}`);
 
-      console.log('Course details found:', courses?.length || 0);
-
-      // Create a map of course_id -> course details
       const courseMap = {};
       courses.forEach(course => {
         courseMap[course.id] = course;
       });
 
-      // Organize results by year
       const organizedData = {};
       let totalPoints = 0;
       let totalCredits = 0;
-      let weightedGPA = 0;
 
-      // Process each student course
       studentCourses.forEach(sc => {
         const course = courseMap[sc.course_id];
-        if (!course) {
-          console.warn(`Course not found for ID: ${sc.course_id}`);
-          return;
-        }
+        if (!course) return;
 
         const yearKey = `year${course.year}`;
-        
         if (!organizedData[yearKey]) {
           organizedData[yearKey] = {
             year: course.year,
@@ -177,39 +144,27 @@ const Results = () => {
           organizedData[yearKey].semester2.push(result);
         }
 
-        // Calculate semester totals
         if (gradePoints && course.credits) {
           organizedData[yearKey].totalPoints += gradePoints * course.credits;
           organizedData[yearKey].totalCredits += course.credits;
-          
-          // Calculate CGPA
           totalPoints += gradePoints * course.credits;
           totalCredits += course.credits;
         }
       });
 
-      // Sort courses within semesters by course code
       Object.keys(organizedData).forEach(yearKey => {
         const yearData = organizedData[yearKey];
-        
         yearData.semester1.sort((a, b) => a.courseCode.localeCompare(b.courseCode));
         yearData.semester2.sort((a, b) => a.courseCode.localeCompare(b.courseCode));
-        
         if (yearData.totalCredits > 0) {
           yearData.gpa = parseFloat((yearData.totalPoints / yearData.totalCredits).toFixed(2));
         }
       });
 
-      // Calculate CGPA
-      weightedGPA = totalCredits > 0 ? totalPoints / totalCredits : 0.0;
-      
-      console.log('Organized data:', organizedData);
-      console.log('Calculated CGPA:', weightedGPA.toFixed(2));
-
+      const weightedGPA = totalCredits > 0 ? totalPoints / totalCredits : 0.0;
       setCgpa(parseFloat(weightedGPA.toFixed(2)));
       setResultsData(organizedData);
-      
-      // Set default active year
+
       if (studentInfo?.year_of_study) {
         const currentYearKey = `year${studentInfo.year_of_study}`;
         if (organizedData[currentYearKey]) {
@@ -232,17 +187,9 @@ const Results = () => {
 
   const getGradePoints = (grade) => {
     if (!grade) return 0.0;
-    
     const gradeMap = {
-      'A': 5.0,
-      'B+': 4.5,
-      'B': 4.0,
-      'C+': 3.5,
-      'C': 3.0,
-      'D+': 2.5,
-      'D': 2.0,
-      'E': 1.0,
-      'F': 0.0
+      'A': 5.0, 'B+': 4.5, 'B': 4.0, 'C+': 3.5,
+      'C': 3.0, 'D+': 2.5, 'D': 2.0, 'E': 1.0, 'F': 0.0
     };
     return gradeMap[grade.toUpperCase()] || 0.0;
   };
@@ -265,23 +212,19 @@ const Results = () => {
 
   const calculateSemesterGPA = (semesterResults) => {
     if (!semesterResults || semesterResults.length === 0) return 0.0;
-    
     let totalPoints = 0;
     let totalCredits = 0;
-    
     semesterResults.forEach(course => {
       if (course.gpa && course.credits) {
         totalPoints += course.gpa * course.credits;
         totalCredits += course.credits;
       }
     });
-    
     return totalCredits > 0 ? parseFloat((totalPoints / totalCredits).toFixed(2)) : 0.0;
   };
 
   const getGradeColor = (grade) => {
     if (!grade || grade === 'N/A') return '#6c757d';
-    
     switch(grade.charAt(0).toUpperCase()) {
       case 'A': return '#28a745';
       case 'B': return '#17a2b8';
@@ -295,363 +238,184 @@ const Results = () => {
 
   const exportToPDF = async () => {
     try {
-      const exportButton = document.getElementById('export-pdf');
-      if (exportButton) {
-        exportButton.disabled = true;
-        exportButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating Transcript...';
-      }
+      const doc = new jsPDF();
+      
+      // Set document properties
+      doc.setProperties({
+        title: `Academic Transcript - ${studentInfo?.full_name}`,
+        subject: 'Academic Results',
+        author: 'University Examination System',
+        keywords: 'transcript, results, academic',
+        creator: 'Examination System'
+      });
 
-      // Create PDF
-      const pdf = new jsPDF('p', 'pt', 'a4');
-      const pageWidth = pdf.internal.pageSize.width;
-      const pageHeight = pdf.internal.pageSize.height;
+      // Add watermark
+      doc.setFillColor(240, 240, 240);
+      doc.rect(0, 0, doc.internal.pageSize.width, doc.internal.pageSize.height, 'F');
       
-      // Add university header
-      pdf.setFontSize(20);
-      pdf.setFont('helvetica', 'bold');
-      pdf.setTextColor(0, 51, 102); // Dark blue
-      pdf.text('UNIVERSITY ACADEMIC TRANSCRIPT', pageWidth / 2, 50, { align: 'center' });
+      // Add header with institution info
+      doc.setFontSize(20);
+      doc.setTextColor(41, 128, 185);
+      doc.text('UNIVERSITY EXAMINATION SYSTEM', 105, 20, null, null, 'center');
       
-      // Add decorative line
-      pdf.setLineWidth(1);
-      pdf.line(50, 65, pageWidth - 50, 65);
+      doc.setFontSize(16);
+      doc.setTextColor(52, 73, 94);
+      doc.text('OFFICIAL ACADEMIC TRANSCRIPT', 105, 30, null, null, 'center');
       
-      // Add student information section
-      pdf.setFontSize(12);
-      pdf.setFont('helvetica', 'normal');
-      pdf.setTextColor(0, 0, 0);
+      doc.setFontSize(10);
+      doc.setTextColor(127, 140, 141);
+      doc.text('Issued Electronically', 105, 36, null, null, 'center');
       
-      let yPosition = 90;
+      // Add student info section
+      doc.setFontSize(12);
+      doc.setTextColor(44, 62, 80);
       
-      if (studentInfo) {
-        pdf.setFont('helvetica', 'bold');
-        pdf.text('STUDENT INFORMATION', 50, yPosition);
-        yPosition += 20;
-        
-        pdf.setFont('helvetica', 'normal');
-        pdf.text(`Full Name: ${studentInfo.full_name || 'N/A'}`, 50, yPosition);
-        pdf.text(`Student ID: ${studentInfo.student_id || 'N/A'}`, pageWidth - 200, yPosition);
-        yPosition += 20;
-        
-        pdf.text(`Program: ${studentInfo.program || 'N/A'}`, 50, yPosition);
-        pdf.text(`Academic Year: ${studentInfo.academic_year || 'N/A'}`, pageWidth - 200, yPosition);
-        yPosition += 20;
-        
-        pdf.text(`Current Year: ${studentInfo.year_of_study || 'N/A'}`, 50, yPosition);
-        pdf.text(`Semester: ${studentInfo.semester || 'N/A'}`, pageWidth - 200, yPosition);
-        yPosition += 25;
-        
-        // Add CGPA in a highlighted box
-        pdf.setFillColor(41, 128, 185); // Blue background
-        pdf.rect(50, yPosition - 10, pageWidth - 100, 30, 'F');
-        
-        pdf.setFont('helvetica', 'bold');
-        pdf.setTextColor(255, 255, 255); // White text
-        pdf.text('CUMULATIVE GPA (CGPA)', pageWidth / 2, yPosition, { align: 'center' });
-        pdf.setFontSize(24);
-        pdf.text(cgpa.toFixed(2).toString(), pageWidth / 2, yPosition + 20, { align: 'center' });
-        
-        yPosition += 40;
-      }
+      const studentDetails = [
+        ['Student Name:', studentInfo?.full_name || ''],
+        ['Student ID:', studentInfo?.student_id || ''],
+        ['Program:', studentInfo?.program || ''],
+        ['Academic Year:', studentInfo?.academic_year || ''],
+        ['Current Year:', `Year ${studentInfo?.year_of_study || ''}`],
+        ['Cumulative GPA:', cgpa.toFixed(2)]
+      ];
       
-      // Add classification
-      let classification = '';
-      if (cgpa >= 4.5) classification = 'FIRST CLASS HONORS';
-      else if (cgpa >= 3.5) classification = 'SECOND CLASS HONORS (UPPER DIVISION)';
-      else if (cgpa >= 2.5) classification = 'SECOND CLASS HONORS (LOWER DIVISION)';
-      else if (cgpa >= 1.5) classification = 'THIRD CLASS HONORS';
-      else classification = 'PASS';
+      autoTable(doc, {
+        startY: 45,
+        head: [['Student Information', '']],
+        body: studentDetails,
+        theme: 'grid',
+        headStyles: { fillColor: [41, 128, 185], textColor: 255, fontSize: 11 },
+        styles: { fontSize: 10, cellPadding: 5 },
+        margin: { left: 20, right: 20 }
+      });
+
+      // Add results for each year
+      let yPos = doc.lastAutoTable.finalY + 15;
       
-      pdf.setFontSize(12);
-      pdf.setFont('helvetica', 'bold');
-      pdf.setTextColor(0, 0, 0);
-      pdf.text(`CLASSIFICATION: ${classification}`, pageWidth / 2, yPosition, { align: 'center' });
-      
-      yPosition += 30;
-      
-      // Sort years in ascending order
-      const sortedYears = Object.keys(resultsData).sort();
-      
-      // Add transcript date
-      pdf.setFontSize(10);
-      pdf.setFont('helvetica', 'italic');
-      pdf.text(`Transcript Generated: ${new Date().toLocaleDateString('en-US', { 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric' 
-      })}`, pageWidth - 70, 40, { align: 'right' });
-      
-      // Loop through each year and add tables
-      sortedYears.forEach((yearKey, yearIndex) => {
+      Object.keys(resultsData).sort().forEach(yearKey => {
         const yearData = resultsData[yearKey];
         
-        // Check if we need a new page
-        if (yPosition > pageHeight - 150 && yearIndex > 0) {
-          pdf.addPage();
-          yPosition = 50;
-        }
-        
-        // Year header with background
-        pdf.setFillColor(240, 240, 240);
-        pdf.rect(50, yPosition - 10, pageWidth - 100, 30, 'F');
-        
-        pdf.setFontSize(14);
-        pdf.setFont('helvetica', 'bold');
-        pdf.setTextColor(0, 0, 0);
-        pdf.text(`ACADEMIC YEAR ${yearData.year} RESULTS`, 60, yPosition);
-        
-        pdf.setFontSize(12);
-        pdf.setTextColor(100, 100, 100);
-        pdf.text(`Year GPA: ${yearData.gpa.toFixed(2)} | Credits: ${yearData.totalCredits}`, pageWidth - 70, yPosition, { align: 'right' });
-        
-        yPosition += 40;
-        
-        // Prepare data for the table
-        const tableData = [];
+        // Year header
+        doc.setFontSize(14);
+        doc.setTextColor(52, 152, 219);
+        doc.text(`YEAR ${yearData.year} RESULTS`, 20, yPos);
+        yPos += 10;
         
         // Semester 1 results
         if (yearData.semester1.length > 0) {
-          tableData.push([{ 
-            content: `SEMESTER 1`, 
-            colSpan: 6, 
-            styles: { 
-              fillColor: [41, 128, 185], 
-              textColor: [255, 255, 255],
-              fontStyle: 'bold',
-              fontSize: 11 
-            } 
-          }]);
+          doc.setFontSize(12);
+          doc.setTextColor(44, 62, 80);
+          doc.text(`Semester 1 (GPA: ${yearData.semester1.length > 0 ? calculateSemesterGPA(yearData.semester1).toFixed(2) : '0.00'})`, 20, yPos);
+          yPos += 5;
           
-          yearData.semester1.forEach(course => {
-            tableData.push([
-              course.courseCode,
-              { content: course.courseName, styles: { cellWidth: 180 } },
-              course.credits.toString(),
-              `${course.score}%`,
-              course.grade,
-              course.gpa.toFixed(2)
-            ]);
-          });
-          
-          // Add semester 1 summary row
-          const sem1GPA = calculateSemesterGPA(yearData.semester1);
-          tableData.push([
-            { 
-              content: 'Semester 1 Summary', 
-              colSpan: 3, 
-              styles: { fontStyle: 'bold' } 
-            },
-            `${yearData.semester1.reduce((sum, c) => sum + c.credits, 0)} Credits`,
-            `GPA: ${sem1GPA.toFixed(2)}`,
-            { content: '', styles: { fillColor: [240, 240, 240] } }
+          const semester1Data = yearData.semester1.map(course => [
+            course.courseCode,
+            course.courseName,
+            course.credits.toString(),
+            course.score + '%',
+            course.grade,
+            course.gpa.toFixed(2)
           ]);
           
-          // Add spacing row
-          tableData.push([{ content: '', colSpan: 6, styles: { fillColor: [255, 255, 255], cellHeight: 10 } }]);
+          autoTable(doc, {
+            startY: yPos,
+            head: [['Code', 'Course Name', 'Credits', 'Score', 'Grade', 'Points']],
+            body: semester1Data,
+            theme: 'striped',
+            headStyles: { fillColor: [52, 152, 219], textColor: 255 },
+            styles: { fontSize: 9 },
+            margin: { left: 20, right: 20 }
+          });
+          
+          yPos = doc.lastAutoTable.finalY + 10;
         }
         
         // Semester 2 results
         if (yearData.semester2.length > 0) {
-          tableData.push([{ 
-            content: `SEMESTER 2`, 
-            colSpan: 6, 
-            styles: { 
-              fillColor: [39, 174, 96], 
-              textColor: [255, 255, 255],
-              fontStyle: 'bold',
-              fontSize: 11 
-            } 
-          }]);
+          doc.setFontSize(12);
+          doc.setTextColor(44, 62, 80);
+          doc.text(`Semester 2 (GPA: ${yearData.semester2.length > 0 ? calculateSemesterGPA(yearData.semester2).toFixed(2) : '0.00'})`, 20, yPos);
+          yPos += 5;
           
-          yearData.semester2.forEach(course => {
-            tableData.push([
-              course.courseCode,
-              { content: course.courseName, styles: { cellWidth: 180 } },
-              course.credits.toString(),
-              `${course.score}%`,
-              course.grade,
-              course.gpa.toFixed(2)
-            ]);
+          const semester2Data = yearData.semester2.map(course => [
+            course.courseCode,
+            course.courseName,
+            course.credits.toString(),
+            course.score + '%',
+            course.grade,
+            course.gpa.toFixed(2)
+          ]);
+          
+          autoTable(doc, {
+            startY: yPos,
+            head: [['Code', 'Course Name', 'Credits', 'Score', 'Grade', 'Points']],
+            body: semester2Data,
+            theme: 'striped',
+            headStyles: { fillColor: [52, 152, 219], textColor: 255 },
+            styles: { fontSize: 9 },
+            margin: { left: 20, right: 20 }
           });
           
-          // Add semester 2 summary row
-          const sem2GPA = calculateSemesterGPA(yearData.semester2);
-          tableData.push([
-            { 
-              content: 'Semester 2 Summary', 
-              colSpan: 3, 
-              styles: { fontStyle: 'bold' } 
-            },
-            `${yearData.semester2.reduce((sum, c) => sum + c.credits, 0)} Credits`,
-            `GPA: ${sem2GPA.toFixed(2)}`,
-            { content: '', styles: { fillColor: [240, 240, 240] } }
-          ]);
-          
-          // Add year summary row
-          tableData.push([
-            { 
-              content: `YEAR ${yearData.year} SUMMARY`, 
-              colSpan: 3, 
-              styles: { 
-                fontStyle: 'bold',
-                fillColor: [52, 73, 94],
-                textColor: [255, 255, 255]
-              } 
-            },
-            { 
-              content: `${yearData.totalCredits} Total Credits`, 
-              styles: { 
-                fontStyle: 'bold',
-                fillColor: [52, 73, 94],
-                textColor: [255, 255, 255]
-              } 
-            },
-            { 
-              content: `Year GPA: ${yearData.gpa.toFixed(2)}`, 
-              styles: { 
-                fontStyle: 'bold',
-                fillColor: [52, 73, 94],
-                textColor: [255, 255, 255]
-              } 
-            },
-            { 
-              content: '', 
-              styles: { 
-                fillColor: [52, 73, 94],
-                textColor: [255, 255, 255]
-              } 
-            }
-          ]);
+          yPos = doc.lastAutoTable.finalY + 15;
         }
         
-        // Add table to PDF
-        autoTable(pdf, {
-          startY: yPosition,
-          head: [[
-            { content: 'Course Code', styles: { fillColor: [41, 128, 185], textColor: [255, 255, 255], fontStyle: 'bold' } },
-            { content: 'Course Name', styles: { fillColor: [41, 128, 185], textColor: [255, 255, 255], fontStyle: 'bold' } },
-            { content: 'Credits', styles: { fillColor: [41, 128, 185], textColor: [255, 255, 255], fontStyle: 'bold' } },
-            { content: 'Score %', styles: { fillColor: [41, 128, 185], textColor: [255, 255, 255], fontStyle: 'bold' } },
-            { content: 'Grade', styles: { fillColor: [41, 128, 185], textColor: [255, 255, 255], fontStyle: 'bold' } },
-            { content: 'Grade Points', styles: { fillColor: [41, 128, 185], textColor: [255, 255, 255], fontStyle: 'bold' } }
-          ]],
-          body: tableData,
-          margin: { left: 50, right: 50 },
-          styles: { 
-            fontSize: 10,
-            cellPadding: 5,
-            overflow: 'linebreak'
-          },
-          columnStyles: {
-            0: { cellWidth: 80 },
-            1: { cellWidth: 180 },
-            2: { cellWidth: 50 },
-            3: { cellWidth: 60 },
-            4: { cellWidth: 50 },
-            5: { cellWidth: 70 }
-          },
-          theme: 'grid',
-          didDrawPage: function(data) {
-            // Add page number
-            pdf.setFontSize(10);
-            pdf.setTextColor(150, 150, 150);
-            pdf.text(
-              `Page ${pdf.internal.getNumberOfPages()}`,
-              pageWidth / 2,
-              pageHeight - 20,
-              { align: 'center' }
-            );
-          }
-        });
+        // Year summary
+        doc.setFontSize(11);
+        doc.setTextColor(127, 140, 141);
+        doc.text(`Year ${yearData.year} GPA: ${yearData.gpa.toFixed(2)} | Total Credits: ${yearData.totalCredits}`, 20, yPos);
+        yPos += 20;
         
-        // Update position for next year
-        yPosition = pdf.lastAutoTable.finalY + 30;
+        // Add page if needed
+        if (yPos > 250) {
+          doc.addPage();
+          yPos = 20;
+        }
       });
-      
-      // Add final summary on last page
-      if (yPosition > pageHeight - 100) {
-        pdf.addPage();
-        yPosition = 50;
-      }
-      
-      // Add final summary box
-      pdf.setFillColor(245, 245, 245);
-      pdf.rect(50, yPosition, pageWidth - 100, 80, 'F');
-      
-      pdf.setFontSize(16);
-      pdf.setFont('helvetica', 'bold');
-      pdf.setTextColor(0, 0, 0);
-      pdf.text('ACADEMIC SUMMARY', pageWidth / 2, yPosition + 20, { align: 'center' });
-      
-      const totalCourses = sortedYears.reduce((total, yearKey) => {
-        return total + resultsData[yearKey].semester1.length + resultsData[yearKey].semester2.length;
-      }, 0);
-      
-      const totalCredits = sortedYears.reduce((total, yearKey) => {
-        return total + resultsData[yearKey].totalCredits;
-      }, 0);
-      
-      pdf.setFontSize(12);
-      pdf.setFont('helvetica', 'normal');
-      pdf.text(`Total Courses Completed: ${totalCourses}`, 60, yPosition + 45);
-      pdf.text(`Total Credits Earned: ${totalCredits}`, 60, yPosition + 65);
-      pdf.text(`Cumulative GPA (CGPA): ${cgpa.toFixed(2)}`, pageWidth - 150, yPosition + 45);
-      pdf.text(`Classification: ${classification}`, pageWidth - 150, yPosition + 65);
-      
-      // Add university seal and signature area
-      yPosition += 110;
-      
-      pdf.setLineWidth(0.5);
-      pdf.line(60, yPosition, pageWidth - 60, yPosition);
-      
-      pdf.setFontSize(10);
-      pdf.setFont('helvetica', 'italic');
-      pdf.setTextColor(100, 100, 100);
-      pdf.text('This is an official academic transcript issued by the University.', pageWidth / 2, yPosition + 15, { align: 'center' });
-      pdf.text('Any alteration or forgery of this document is strictly prohibited.', pageWidth / 2, yPosition + 30, { align: 'center' });
-      
-      // Add signature lines
-      const signatureY = yPosition + 60;
-      pdf.line(100, signatureY, 250, signatureY);
-      pdf.line(pageWidth - 250, signatureY, pageWidth - 100, signatureY);
-      
-      pdf.setFont('helvetica', 'normal');
-      pdf.setTextColor(0, 0, 0);
-      pdf.text('Registrar\'s Signature', 175, signatureY + 15, { align: 'center' });
-      pdf.text('University Seal', pageWidth - 175, signatureY + 15, { align: 'center' });
-      
-      // Add footer on all pages
-      const pageCount = pdf.internal.getNumberOfPages();
-      for (let i = 1; i <= pageCount; i++) {
-        pdf.setPage(i);
-        
-        // Footer border
-        pdf.setDrawColor(200, 200, 200);
-        pdf.setLineWidth(0.5);
-        pdf.line(50, pageHeight - 40, pageWidth - 50, pageHeight - 40);
-        
-        // Footer text
-        pdf.setFontSize(8);
-        pdf.setTextColor(150, 150, 150);
-        pdf.text('UNIVERSITY OF EXCELLENCE', pageWidth / 2, pageHeight - 30, { align: 'center' });
-        pdf.text('123 University Avenue, City, Country | Tel: +1 (234) 567-8900 | Email: registrar@university.edu', pageWidth / 2, pageHeight - 20, { align: 'center' });
-      }
-      
-      // Save PDF
-      const fileName = `Academic_Transcript_${studentInfo?.student_id}_${new Date().toISOString().split('T')[0]}.pdf`;
-      pdf.save(fileName);
 
-      alert('Academic transcript exported successfully!');
-    } catch (error) {
-      console.error('Error exporting PDF:', error);
-      alert('Failed to export transcript. Please try again.');
-    } finally {
-      // Reset button
-      const exportButton = document.getElementById('export-pdf');
-      if (exportButton) {
-        exportButton.disabled = false;
-        exportButton.innerHTML = '<i class="fas fa-file-pdf"></i> Export Transcript';
+      // Add final summary
+      doc.setFontSize(12);
+      doc.setTextColor(39, 174, 96);
+      doc.text('FINAL SUMMARY', 20, yPos);
+      yPos += 10;
+      
+      const summaryData = [
+        ['Cumulative GPA (CGPA):', cgpa.toFixed(2)],
+        ['Classification:', cgpa >= 4.5 ? 'First Class' : 
+                         cgpa >= 3.5 ? 'Second Class Upper' : 
+                         cgpa >= 2.5 ? 'Second Class Lower' : 
+                         cgpa >= 1.5 ? 'Third Class' : 'Pass'],
+        ['Date Generated:', new Date().toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric'
+        })],
+        ['Issuing Authority:', 'University Examination Board']
+      ];
+      
+      autoTable(doc, {
+        startY: yPos,
+        body: summaryData,
+        theme: 'plain',
+        styles: { fontSize: 10 },
+        margin: { left: 20, right: 20 }
+      });
+
+      // Add footer
+      const pageCount = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setTextColor(150, 150, 150);
+        doc.text('This is an electronically generated document. No signature required.', 105, doc.internal.pageSize.height - 10, null, null, 'center');
+        doc.text(`Page ${i} of ${pageCount}`, 105, doc.internal.pageSize.height - 5, null, null, 'center');
       }
+
+      // Save the PDF
+      doc.save(`Transcript_${studentInfo?.student_id}_${new Date().toISOString().split('T')[0]}.pdf`);
+      
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      alert('Failed to generate PDF. Please try again.');
     }
   };
 
@@ -659,151 +423,76 @@ const Results = () => {
     fetchResults();
   };
 
-  // Render specific exam results
   const renderSpecificExamResults = () => {
     if (!specificExam || !examDetails) return null;
 
     return (
-      <div id="specific-exam-results">
-        {/* Specific Exam Header */}
-        <div className="dashboard-header" style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '15px',
-          marginBottom: '20px'
-        }}>
-          <div style={{ width: '100%' }}>
-            <h2 style={{ margin: '0 0 5px 0', fontSize: '1.5rem' }}>Exam Results</h2>
-            <div className="date-display" style={{ color: '#666', fontSize: '14px' }}>
-              {specificExam.courseCode} - {specificExam.examTitle}
-            </div>
+      <div className="specific-exam-container">
+        {/* Header */}
+        <div className="page-header">
+          <div className="header-content">
+            <h2 className="page-title">Exam Results</h2>
+            <p className="page-subtitle">{specificExam.courseCode} - {specificExam.examTitle}</p>
           </div>
-          <div style={{ 
-            display: 'flex', 
-            gap: '10px',
-            flexWrap: 'wrap',
-            width: '100%'
-          }}>
-            <button 
-              onClick={() => setSpecificExam(null)}
-              style={{
-                padding: '8px 16px',
-                backgroundColor: '#6c757d',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                fontSize: '14px',
-                flex: '1',
-                minWidth: '140px'
-              }}
-            >
-              <i className="fas fa-list"></i>
-              All Results
+          <div className="action-buttons">
+            <button className="btn btn-secondary" onClick={() => setSpecificExam(null)}>
+              <i className="fas fa-list"></i> <span className="btn-text">All Results</span>
             </button>
-            <button 
-              id="export-pdf" 
-              className="export-button" 
-              onClick={exportToPDF}
-              style={{
-                padding: '8px 16px',
-                backgroundColor: '#dc3545',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                fontSize: '14px',
-                fontWeight: '500',
-                flex: '1',
-                minWidth: '160px'
-              }}
-            >
-              <i className="fas fa-file-pdf"></i>
-              Export Transcript
+            <button id="export-pdf" className="btn btn-danger" onClick={exportToPDF}>
+              <i className="fas fa-file-pdf"></i> <span className="btn-text">Export Transcript</span>
             </button>
           </div>
         </div>
 
-        {/* Exam Performance Summary */}
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '12px',
-          padding: '20px',
-          marginBottom: '25px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-          textAlign: 'center'
-        }}>
-          <h3 style={{ marginBottom: '25px', color: '#333', fontSize: '1.2rem' }}>
-            <i className="fas fa-chart-line" style={{ marginRight: '10px', color: '#007bff' }}></i>
-            Exam Performance Summary
+        {/* Performance Summary */}
+        <div className="performance-summary">
+          <h3 className="section-title">
+            <i className="fas fa-chart-line"></i> Exam Performance Summary
           </h3>
           
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-            gap: '15px',
-            marginBottom: '30px'
-          }}>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '5px' }}>Total Marks</div>
-              <div style={{ fontSize: '24px', fontWeight: 'bold' }}>{examDetails.total_marks}</div>
+          <div className="stats-grid">
+            <div className="stat-item">
+              <div className="stat-label">Total Marks</div>
+              <div className="stat-value">{examDetails.total_marks}</div>
             </div>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '5px' }}>Marks Obtained</div>
-              <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#28a745' }}>
+            <div className="stat-item">
+              <div className="stat-label">Marks Obtained</div>
+              <div className="stat-value text-success">
                 {specificExam.submission?.total_marks_obtained || 'N/A'}
               </div>
             </div>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '5px' }}>Percentage</div>
-              <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#007bff' }}>
+            <div className="stat-item">
+              <div className="stat-label">Percentage</div>
+              <div className="stat-value text-primary">
                 {specificExam.submission?.percentage || 
                   (specificExam.submission?.total_marks_obtained && examDetails.total_marks 
                     ? ((specificExam.submission.total_marks_obtained / examDetails.total_marks) * 100).toFixed(2) + '%'
                     : 'N/A')}
               </div>
             </div>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '5px' }}>Grade</div>
-              <div style={{
-                fontSize: '24px',
-                fontWeight: 'bold',
-                color: getGradeColor(specificExam.submission?.grade)
-              }}>
+            <div className="stat-item">
+              <div className="stat-label">Grade</div>
+              <div className="stat-value" style={{color: getGradeColor(specificExam.submission?.grade)}}>
                 {specificExam.submission?.grade || 'N/A'}
               </div>
             </div>
           </div>
 
           {/* Progress Bar */}
-          <div style={{ margin: '30px 0' }}>
-            <div style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              marginBottom: '8px',
-              fontSize: '14px'
-            }}>
-              <span>Performance</span>
-              <span>{specificExam.submission?.percentage || 
-                (specificExam.submission?.total_marks_obtained && examDetails.total_marks 
-                  ? ((specificExam.submission.total_marks_obtained / examDetails.total_marks) * 100).toFixed(2) + '%'
-                  : '0%')}</span>
+          <div className="progress-section">
+            <div className="progress-header">
+              <span className="progress-label">Performance</span>
+              <span className="progress-percentage">
+                {specificExam.submission?.percentage || 
+                  (specificExam.submission?.total_marks_obtained && examDetails.total_marks 
+                    ? ((specificExam.submission.total_marks_obtained / examDetails.total_marks) * 100).toFixed(2) + '%'
+                    : '0%')}
+              </span>
             </div>
-            <div style={{
-              height: '20px',
-              backgroundColor: '#e9ecef',
-              borderRadius: '10px',
-              overflow: 'hidden'
-            }}>
+            <div className="progress-bar">
               <div 
+                className="progress-fill"
                 style={{
-                  height: '100%',
                   width: `${specificExam.submission?.percentage || 
                     (specificExam.submission?.total_marks_obtained && examDetails.total_marks 
                       ? ((specificExam.submission.total_marks_obtained / examDetails.total_marks) * 100).toFixed(2)
@@ -811,171 +500,84 @@ const Results = () => {
                   backgroundColor: (specificExam.submission?.percentage || 
                     (specificExam.submission?.total_marks_obtained && examDetails.total_marks 
                       ? (specificExam.submission.total_marks_obtained / examDetails.total_marks) * 100
-                      : 0)) >= 50 ? '#28a745' : '#dc3545',
-                  borderRadius: '10px',
-                  transition: 'width 0.5s ease'
+                      : 0)) >= 50 ? '#28a745' : '#dc3545'
                 }}
               ></div>
             </div>
           </div>
         </div>
 
-        {/* Exam Details Section */}
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '12px',
-          padding: '20px',
-          marginBottom: '25px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-        }}>
-          <h4 style={{ marginBottom: '20px', color: '#333', fontSize: '1.1rem' }}>Exam Details</h4>
+        {/* Exam Details */}
+        <div className="exam-details">
+          <h4 className="section-title">Exam Details</h4>
           
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr',
-            gap: '30px'
-          }}>
-            <div>
-              <h5 style={{ color: '#495057', marginBottom: '15px', fontSize: '1rem' }}>
-                <i className="fas fa-info-circle" style={{ marginRight: '8px', color: '#007bff' }}></i>
-                Exam Information
-              </h5>
-              <p style={{ margin: '10px 0', fontSize: '14px' }}>
-                <strong>Course:</strong> {specificExam.courseCode} - {specificExam.courseName}
-              </p>
-              <p style={{ margin: '10px 0', fontSize: '14px' }}>
-                <strong>Exam Type:</strong> {examDetails.exam_type}
-              </p>
-              <p style={{ margin: '10px 0', fontSize: '14px' }}>
-                <strong>Duration:</strong> {examDetails.duration_minutes} minutes
-              </p>
-              <p style={{ margin: '10px 0', fontSize: '14px' }}>
-                <strong>Date:</strong> {new Date(examDetails.start_time).toLocaleDateString()}
-              </p>
-              <p style={{ margin: '10px 0', fontSize: '14px' }}>
-                <strong>Time:</strong> {new Date(examDetails.start_time).toLocaleTimeString()} - {new Date(examDetails.end_time).toLocaleTimeString()}
-              </p>
+          <div className="details-grid">
+            <div className="detail-section">
+              <h5><i className="fas fa-info-circle"></i> Exam Information</h5>
+              <div className="detail-item">
+                <span className="detail-label">Course:</span>
+                <span className="detail-value">{specificExam.courseCode} - {specificExam.courseName}</span>
+              </div>
+              <div className="detail-item">
+                <span className="detail-label">Exam Type:</span>
+                <span className="detail-value">{examDetails.exam_type}</span>
+              </div>
+              <div className="detail-item">
+                <span className="detail-label">Duration:</span>
+                <span className="detail-value">{examDetails.duration_minutes} minutes</span>
+              </div>
+              <div className="detail-item">
+                <span className="detail-label">Date:</span>
+                <span className="detail-value">{new Date(examDetails.start_time).toLocaleDateString()}</span>
+              </div>
+              <div className="detail-item">
+                <span className="detail-label">Time:</span>
+                <span className="detail-value">
+                  {new Date(examDetails.start_time).toLocaleTimeString()} - {new Date(examDetails.end_time).toLocaleTimeString()}
+                </span>
+              </div>
             </div>
             
-            <div>
-              <h5 style={{ color: '#495057', marginBottom: '15px', fontSize: '1rem' }}>
-                <i className="fas fa-user-graduate" style={{ marginRight: '8px', color: '#007bff' }}></i>
-                Submission Details
-              </h5>
-              <p style={{ margin: '10px 0', fontSize: '14px' }}>
-                <strong>Student:</strong> {studentInfo?.full_name} ({studentInfo?.student_id})
-              </p>
-              <p style={{ margin: '10px 0', fontSize: '14px' }}>
-                <strong>Submitted:</strong> {specificExam.submission?.submitted_at 
-                  ? new Date(specificExam.submission.submitted_at).toLocaleString()
-                  : 'N/A'}
-              </p>
-              <p style={{ margin: '10px 0', fontSize: '14px' }}>
-                <strong>Time Spent:</strong> {specificExam.submission?.time_spent_minutes || 'N/A'} minutes
-              </p>
-              <p style={{ margin: '10px 0', fontSize: '14px' }}>
-                <strong>Status:</strong> 
-                <span style={{
-                  marginLeft: '8px',
-                  padding: '4px 12px',
-                  borderRadius: '20px',
-                  fontSize: '12px',
-                  fontWeight: 'bold',
-                  backgroundColor: specificExam.submission?.status === 'graded' ? '#d4edda' : '#f8d7da',
-                  color: specificExam.submission?.status === 'graded' ? '#155724' : '#721c24'
-                }}>
+            <div className="detail-section">
+              <h5><i className="fas fa-user-graduate"></i> Submission Details</h5>
+              <div className="detail-item">
+                <span className="detail-label">Student:</span>
+                <span className="detail-value">{studentInfo?.full_name} ({studentInfo?.student_id})</span>
+              </div>
+              <div className="detail-item">
+                <span className="detail-label">Submitted:</span>
+                <span className="detail-value">
+                  {specificExam.submission?.submitted_at 
+                    ? new Date(specificExam.submission.submitted_at).toLocaleString()
+                    : 'N/A'}
+                </span>
+              </div>
+              <div className="detail-item">
+                <span className="detail-label">Time Spent:</span>
+                <span className="detail-value">{specificExam.submission?.time_spent_minutes || 'N/A'} minutes</span>
+              </div>
+              <div className="detail-item">
+                <span className="detail-label">Status:</span>
+                <span className={`status-badge ${specificExam.submission?.status === 'graded' ? 'graded' : 'pending'}`}>
                   {specificExam.submission?.status?.toUpperCase() || 'N/A'}
                 </span>
-              </p>
+              </div>
             </div>
           </div>
 
-          {/* Feedback Section */}
           {specificExam.submission?.feedback && (
-            <div style={{
-              marginTop: '30px',
-              padding: '20px',
-              backgroundColor: '#e8f4fc',
-              borderRadius: '8px',
-              borderLeft: '4px solid #17a2b8'
-            }}>
-              <h5 style={{ marginBottom: '15px', color: '#495057', fontSize: '1rem' }}>
-                <i className="fas fa-comment" style={{ marginRight: '8px', color: '#17a2b8' }}></i>
-                Lecturer Feedback
-              </h5>
-              <p style={{ color: '#666', lineHeight: '1.6', margin: 0, fontSize: '14px' }}>
-                {specificExam.submission.feedback}
-              </p>
+            <div className="feedback-section">
+              <h5><i className="fas fa-comment"></i> Lecturer Feedback</h5>
+              <p className="feedback-text">{specificExam.submission.feedback}</p>
             </div>
           )}
 
-          {/* Graded By Section */}
-          {specificExam.submission?.graded_by && (
-            <div style={{
-              marginTop: '25px',
-              paddingTop: '25px',
-              borderTop: '1px solid #dee2e6',
-              textAlign: 'right'
-            }}>
-              <p style={{ color: '#6c757d', margin: 0, fontSize: '13px' }}>
-                <small>
-                  Graded by: Lecturer | 
-                  Date: {specificExam.submission?.graded_at 
-                    ? new Date(specificExam.submission.graded_at).toLocaleDateString()
-                    : 'N/A'}
-                </small>
-              </p>
-            </div>
-          )}
-
-          {/* Action Buttons */}
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '15px',
-            marginTop: '35px',
-            paddingTop: '25px',
-            borderTop: '1px solid #dee2e6'
-          }}>
-            <button 
-              onClick={() => navigate('/examinations')}
-              style={{
-                padding: '12px 20px',
-                backgroundColor: '#007bff',
-                color: 'white',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px',
-                fontSize: '14px',
-                width: '100%'
-              }}
-            >
-              <i className="fas fa-arrow-left"></i>
-              Back to Examinations
+          <div className="action-buttons-grid">
+            <button className="btn btn-primary" onClick={() => navigate('/examinations')}>
+              <i className="fas fa-arrow-left"></i> <span className="btn-text">Back to Examinations</span>
             </button>
-            <button 
-              onClick={() => window.print()}
-              style={{
-                padding: '12px 20px',
-                backgroundColor: '#28a745',
-                color: 'white',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px',
-                fontSize: '14px',
-                width: '100%'
-              }}
-            >
-              <i className="fas fa-print"></i>
-              Print This Result
+            <button className="btn btn-success" onClick={() => window.print()}>
+              <i className="fas fa-print"></i> <span className="btn-text">Print This Result</span>
             </button>
           </div>
         </div>
@@ -983,106 +585,47 @@ const Results = () => {
     );
   };
 
-  // Render general results view
   const renderGeneralResults = () => {
     if (loading) {
       return (
-        <div style={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          height: '300px'
-        }}>
-          <div style={{
-            width: '50px',
-            height: '50px',
-            border: '5px solid #f3f3f3',
-            borderTop: '5px solid #3498db',
-            borderRadius: '50%',
-            animation: 'spin 1s linear infinite'
-          }}></div>
+        <div className="loading-container">
+          <div className="spinner"></div>
+          <p className="loading-text">Loading results...</p>
         </div>
       );
     }
 
     if (error) {
       return (
-        <div style={{
-          padding: '20px',
-          backgroundColor: '#fee',
-          border: '1px solid #f99',
-          borderRadius: '8px',
-          margin: '20px 0',
-          textAlign: 'center'
-        }}>
-          <i className="fas fa-exclamation-triangle" style={{
-            fontSize: '48px',
-            color: '#dc3545',
-            marginBottom: '20px'
-          }}></i>
-          <p style={{ color: '#d33', marginBottom: '20px', fontSize: '16px' }}>
-            {error}
-          </p>
-          <button 
-            onClick={refreshResults}
-            style={{
-              padding: '10px 20px',
-              backgroundColor: '#007bff',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '14px',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px'
-            }}
-          >
-            <i className="fas fa-sync-alt"></i>
-            Try Again
+        <div className="error-container">
+          <i className="fas fa-exclamation-triangle"></i>
+          <p className="error-message">{error}</p>
+          <button className="btn btn-primary" onClick={refreshResults}>
+            <i className="fas fa-sync-alt"></i> <span className="btn-text">Try Again</span>
           </button>
         </div>
       );
     }
 
     return (
-      <div id="results-content">
-        {/* Summary Card */}
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '12px',
-          padding: '20px',
-          marginBottom: '25px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '20px'
-        }}>
-          <div style={{ width: '100%' }}>
-            <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '5px' }}>
-              Student Information
+      <div className="general-results-container">
+        {/* Student Info & CGPA Card */}
+        <div className="student-summary-card">
+          <div className="student-info">
+            <div className="student-name">{studentInfo?.full_name || 'Student Name'}</div>
+            <div className="student-details">
+              <span className="student-id">ID: {studentInfo?.student_id || 'N/A'}</span>
+              <span className="student-program">{studentInfo?.program || 'N/A'}</span>
             </div>
-            <div style={{ fontWeight: 'bold', fontSize: '18px', marginBottom: '5px' }}>
-              {studentInfo?.full_name || 'Student Name'}
-            </div>
-            <div style={{ fontSize: '14px', color: '#666', lineHeight: '1.5' }}>
-              ID: {studentInfo?.student_id || 'N/A'} <br />
-              {studentInfo?.program || 'N/A'} <br />
-              Year {studentInfo?.year_of_study || 'N/A'} Semester {studentInfo?.semester || 'N/A'}
+            <div className="student-academic">
+              Year {studentInfo?.year_of_study || 'N/A'} • Semester {studentInfo?.semester || 'N/A'}
             </div>
           </div>
           
-          <div style={{ 
-            backgroundColor: '#007bff',
-            color: 'white',
-            padding: '20px',
-            borderRadius: '8px',
-            textAlign: 'center',
-            width: '100%'
-          }}>
-            <div style={{ fontSize: '14px', marginBottom: '5px' }}>CUMULATIVE GPA</div>
-            <div style={{ fontSize: '32px', fontWeight: 'bold' }}>{cgpa.toFixed(2)}</div>
-            <div style={{ fontSize: '12px', opacity: 0.9, marginTop: '5px' }}>
+          <div className="cgpa-display">
+            <div className="cgpa-label">CUMULATIVE GPA</div>
+            <div className="cgpa-value">{cgpa.toFixed(2)}</div>
+            <div className="cgpa-classification">
               {cgpa >= 4.5 ? 'First Class' : 
                cgpa >= 3.5 ? 'Second Class Upper' : 
                cgpa >= 2.5 ? 'Second Class Lower' : 
@@ -1092,869 +635,1143 @@ const Results = () => {
         </div>
 
         {/* Controls */}
-        <div className="tabs" style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '15px',
-          marginBottom: '25px'
-        }}>
-          <div style={{ width: '100%' }}>
-            <div className="year-selector" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <label htmlFor="academic-year" style={{ 
-                fontWeight: '500',
-                color: '#495057'
-              }}>
-                Select Academic Year:
-              </label>
-              <div style={{ position: 'relative', width: '100%' }}>
-                <select 
-                  id="academic-year" 
-                  className="form-control"
-                  value={activeYear}
-                  onChange={(e) => setActiveYear(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '12px 40px 12px 15px',
-                    border: '2px solid #dee2e6',
-                    borderRadius: '6px',
-                    backgroundColor: 'white',
-                    fontSize: '14px',
-                    appearance: 'none',
-                    cursor: 'pointer'
-                  }}
-                >
-                  {Object.keys(resultsData).sort().map(yearKey => (
-                    <option key={yearKey} value={yearKey}>
-                      Year {resultsData[yearKey].year}
-                    </option>
-                  ))}
-                  {Object.keys(resultsData).length === 0 && (
-                    <option value="">No results available</option>
-                  )}
-                </select>
-                <div style={{
-                  position: 'absolute',
-                  right: '15px',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  pointerEvents: 'none',
-                  color: '#6c757d'
-                }}>
-                  ▼
-                </div>
+        <div className="controls-row">
+          <div className="year-selector">
+            <label htmlFor="academic-year">Select Academic Year:</label>
+            <div className="select-wrapper">
+              <select 
+                id="academic-year"
+                value={activeYear}
+                onChange={(e) => setActiveYear(e.target.value)}
+              >
+                {Object.keys(resultsData).sort().map(yearKey => (
+                  <option key={yearKey} value={yearKey}>
+                    Year {resultsData[yearKey].year}
+                  </option>
+                ))}
+                {Object.keys(resultsData).length === 0 && (
+                  <option value="">No results available</option>
+                )}
+              </select>
+              <div className="select-arrow">
+                <i className="fas fa-chevron-down"></i>
               </div>
             </div>
           </div>
           
-          <button 
-            id="export-pdf" 
-            className="export-button" 
-            onClick={exportToPDF}
-            style={{
-              padding: '12px 20px',
-              backgroundColor: '#dc3545',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px',
-              fontSize: '14px',
-              fontWeight: '500',
-              width: '100%'
-            }}
-          >
-            <i className="fas fa-file-pdf"></i>
-            Export Transcript
+          <button id="export-pdf" className="btn btn-danger" onClick={exportToPDF}>
+            <i className="fas fa-file-pdf"></i> <span className="btn-text">Export Transcript</span>
           </button>
         </div>
 
-        {/* Results Content */}
-        <div className="tab-content active">
-          {Object.keys(resultsData).length > 0 ? (
-            <div className="year-results">
-              {/* Year Summary */}
-              {resultsData[activeYear] && (
-                <div style={{
-                  backgroundColor: '#e8f4fc',
-                  borderRadius: '8px',
-                  padding: '15px',
-                  marginBottom: '25px',
-                  borderLeft: '4px solid #007bff'
-                }}>
-                  <div style={{ 
-                    display: 'flex', 
-                    flexDirection: 'column',
-                    gap: '10px'
-                  }}>
-                    <div>
-                      <h4 style={{ margin: '0 0 5px 0', color: '#0056b3', fontSize: '1.1rem' }}>
-                        Year {resultsData[activeYear].year} Academic Summary
-                      </h4>
-                      <div style={{ fontSize: '14px', color: '#666', lineHeight: '1.5' }}>
-                        Total Credits: {resultsData[activeYear].totalCredits} <br />
-                        Year GPA: {resultsData[activeYear].gpa.toFixed(2)} <br />
-                        Courses: {resultsData[activeYear].semester1.length + resultsData[activeYear].semester2.length}
-                      </div>
-                    </div>
-                    <div style={{
-                      backgroundColor: '#28a745',
-                      color: 'white',
-                      padding: '10px 16px',
-                      borderRadius: '6px',
-                      fontSize: '14px',
-                      fontWeight: 'bold',
-                      textAlign: 'center'
-                    }}>
-                      Year GPA: {resultsData[activeYear].gpa.toFixed(2)}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Semester 1 */}
-              <div style={{ marginBottom: '30px' }}>
-                <h3 style={{
-                  margin: '0 0 15px 0',
-                  color: '#333',
-                  paddingBottom: '10px',
-                  borderBottom: '2px solid #007bff',
-                  fontSize: '1.2rem'
-                }}>
-                  <i className="fas fa-calendar" style={{ marginRight: '10px', color: '#007bff' }}></i>
-                  Semester 1 Results
-                </h3>
-                
-                {resultsData[activeYear]?.semester1?.length > 0 ? (
-                  <div className="table-container" style={{
-                    overflowX: 'auto',
-                    borderRadius: '8px',
-                    border: '1px solid #dee2e6',
-                    WebkitOverflowScrolling: 'touch'
-                  }}>
-                    <table style={{
-                      width: '100%',
-                      borderCollapse: 'collapse',
-                      minWidth: '600px'
-                    }}>
-                      <thead>
-                        <tr style={{ 
-                          backgroundColor: '#f8f9fa',
-                          borderBottom: '2px solid #dee2e6'
-                        }}>
-                          <th style={{ 
-                            padding: '12px 10px',
-                            textAlign: 'left',
-                            fontWeight: '600',
-                            color: '#495057',
-                            borderRight: '1px solid #dee2e6',
-                            fontSize: '13px'
-                          }}>Course Code</th>
-                          <th style={{ 
-                            padding: '12px 10px',
-                            textAlign: 'left',
-                            fontWeight: '600',
-                            color: '#495057',
-                            borderRight: '1px solid #dee2e6',
-                            fontSize: '13px'
-                          }}>Course Name</th>
-                          <th style={{ 
-                            padding: '12px 10px',
-                            textAlign: 'left',
-                            fontWeight: '600',
-                            color: '#495057',
-                            borderRight: '1px solid #dee2e6',
-                            fontSize: '13px'
-                          }}>Credits</th>
-                          <th style={{ 
-                            padding: '12px 10px',
-                            textAlign: 'left',
-                            fontWeight: '600',
-                            color: '#495057',
-                            borderRight: '1px solid #dee2e6',
-                            fontSize: '13px'
-                          }}>Score (%)</th>
-                          <th style={{ 
-                            padding: '12px 10px',
-                            textAlign: 'left',
-                            fontWeight: '600',
-                            color: '#495057',
-                            borderRight: '1px solid #dee2e6',
-                            fontSize: '13px'
-                          }}>Grade</th>
-                          <th style={{ 
-                            padding: '12px 10px',
-                            textAlign: 'left',
-                            fontWeight: '600',
-                            color: '#495057',
-                            fontSize: '13px'
-                          }}>Grade Points</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {resultsData[activeYear].semester1.map((course, index) => (
-                          <tr 
-                            key={course.id || index} 
-                            style={{
-                              borderBottom: '1px solid #dee2e6',
-                              transition: 'background-color 0.2s'
-                            }}
-                          >
-                            <td style={{ 
-                              padding: '12px 10px',
-                              borderRight: '1px solid #dee2e6',
-                              fontWeight: '500',
-                              fontFamily: 'monospace',
-                              fontSize: '13px'
-                            }}>
-                              {course.courseCode}
-                              {course.isCore && (
-                                <span style={{
-                                  fontSize: '10px',
-                                  backgroundColor: '#ffc107',
-                                  color: '#212529',
-                                  padding: '1px 6px',
-                                  borderRadius: '10px',
-                                  marginLeft: '8px'
-                                }}>
-                                  CORE
-                                </span>
-                              )}
-                            </td>
-                            <td style={{ 
-                              padding: '12px 10px',
-                              borderRight: '1px solid #dee2e6',
-                              fontSize: '13px'
-                            }}>
-                              {course.courseName}
-                            </td>
-                            <td style={{ 
-                              padding: '12px 10px',
-                              borderRight: '1px solid #dee2e6',
-                              textAlign: 'center',
-                              fontWeight: '500',
-                              fontSize: '13px'
-                            }}>
-                              {course.credits}
-                            </td>
-                            <td style={{ 
-                              padding: '12px 10px',
-                              borderRight: '1px solid #dee2e6',
-                              textAlign: 'center',
-                              fontSize: '13px'
-                            }}>
-                              <div style={{
-                                display: 'inline-block',
-                                padding: '2px 8px',
-                                borderRadius: '20px',
-                                backgroundColor: course.score >= 50 ? '#d4edda' : '#f8d7da',
-                                color: course.score >= 50 ? '#155724' : '#721c24',
-                                fontWeight: '500',
-                                fontSize: '12px'
-                              }}>
-                                {course.score}%
-                              </div>
-                            </td>
-                            <td style={{ 
-                              padding: '12px 10px',
-                              borderRight: '1px solid #dee2e6',
-                              textAlign: 'center',
-                              fontSize: '13px'
-                            }}>
-                              <span style={{
-                                display: 'inline-block',
-                                padding: '4px 8px',
-                                borderRadius: '20px',
-                                backgroundColor: getGradeColor(course.grade),
-                                color: 'white',
-                                fontWeight: 'bold',
-                                fontSize: '13px',
-                                minWidth: '35px'
-                              }}>
-                                {course.grade}
-                              </span>
-                            </td>
-                            <td style={{ 
-                              padding: '12px 10px',
-                              textAlign: 'center',
-                              fontWeight: '500',
-                              fontSize: '13px'
-                            }}>
-                              {course.gpa.toFixed(2)}
-                            </td>
-                          </tr>
-                        ))}
-                        <tr style={{ 
-                          backgroundColor: '#f8f9fa',
-                          fontWeight: 'bold'
-                        }}>
-                          <td colSpan="3" style={{ padding: '15px 10px', textAlign: 'right', fontSize: '13px' }}>
-                            Semester 1 GPA:
-                          </td>
-                          <td style={{ padding: '15px 10px', textAlign: 'center', fontSize: '13px' }}>
-                            {calculateSemesterGPA(resultsData[activeYear]?.semester1).toFixed(2)}
-                          </td>
-                          <td colSpan="2" style={{ padding: '15px 10px', textAlign: 'center', color: '#28a745', fontSize: '13px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                              <i className="fas fa-chart-line"></i>
-                              <span>Semester Credits: {resultsData[activeYear]?.semester1.reduce((sum, course) => sum + (course.credits || 0), 0)}</span>
-                            </div>
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div style={{
-                    padding: '30px',
-                    textAlign: 'center',
-                    backgroundColor: '#f8f9fa',
-                    borderRadius: '8px',
-                    border: '2px dashed #dee2e6'
-                  }}>
-                    <i className="fas fa-clipboard-list" style={{
-                      fontSize: '40px',
-                      color: '#6c757d',
-                      marginBottom: '15px'
-                    }}></i>
-                    <p style={{ color: '#6c757d', fontSize: '14px', margin: '0' }}>
-                      No results available for Semester 1
-                    </p>
-                  </div>
-                )}
+        {/* Year Summary */}
+        {resultsData[activeYear] && (
+          <div className="year-summary">
+            <h4>Year {resultsData[activeYear].year} Academic Summary</h4>
+            <div className="summary-stats">
+              <div className="summary-stat">
+                <span className="stat-label">Total Credits:</span>
+                <span className="stat-value">{resultsData[activeYear].totalCredits}</span>
               </div>
+              <div className="summary-stat">
+                <span className="stat-label">Year GPA:</span>
+                <span className="stat-value">{resultsData[activeYear].gpa.toFixed(2)}</span>
+              </div>
+              <div className="summary-stat">
+                <span className="stat-label">Courses:</span>
+                <span className="stat-value">
+                  {resultsData[activeYear].semester1.length + resultsData[activeYear].semester2.length}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
 
-              {/* Semester 2 */}
-              <div>
-                <h3 style={{
-                  margin: '0 0 15px 0',
-                  color: '#333',
-                  paddingBottom: '10px',
-                  borderBottom: '2px solid #28a745',
-                  fontSize: '1.2rem'
-                }}>
-                  <i className="fas fa-calendar-alt" style={{ marginRight: '10px', color: '#28a745' }}></i>
-                  Semester 2 Results
-                </h3>
-                
-                {resultsData[activeYear]?.semester2?.length > 0 ? (
-                  <div className="table-container" style={{
-                    overflowX: 'auto',
-                    borderRadius: '8px',
-                    border: '1px solid #dee2e6',
-                    WebkitOverflowScrolling: 'touch'
-                  }}>
-                    <table style={{
-                      width: '100%',
-                      borderCollapse: 'collapse',
-                      minWidth: '600px'
-                    }}>
-                      <thead>
-                        <tr style={{ 
-                          backgroundColor: '#f8f9fa',
-                          borderBottom: '2px solid #dee2e6'
-                        }}>
-                          <th style={{ 
-                            padding: '12px 10px',
-                            textAlign: 'left',
-                            fontWeight: '600',
-                            color: '#495057',
-                            borderRight: '1px solid #dee2e6',
-                            fontSize: '13px'
-                          }}>Course Code</th>
-                          <th style={{ 
-                            padding: '12px 10px',
-                            textAlign: 'left',
-                            fontWeight: '600',
-                            color: '#495057',
-                            borderRight: '1px solid #dee2e6',
-                            fontSize: '13px'
-                          }}>Course Name</th>
-                          <th style={{ 
-                            padding: '12px 10px',
-                            textAlign: 'left',
-                            fontWeight: '600',
-                            color: '#495057',
-                            borderRight: '1px solid #dee2e6',
-                            fontSize: '13px'
-                          }}>Credits</th>
-                          <th style={{ 
-                            padding: '12px 10px',
-                            textAlign: 'left',
-                            fontWeight: '600',
-                            color: '#495057',
-                            borderRight: '1px solid #dee2e6',
-                            fontSize: '13px'
-                          }}>Score (%)</th>
-                          <th style={{ 
-                            padding: '12px 10px',
-                            textAlign: 'left',
-                            fontWeight: '600',
-                            color: '#495057',
-                            borderRight: '1px solid #dee2e6',
-                            fontSize: '13px'
-                          }}>Grade</th>
-                          <th style={{ 
-                            padding: '12px 10px',
-                            textAlign: 'left',
-                            fontWeight: '600',
-                            color: '#495057',
-                            fontSize: '13px'
-                          }}>Grade Points</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {resultsData[activeYear].semester2.map((course, index) => (
-                          <tr 
-                            key={course.id || index} 
-                            style={{
-                              borderBottom: '1px solid #dee2e6',
-                              transition: 'background-color 0.2s'
-                            }}
-                          >
-                            <td style={{ 
-                              padding: '12px 10px',
-                              borderRight: '1px solid #dee2e6',
-                              fontWeight: '500',
-                              fontFamily: 'monospace',
-                              fontSize: '13px'
-                            }}>
-                              {course.courseCode}
-                              {course.isCore && (
-                                <span style={{
-                                  fontSize: '10px',
-                                  backgroundColor: '#ffc107',
-                                  color: '#212529',
-                                  padding: '1px 6px',
-                                  borderRadius: '10px',
-                                  marginLeft: '8px'
-                                }}>
-                                  CORE
-                                </span>
-                              )}
-                            </td>
-                            <td style={{ 
-                              padding: '12px 10px',
-                              borderRight: '1px solid #dee2e6',
-                              fontSize: '13px'
-                            }}>
-                              {course.courseName}
-                            </td>
-                            <td style={{ 
-                              padding: '12px 10px',
-                              borderRight: '1px solid #dee2e6',
-                              textAlign: 'center',
-                              fontWeight: '500',
-                              fontSize: '13px'
-                            }}>
-                              {course.credits}
-                            </td>
-                            <td style={{ 
-                              padding: '12px 10px',
-                              borderRight: '1px solid #dee2e6',
-                              textAlign: 'center',
-                              fontSize: '13px'
-                            }}>
-                              <div style={{
-                                display: 'inline-block',
-                                padding: '2px 8px',
-                                borderRadius: '20px',
-                                backgroundColor: course.score >= 50 ? '#d4edda' : '#f8d7da',
-                                color: course.score >= 50 ? '#155724' : '#721c24',
-                                fontWeight: '500',
-                                fontSize: '12px'
-                              }}>
-                                {course.score}%
-                              </div>
-                            </td>
-                            <td style={{ 
-                              padding: '12px 10px',
-                              borderRight: '1px solid #dee2e6',
-                              textAlign: 'center',
-                              fontSize: '13px'
-                            }}>
-                              <span style={{
-                                display: 'inline-block',
-                                padding: '4px 8px',
-                                borderRadius: '20px',
-                                backgroundColor: getGradeColor(course.grade),
-                                color: 'white',
-                                fontWeight: 'bold',
-                                fontSize: '13px',
-                                minWidth: '35px'
-                              }}>
-                                {course.grade}
-                              </span>
-                            </td>
-                            <td style={{ 
-                              padding: '12px 10px',
-                              textAlign: 'center',
-                              fontWeight: '500',
-                              fontSize: '13px'
-                            }}>
-                              {course.gpa.toFixed(2)}
-                            </td>
-                          </tr>
-                        ))}
-                        <tr style={{ 
-                          backgroundColor: '#f8f9fa',
-                          fontWeight: 'bold'
-                        }}>
-                          <td colSpan="3" style={{ padding: '15px 10px', textAlign: 'right', fontSize: '13px' }}>
-                            Semester 2 GPA:
-                          </td>
-                          <td style={{ padding: '15px 10px', textAlign: 'center', fontSize: '13px' }}>
-                            {calculateSemesterGPA(resultsData[activeYear]?.semester2).toFixed(2)}
-                          </td>
-                          <td colSpan="2" style={{ padding: '15px 10px', textAlign: 'center', color: '#28a745', fontSize: '13px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                              <i className="fas fa-chart-line"></i>
-                              <span>Semester Credits: {resultsData[activeYear]?.semester2.reduce((sum, course) => sum + (course.credits || 0), 0)}</span>
-                            </div>
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div style={{
-                    padding: '30px',
-                    textAlign: 'center',
-                    backgroundColor: '#f8f9fa',
-                    borderRadius: '8px',
-                    border: '2px dashed #dee2e6'
-                  }}>
-                    <i className="fas fa-clipboard-list" style={{
-                      fontSize: '40px',
-                      color: '#6c757d',
-                      marginBottom: '15px'
-                    }}></i>
-                    <p style={{ color: '#6c757d', fontSize: '14px', margin: '0' }}>
-                      No results available for Semester 2
-                    </p>
-                  </div>
-                )}
+        {/* Semester 1 Results */}
+        <div className="semester-results">
+          <h3 className="semester-title">
+            <i className="fas fa-calendar"></i> Semester 1 Results
+          </h3>
+          
+          {resultsData[activeYear]?.semester1?.length > 0 ? (
+            <div className="results-table-container">
+              <div className="table-scroll-wrapper">
+                <table className="results-table">
+                  <thead>
+                    <tr>
+                      <th>Course Code</th>
+                      <th>Course Name</th>
+                      <th>Credits</th>
+                      <th>Score</th>
+                      <th>Grade</th>
+                      <th>Points</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {resultsData[activeYear].semester1.map((course, index) => (
+                      <tr key={course.id || index}>
+                        <td>
+                          <div className="course-code">
+                            {course.courseCode}
+                            {course.isCore && <span className="core-badge">CORE</span>}
+                          </div>
+                        </td>
+                        <td className="course-name">{course.courseName}</td>
+                        <td className="credits">{course.credits}</td>
+                        <td className="score">
+                          <span className={`score-badge ${course.score >= 50 ? 'pass' : 'fail'}`}>
+                            {course.score}%
+                          </span>
+                        </td>
+                        <td className="grade">
+                          <span className="grade-badge" style={{backgroundColor: getGradeColor(course.grade)}}>
+                            {course.grade}
+                          </span>
+                        </td>
+                        <td className="points">{course.gpa.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="semester-summary-footer">
+                <div className="summary-info">
+                  <i className="fas fa-chart-line"></i>
+                  <span>Credits: {resultsData[activeYear]?.semester1.reduce((sum, course) => sum + (course.credits || 0), 0)}</span>
+                </div>
+                <div className="gpa-display">
+                  Semester 1 GPA: <strong>{calculateSemesterGPA(resultsData[activeYear]?.semester1).toFixed(2)}</strong>
+                </div>
               </div>
             </div>
           ) : (
-            <div className="no-results" style={{
-              padding: '40px 20px',
-              textAlign: 'center',
-              backgroundColor: '#f8f9fa',
-              borderRadius: '8px'
-            }}>
-              <i className="fas fa-graduation-cap" style={{
-                fontSize: '48px',
-                color: '#dee2e6',
-                marginBottom: '20px'
-              }}></i>
-              <h3 style={{ color: '#6c757d', marginBottom: '15px', fontSize: '1.2rem' }}>
-                No Examination Results Available
-              </h3>
-              <p style={{ color: '#999', marginBottom: '25px', fontSize: '14px', lineHeight: '1.5' }}>
-                Your examination results will appear here once they have been processed and published by the examination office.
-              </p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', justifyContent: 'center', maxWidth: '300px', margin: '0 auto' }}>
-                <button 
-                  onClick={refreshResults}
-                  style={{
-                    padding: '12px 20px',
-                    backgroundColor: '#007bff',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px',
-                    fontSize: '14px',
-                    width: '100%'
-                  }}
-                >
-                  <i className="fas fa-sync-alt"></i>
-                  Check Again
-                </button>
-                <button 
-                  onClick={() => navigate('/courses')}
-                  style={{
-                    padding: '12px 20px',
-                    backgroundColor: '#6c757d',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px',
-                    fontSize: '14px',
-                    width: '100%'
-                  }}
-                >
-                  <i className="fas fa-book"></i>
-                  View Courses
-                </button>
-              </div>
+            <div className="no-results-message">
+              <i className="fas fa-clipboard-list"></i>
+              <p>No results available for Semester 1</p>
             </div>
           )}
         </div>
+
+        {/* Semester 2 Results */}
+        <div className="semester-results">
+          <h3 className="semester-title">
+            <i className="fas fa-calendar-alt"></i> Semester 2 Results
+          </h3>
+          
+          {resultsData[activeYear]?.semester2?.length > 0 ? (
+            <div className="results-table-container">
+              <div className="table-scroll-wrapper">
+                <table className="results-table">
+                  <thead>
+                    <tr>
+                      <th>Course Code</th>
+                      <th>Course Name</th>
+                      <th>Credits</th>
+                      <th>Score</th>
+                      <th>Grade</th>
+                      <th>Points</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {resultsData[activeYear].semester2.map((course, index) => (
+                      <tr key={course.id || index}>
+                        <td>
+                          <div className="course-code">
+                            {course.courseCode}
+                            {course.isCore && <span className="core-badge">CORE</span>}
+                          </div>
+                        </td>
+                        <td className="course-name">{course.courseName}</td>
+                        <td className="credits">{course.credits}</td>
+                        <td className="score">
+                          <span className={`score-badge ${course.score >= 50 ? 'pass' : 'fail'}`}>
+                            {course.score}%
+                          </span>
+                        </td>
+                        <td className="grade">
+                          <span className="grade-badge" style={{backgroundColor: getGradeColor(course.grade)}}>
+                            {course.grade}
+                          </span>
+                        </td>
+                        <td className="points">{course.gpa.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="semester-summary-footer">
+                <div className="summary-info">
+                  <i className="fas fa-chart-line"></i>
+                  <span>Credits: {resultsData[activeYear]?.semester2.reduce((sum, course) => sum + (course.credits || 0), 0)}</span>
+                </div>
+                <div className="gpa-display">
+                  Semester 2 GPA: <strong>{calculateSemesterGPA(resultsData[activeYear]?.semester2).toFixed(2)}</strong>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="no-results-message">
+              <i className="fas fa-clipboard-list"></i>
+              <p>No results available for Semester 2</p>
+            </div>
+          )}
+        </div>
+
+        {Object.keys(resultsData).length === 0 && (
+          <div className="empty-state">
+            <i className="fas fa-graduation-cap"></i>
+            <h3>No Examination Results Available</h3>
+            <p>Your examination results will appear here once they have been processed and published.</p>
+            <div className="empty-state-actions">
+              <button className="btn btn-primary" onClick={refreshResults}>
+                <i className="fas fa-sync-alt"></i> <span className="btn-text">Check Again</span>
+              </button>
+              <button className="btn btn-secondary" onClick={() => navigate('/courses')}>
+                <i className="fas fa-book"></i> <span className="btn-text">View Courses</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
 
   return (
-    <div className="content" style={{ padding: '15px' }}>
-      <div className="dashboard-header" style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '15px',
-        marginBottom: '20px'
-      }}>
-        <div style={{ width: '100%' }}>
-          <h2 style={{ margin: '0 0 5px 0', fontSize: '1.5rem' }}>
-            <i className="fas fa-chart-line" style={{ marginRight: '10px', color: '#007bff' }}></i>
+    <div className="results-page">
+      <div className="page-header">
+        <div className="header-content">
+          <h2 className="page-title">
+            <i className="fas fa-chart-line"></i>
             {specificExam ? 'Exam Results' : 'Examination Results'}
           </h2>
-          <div className="date-display" style={{ color: '#666', fontSize: '14px' }}>
+          <p className="page-subtitle">
             {studentInfo?.academic_year || 'Academic Year: 2024-2025'}
-          </div>
+          </p>
         </div>
         {!specificExam && (
-          <button 
-            onClick={refreshResults}
-            style={{
-              padding: '10px 20px',
-              backgroundColor: '#28a745',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px',
-              fontSize: '14px',
-              width: '100%'
-            }}
-          >
-            <i className="fas fa-sync-alt"></i>
-            Refresh
+          <button className="btn btn-success" onClick={refreshResults}>
+            <i className="fas fa-sync-alt"></i> <span className="btn-text">Refresh</span>
           </button>
         )}
       </div>
 
       {specificExam ? renderSpecificExamResults() : renderGeneralResults()}
 
-      <style>{`
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
+      <style jsx>{`
+        /* Base Styles */
+        .results-page {
+          min-height: 100vh;
+          background: #f5f7fa;
+          padding: 1rem;
         }
-        
-        tr:hover {
-          background-color: #f8f9fa !important;
+
+        /* Page Header */
+        .page-header {
+          display: flex;
+          flex-direction: column;
+          gap: 1rem;
+          margin-bottom: 2rem;
+          padding-bottom: 1rem;
+          border-bottom: 1px solid #e0e6ed;
         }
-        
-        select:focus {
-          outline: none;
-          border-color: #007bff !important;
-          box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25);
+
+        .header-content {
+          flex: 1;
         }
-        
-        button:hover:not(:disabled) {
-          opacity: 0.9;
-          transform: translateY(-1px);
+
+        .page-title {
+          font-size: 1.5rem;
+          font-weight: 700;
+          color: #1a202c;
+          margin: 0 0 0.25rem 0;
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+        }
+
+        .page-title i {
+          color: #4299e1;
+        }
+
+        .page-subtitle {
+          color: #718096;
+          font-size: 0.875rem;
+          margin: 0;
+        }
+
+        /* Buttons */
+        .btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 0.5rem;
+          padding: 0.625rem 1.25rem;
+          border: none;
+          border-radius: 0.375rem;
+          font-size: 0.875rem;
+          font-weight: 500;
+          cursor: pointer;
           transition: all 0.2s ease;
+          white-space: nowrap;
         }
-        
-        button:active:not(:disabled) {
-          transform: translateY(0);
+
+        .btn i {
+          font-size: 0.875rem;
         }
-        
-        .export-button:disabled {
-          opacity: 0.6;
-          cursor: not-allowed;
+
+        .btn-text {
+          display: inline;
         }
-        
-        /* Responsive styles */
-        @media (min-width: 576px) {
-          .dashboard-header {
-            flex-direction: row !important;
+
+        .btn:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .btn-primary {
+          background: #4299e1;
+          color: white;
+        }
+
+        .btn-secondary {
+          background: #a0aec0;
+          color: white;
+        }
+
+        .btn-success {
+          background: #48bb78;
+          color: white;
+        }
+
+        .btn-danger {
+          background: #f56565;
+          color: white;
+        }
+
+        /* Student Summary Card */
+        .student-summary-card {
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          border-radius: 0.75rem;
+          padding: 1.5rem;
+          margin-bottom: 1.5rem;
+          display: flex;
+          flex-direction: column;
+          gap: 1.5rem;
+        }
+
+        .student-info {
+          flex: 1;
+        }
+
+        .student-name {
+          font-size: 1.5rem;
+          font-weight: 700;
+          margin-bottom: 0.5rem;
+        }
+
+        .student-details {
+          display: flex;
+          flex-direction: column;
+          gap: 0.25rem;
+          font-size: 0.875rem;
+          opacity: 0.9;
+          margin-bottom: 0.5rem;
+        }
+
+        .student-id {
+          font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+        }
+
+        .student-academic {
+          font-size: 0.875rem;
+          opacity: 0.8;
+        }
+
+        .cgpa-display {
+          text-align: center;
+          padding: 1rem;
+          background: rgba(255, 255, 255, 0.1);
+          border-radius: 0.5rem;
+          backdrop-filter: blur(10px);
+        }
+
+        .cgpa-label {
+          font-size: 0.75rem;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          opacity: 0.8;
+          margin-bottom: 0.5rem;
+        }
+
+        .cgpa-value {
+          font-size: 2.5rem;
+          font-weight: 800;
+          line-height: 1;
+          margin-bottom: 0.25rem;
+        }
+
+        .cgpa-classification {
+          font-size: 0.75rem;
+          opacity: 0.9;
+        }
+
+        /* Controls Row - Fixed Dropdown */
+        .controls-row {
+          display: flex;
+          flex-direction: column;
+          gap: 1rem;
+          margin-bottom: 1.5rem;
+          position: relative;
+        }
+
+        .year-selector {
+          display: flex;
+          flex-direction: column;
+          gap: 0.5rem;
+          position: relative;
+          width: 100%;
+        }
+
+        .year-selector label {
+          font-size: 0.875rem;
+          font-weight: 500;
+          color: #4a5568;
+          white-space: nowrap;
+        }
+
+        .select-wrapper {
+          position: relative;
+          width: 100%;
+          max-width: 100%;
+        }
+
+        .year-selector select {
+          width: 100%;
+          padding: 0.625rem 1rem;
+          padding-right: 2.5rem;
+          border: 1px solid #e2e8f0;
+          border-radius: 0.375rem;
+          font-size: 0.875rem;
+          background: white;
+          color: #1a202c;
+          cursor: pointer;
+          appearance: none;
+          -webkit-appearance: none;
+          -moz-appearance: none;
+          transition: all 0.2s ease;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          max-width: 100%;
+          box-sizing: border-box;
+        }
+
+        /* Fix for iOS */
+        .year-selector select::-ms-expand {
+          display: none;
+        }
+
+        /* Fix dropdown positioning on mobile */
+        .year-selector select:focus {
+          outline: none;
+          border-color: #4299e1;
+          box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.15);
+          z-index: 100;
+        }
+
+        .select-arrow {
+          position: absolute;
+          right: 0.75rem;
+          top: 50%;
+          transform: translateY(-50%);
+          pointer-events: none;
+          color: #718096;
+          font-size: 0.875rem;
+        }
+
+        /* Fix dropdown options styling */
+        .year-selector select option {
+          padding: 0.75rem 1rem;
+          font-size: 0.875rem;
+          background: white;
+          color: #1a202c;
+          border: none;
+          white-space: normal;
+          word-wrap: break-word;
+          max-width: 100%;
+        }
+
+        .year-selector select option:hover,
+        .year-selector select option:focus,
+        .year-selector select option:checked {
+          background: #4299e1;
+          color: white;
+        }
+
+        /* Year Summary */
+        .year-summary {
+          background: white;
+          border-left: 4px solid #4299e1;
+          padding: 1rem;
+          margin-bottom: 1.5rem;
+          border-radius: 0 0.375rem 0.375rem 0;
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .year-summary h4 {
+          font-size: 1rem;
+          font-weight: 600;
+          color: #2d3748;
+          margin: 0 0 0.75rem 0;
+        }
+
+        .summary-stats {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+          gap: 1rem;
+        }
+
+        .summary-stat {
+          display: flex;
+          flex-direction: column;
+          gap: 0.25rem;
+        }
+
+        .stat-label {
+          font-size: 0.75rem;
+          color: #718096;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+
+        .stat-value {
+          font-size: 1.125rem;
+          font-weight: 600;
+          color: #2d3748;
+        }
+
+        /* Semester Results */
+        .semester-results {
+          background: white;
+          border-radius: 0.75rem;
+          padding: 1.5rem;
+          margin-bottom: 1.5rem;
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .semester-title {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          font-size: 1.125rem;
+          font-weight: 600;
+          color: #2d3748;
+          margin: 0 0 1rem 0;
+        }
+
+        .semester-title i {
+          color: #4299e1;
+        }
+
+        /* Results Table */
+        .results-table-container {
+          overflow: hidden;
+        }
+
+        .table-scroll-wrapper {
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+          margin: 0 -1.5rem;
+          padding: 0 1.5rem;
+        }
+
+        .results-table {
+          width: 100%;
+          min-width: 600px;
+          border-collapse: separate;
+          border-spacing: 0;
+        }
+
+        .results-table thead {
+          background: #f7fafc;
+        }
+
+        .results-table th {
+          padding: 0.75rem 1rem;
+          font-size: 0.75rem;
+          font-weight: 600;
+          color: #4a5568;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          text-align: left;
+          border-bottom: 2px solid #e2e8f0;
+          white-space: nowrap;
+        }
+
+        .results-table td {
+          padding: 1rem;
+          font-size: 0.875rem;
+          color: #4a5568;
+          border-bottom: 1px solid #e2e8f0;
+        }
+
+        .results-table tbody tr:hover {
+          background: #f7fafc;
+        }
+
+        .course-code {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+          font-weight: 500;
+          color: #2d3748;
+        }
+
+        .core-badge {
+          background: #f6e05e;
+          color: #744210;
+          padding: 0.125rem 0.5rem;
+          border-radius: 1rem;
+          font-size: 0.625rem;
+          font-weight: 600;
+          white-space: nowrap;
+        }
+
+        .score-badge {
+          display: inline-block;
+          padding: 0.25rem 0.75rem;
+          border-radius: 1rem;
+          font-size: 0.75rem;
+          font-weight: 500;
+          white-space: nowrap;
+        }
+
+        .score-badge.pass {
+          background: #c6f6d5;
+          color: #22543d;
+        }
+
+        .score-badge.fail {
+          background: #fed7d7;
+          color: #742a2a;
+        }
+
+        .grade-badge {
+          display: inline-block;
+          padding: 0.375rem 0.75rem;
+          border-radius: 1rem;
+          color: white;
+          font-size: 0.75rem;
+          font-weight: 600;
+          min-width: 2.5rem;
+          text-align: center;
+          white-space: nowrap;
+        }
+
+        .semester-summary-footer {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 1rem;
+          margin-top: 1rem;
+          padding-top: 1rem;
+          border-top: 1px solid #e2e8f0;
+        }
+
+        .summary-info {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          color: #48bb78;
+          font-size: 0.875rem;
+        }
+
+        .gpa-display {
+          font-size: 0.875rem;
+          color: #4a5568;
+        }
+
+        .gpa-display strong {
+          color: #2d3748;
+          font-size: 1rem;
+        }
+
+        /* Empty States */
+        .loading-container {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: 4rem 2rem;
+          text-align: center;
+        }
+
+        .spinner {
+          width: 3rem;
+          height: 3rem;
+          border: 3px solid #e2e8f0;
+          border-top-color: #4299e1;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+          margin-bottom: 1rem;
+        }
+
+        .loading-text {
+          color: #718096;
+          font-size: 0.875rem;
+        }
+
+        .error-container {
+          text-align: center;
+          padding: 3rem 1.5rem;
+          background: #fff5f5;
+          border-radius: 0.75rem;
+          border: 1px solid #fed7d7;
+        }
+
+        .error-container i {
+          font-size: 2.5rem;
+          color: #f56565;
+          margin-bottom: 1rem;
+        }
+
+        .error-message {
+          color: #c53030;
+          margin-bottom: 1.5rem;
+          font-size: 0.875rem;
+          line-height: 1.5;
+        }
+
+        .no-results-message {
+          text-align: center;
+          padding: 2rem;
+          background: #f7fafc;
+          border: 2px dashed #cbd5e0;
+          border-radius: 0.5rem;
+        }
+
+        .no-results-message i {
+          font-size: 2rem;
+          color: #a0aec0;
+          margin-bottom: 0.75rem;
+        }
+
+        .no-results-message p {
+          color: #718096;
+          margin: 0;
+          font-size: 0.875rem;
+        }
+
+        .empty-state {
+          text-align: center;
+          padding: 3rem 1.5rem;
+          background: white;
+          border-radius: 0.75rem;
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .empty-state i {
+          font-size: 3rem;
+          color: #a0aec0;
+          margin-bottom: 1.5rem;
+        }
+
+        .empty-state h3 {
+          color: #2d3748;
+          font-size: 1.25rem;
+          margin-bottom: 0.75rem;
+        }
+
+        .empty-state p {
+          color: #718096;
+          margin-bottom: 2rem;
+          font-size: 0.875rem;
+          line-height: 1.6;
+          max-width: 28rem;
+          margin-left: auto;
+          margin-right: auto;
+        }
+
+        .empty-state-actions {
+          display: flex;
+          flex-direction: column;
+          gap: 0.75rem;
+        }
+
+        /* Specific Exam Results */
+        .specific-exam-container {
+          display: flex;
+          flex-direction: column;
+          gap: 1.5rem;
+        }
+
+        .performance-summary {
+          background: white;
+          border-radius: 0.75rem;
+          padding: 1.5rem;
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .section-title {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          font-size: 1.125rem;
+          font-weight: 600;
+          color: #2d3748;
+          margin: 0 0 1.5rem 0;
+        }
+
+        .section-title i {
+          color: #4299e1;
+        }
+
+        .stats-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 1rem;
+          margin-bottom: 1.5rem;
+        }
+
+        .stat-item {
+          text-align: center;
+          padding: 1rem;
+          background: #f7fafc;
+          border-radius: 0.5rem;
+        }
+
+        .stat-label {
+          font-size: 0.75rem;
+          color: #718096;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          margin-bottom: 0.5rem;
+        }
+
+        .stat-value {
+          font-size: 1.5rem;
+          font-weight: 700;
+          color: #2d3748;
+        }
+
+        .text-success {
+          color: #48bb78 !important;
+        }
+
+        .text-primary {
+          color: #4299e1 !important;
+        }
+
+        .progress-section {
+          margin-top: 1.5rem;
+        }
+
+        .progress-header {
+          display: flex;
+          justify-content: space-between;
+          margin-bottom: 0.5rem;
+          font-size: 0.875rem;
+          color: #4a5568;
+        }
+
+        .progress-bar {
+          height: 0.75rem;
+          background: #edf2f7;
+          border-radius: 0.375rem;
+          overflow: hidden;
+        }
+
+        .progress-fill {
+          height: 100%;
+          border-radius: 0.375rem;
+          transition: width 0.5s ease;
+        }
+
+        .exam-details {
+          background: white;
+          border-radius: 0.75rem;
+          padding: 1.5rem;
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .details-grid {
+          display: flex;
+          flex-direction: column;
+          gap: 1.5rem;
+          margin-bottom: 1.5rem;
+        }
+
+        .detail-section h5 {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          font-size: 1rem;
+          font-weight: 600;
+          color: #2d3748;
+          margin: 0 0 1rem 0;
+        }
+
+        .detail-item {
+          display: flex;
+          flex-direction: column;
+          gap: 0.25rem;
+          margin-bottom: 0.75rem;
+        }
+
+        .detail-label {
+          font-size: 0.75rem;
+          color: #718096;
+          font-weight: 500;
+        }
+
+        .detail-value {
+          font-size: 0.875rem;
+          color: #4a5568;
+        }
+
+        .status-badge {
+          display: inline-block;
+          padding: 0.25rem 0.75rem;
+          border-radius: 1rem;
+          font-size: 0.75rem;
+          font-weight: 600;
+          margin-top: 0.25rem;
+        }
+
+        .status-badge.graded {
+          background: #c6f6d5;
+          color: #22543d;
+        }
+
+        .status-badge.pending {
+          background: #fed7d7;
+          color: #742a2a;
+        }
+
+        .feedback-section {
+          margin-top: 1.5rem;
+          padding: 1rem;
+          background: #ebf8ff;
+          border-radius: 0.5rem;
+          border-left: 4px solid #4299e1;
+        }
+
+        .feedback-section h5 {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          font-size: 1rem;
+          font-weight: 600;
+          color: #2d3748;
+          margin: 0 0 0.75rem 0;
+        }
+
+        .feedback-text {
+          color: #4a5568;
+          font-size: 0.875rem;
+          line-height: 1.6;
+          margin: 0;
+        }
+
+        .action-buttons-grid {
+          display: flex;
+          flex-direction: column;
+          gap: 0.75rem;
+          margin-top: 1.5rem;
+          padding-top: 1.5rem;
+          border-top: 1px solid #e2e8f0;
+        }
+
+        /* Media Queries */
+        @media (min-width: 640px) {
+          .results-page {
+            padding: 1.5rem;
+          }
+
+          .page-title {
+            font-size: 1.75rem;
+          }
+
+          .student-summary-card {
+            flex-direction: row;
+            align-items: center;
+            padding: 2rem;
+          }
+
+          .student-details {
+            flex-direction: row;
+            gap: 0.75rem;
+          }
+
+          .controls-row {
+            flex-direction: row;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+          }
+
+          .year-selector {
+            flex-direction: row;
+            align-items: center;
+            gap: 0.75rem;
+            flex: 1;
+            min-width: 0; /* Prevents flex item overflow */
+          }
+
+          .year-selector label {
+            flex-shrink: 0; /* Prevents label from shrinking */
+          }
+
+          .select-wrapper {
+            max-width: 200px;
+            min-width: 150px;
+          }
+
+          .empty-state-actions {
+            flex-direction: row;
+            justify-content: center;
+          }
+
+          .action-buttons-grid {
+            flex-direction: row;
+          }
+
+          .btn-text {
+            display: inline;
+          }
+
+          .stats-grid {
+            grid-template-columns: repeat(4, 1fr);
+          }
+
+          .details-grid {
+            flex-direction: row;
+          }
+
+          .details-grid > * {
+            flex: 1;
+          }
+
+          .semester-summary-footer {
+            flex-direction: row;
             justify-content: space-between;
             align-items: center;
           }
-          
-          .dashboard-header button {
-            width: auto !important;
-          }
-          
-          .tabs {
-            flex-direction: row !important;
-            align-items: center;
-          }
-          
-          .tabs .year-selector {
-            flex-direction: row !important;
-            align-items: center;
-          }
-          
-          .tabs .export-button {
-            width: auto !important;
-            min-width: 180px;
-          }
-          
-          #specific-exam-results .dashboard-header > div:last-child {
-            flex-direction: row !important;
-            justify-content: flex-end;
-          }
-          
-          #specific-exam-results .dashboard-header button {
-            width: auto !important;
-          }
-          
-          #specific-exam-results .exam-details-section > div {
-            grid-template-columns: 1fr 1fr !important;
-          }
-          
-          #specific-exam-results .action-buttons {
-            flex-direction: row !important;
-          }
-          
-          #specific-exam-results .action-buttons button {
-            width: auto !important;
-          }
-          
-          #results-content .summary-card {
-            flex-direction: row !important;
-            align-items: center;
-          }
-          
-          #results-content .summary-card > div:last-child {
-            width: auto !important;
-            min-width: 180px;
-          }
-          
-          .no-results .action-buttons-container {
-            flex-direction: row !important;
-            max-width: none !important;
-          }
-          
-          .no-results .action-buttons-container button {
-            width: auto !important;
+
+          .action-buttons {
+            display: flex;
+            gap: 0.75rem;
           }
         }
-        
+
         @media (min-width: 768px) {
-          .content {
-            padding: 25px !important;
+          .page-header {
+            flex-direction: row;
+            align-items: center;
+            justify-content: space-between;
           }
-          
-          .dashboard-header h2 {
-            font-size: 1.75rem !important;
+
+          .student-name {
+            font-size: 1.75rem;
           }
-          
-          #specific-exam-results .performance-summary-grid {
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)) !important;
+
+          .cgpa-value {
+            font-size: 3rem;
           }
-          
-          #specific-exam-results .exam-details-section {
-            padding: 30px !important;
+
+          .summary-stats {
+            grid-template-columns: repeat(3, auto);
+            gap: 2rem;
           }
-          
-          #results-content .summary-card {
-            padding: 25px !important;
+
+          .detail-item {
+            flex-direction: row;
+            gap: 0.5rem;
           }
-          
-          #results-content .summary-card > div:first-child h3 {
-            font-size: 20px !important;
+
+          .detail-label {
+            min-width: 6rem;
           }
-          
-          table th, table td {
-            padding: 15px 12px !important;
-          }
-        }
-        
-        @media (min-width: 992px) {
-          .content {
-            padding: 30px !important;
-          }
-          
-          #specific-exam-results .performance-summary-grid {
-            grid-template-columns: repeat(4, 1fr) !important;
-          }
-          
-          #results-content .summary-card > div:last-child {
-            min-width: 200px;
+
+          .select-wrapper {
+            max-width: 250px;
           }
         }
-        
-        @media (min-width: 1200px) {
-          .content {
-            max-width: 1400px;
+
+        @media (min-width: 1024px) {
+          .results-page {
+            padding: 2rem;
+            max-width: 1200px;
             margin: 0 auto;
           }
-          
-          #specific-exam-results .exam-details-section {
-            padding: 40px !important;
+
+          .page-title {
+            font-size: 2rem;
           }
-          
-          #results-content .summary-card {
-            padding: 30px !important;
+
+          .student-summary-card {
+            padding: 2.5rem;
           }
-          
-          table th, table td {
-            padding: 15px !important;
-            font-size: 14px !important;
+
+          .semester-results {
+            padding: 2rem;
           }
-        }
-        
-        @media (max-width: 575px) {
-          table {
-            font-size: 12px;
+
+          .performance-summary,
+          .exam-details {
+            padding: 2rem;
           }
-          
-          table th, table td {
-            padding: 8px 6px !important;
-          }
-          
-          .year-summary h4 {
-            font-size: 1rem !important;
-          }
-          
-          .semester-header {
-            font-size: 1.1rem !important;
-          }
-          
-          .performance-summary-grid > div div:first-child {
-            font-size: 11px !important;
-          }
-          
-          .performance-summary-grid > div div:last-child {
-            font-size: 20px !important;
+
+          .select-wrapper {
+            max-width: 300px;
           }
         }
-        
+
+        /* Animations */
+        @keyframes spin {
+          to {
+            transform: rotate(360deg);
+          }
+        }
+
+        /* Print Styles */
         @media print {
-          .dashboard-header button,
-          .tabs select,
-          .export-button,
-          .no-print {
+          .btn, .no-print {
             display: none !important;
           }
-          
-          .content {
-            padding: 0 !important;
+
+          .results-page {
+            padding: 0;
+            background: white;
           }
-          
+
+          .student-summary-card {
+            background: none;
+            color: black;
+            border: 1px solid #ddd;
+          }
+
+          .semester-results,
+          .performance-summary,
+          .exam-details {
+            box-shadow: none;
+            border: 1px solid #ddd;
+          }
+
           table {
-            break-inside: avoid;
+                break-inside: avoid;
           }
-          
+
           h2, h3, h4 {
             break-after: avoid;
+          }
+
+          .table-scroll-wrapper {
+            overflow: visible;
+            margin: 0;
+            padding: 0;
           }
         }
       `}</style>
