@@ -14,43 +14,20 @@ const StudentLayout = () => {
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [studentData, setStudentData] = useState(null);
-  const [notifications, setNotifications] = useState([
-    {
-      id: 1,
-      title: 'New Assignment Posted',
-      message: 'Machine Learning Lab assignment is now available',
-      time: '2 hours ago',
-      read: false,
-      type: 'assignment'
-    },
-    {
-      id: 2,
-      title: 'Lecture Reminder',
-      message: 'Internet of Things lecture starts in 30 minutes',
-      time: '1 day ago',
-      read: false,
-      type: 'lecture'
-    },
-    {
-      id: 3,
-      title: 'Payment Due',
-      message: 'Semester fees payment deadline is approaching',
-      time: '2 days ago',
-      read: true,
-      type: 'finance'
-    }
-  ]);
+  const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [logoutProgress, setLogoutProgress] = useState(0);
   const [isLoadingUser, setIsLoadingUser] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
+  const [isLoadingNotifications, setIsLoadingNotifications] = useState(false);
 
   const notificationRef = useRef(null);
   const bellIconRef = useRef(null);
   const logoutModalRef = useRef(null);
   const logoutProgressRef = useRef(null);
   const mobileMenuRef = useRef(null);
+  const layoutContainerRef = useRef(null);
 
   const menuItems = [
     { id: 'dashboard', label: 'Home', icon: 'fas fa-home', path: '/dashboard' },
@@ -65,6 +42,11 @@ const StudentLayout = () => {
     { id: 'chatbot', label: 'Student Assistant', icon: 'fas fa-robot', path: '/chatbot' },
     { id: 'settings', label: 'Settings', icon: 'fas fa-cog', path: '/settings' },
   ];
+
+  // Check if current path is active
+  const isActive = (path) => {
+    return location.pathname === path;
+  };
 
   // Check mobile on mount and resize
   useEffect(() => {
@@ -129,7 +111,175 @@ const StudentLayout = () => {
     }
   }, [user]);
 
-  // Initialize user data
+  // Fetch notifications from Supabase
+  const fetchNotifications = useCallback(async () => {
+    try {
+      setIsLoadingNotifications(true);
+      
+      if (!studentData?.student_id && !user?.studentId) {
+        console.log('No student ID available for fetching notifications');
+        setIsLoadingNotifications(false);
+        return;
+      }
+
+      const studentId = studentData?.student_id || user?.studentId;
+      
+      console.log('🔔 Fetching notifications for student:', studentId);
+      
+      const { data: notificationsData, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('student_id', studentId)
+        .order('created_at', { ascending: false })
+        .limit(20);
+
+      if (error) {
+        console.error('Error fetching notifications:', error);
+        // Set empty array as fallback
+        setNotifications([]);
+        return;
+      }
+
+      if (notificationsData) {
+        console.log(`📨 Loaded ${notificationsData.length} notifications`);
+        
+        const formattedNotifications = notificationsData.map(notification => ({
+          id: notification.id,
+          title: notification.title,
+          message: notification.message,
+          time: formatTimeAgo(notification.created_at),
+          read: notification.is_read,
+          type: notification.type || 'general',
+          rawData: notification
+        }));
+        
+        setNotifications(formattedNotifications);
+      }
+    } catch (error) {
+      console.error('Error in fetchNotifications:', error);
+      // Set empty array as fallback
+      setNotifications([]);
+    } finally {
+      setIsLoadingNotifications(false);
+    }
+  }, [studentData, user]);
+
+  // Format time ago
+  const formatTimeAgo = (timestamp) => {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const seconds = Math.floor((now - date) / 1000);
+    
+    if (seconds < 60) return `${seconds} seconds ago`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
+    if (seconds < 604800) return `${Math.floor(seconds / 86400)} days ago`;
+    
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  // Mark notification as read
+  const markNotificationAsRead = async (notificationId) => {
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('id', notificationId);
+
+      if (error) {
+        console.error('Error marking notification as read:', error);
+        return false;
+      }
+
+      // Update local state
+      setNotifications(prev => 
+        prev.map(notif => 
+          notif.id === notificationId ? { ...notif, read: true } : notif
+        )
+      );
+      
+      return true;
+    } catch (error) {
+      console.error('Error in markNotificationAsRead:', error);
+      return false;
+    }
+  };
+
+  // Mark all notifications as read
+  const markAllNotificationsAsRead = async () => {
+    try {
+      if (!studentData?.student_id && !user?.studentId) return;
+      
+      const studentId = studentData?.student_id || user?.studentId;
+      
+      const { error } = await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('student_id', studentId)
+        .eq('is_read', false);
+
+      if (error) {
+        console.error('Error marking all notifications as read:', error);
+        return;
+      }
+
+      // Update local state
+      setNotifications(prev => 
+        prev.map(notif => ({ ...notif, read: true }))
+      );
+    } catch (error) {
+      console.error('Error in markAllNotificationsAsRead:', error);
+    }
+  };
+
+  // Delete notification
+  const deleteNotification = async (notificationId) => {
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .delete()
+        .eq('id', notificationId);
+
+      if (error) {
+        console.error('Error deleting notification:', error);
+        return false;
+      }
+
+      // Update local state
+      setNotifications(prev => prev.filter(notif => notif.id !== notificationId));
+      return true;
+    } catch (error) {
+      console.error('Error in deleteNotification:', error);
+      return false;
+    }
+  };
+
+  // Delete all notifications
+  const deleteAllNotifications = async () => {
+    try {
+      if (!studentData?.student_id && !user?.studentId) return;
+      
+      const studentId = studentData?.student_id || user?.studentId;
+      
+      const { error } = await supabase
+        .from('notifications')
+        .delete()
+        .eq('student_id', studentId);
+
+      if (error) {
+        console.error('Error deleting all notifications:', error);
+        return;
+      }
+
+      // Update local state
+      setNotifications([]);
+      setShowNotifications(false);
+    } catch (error) {
+      console.error('Error in deleteAllNotifications:', error);
+    }
+  };
+
+  // Initialize user data and notifications
   useEffect(() => {
     if (!authLoading && user) {
       setIsLoadingUser(true);
@@ -144,11 +294,115 @@ const StudentLayout = () => {
     }
   }, [user, authLoading, fetchStudentData, navigate, location]);
 
+  // Fetch notifications when student data is loaded
+  useEffect(() => {
+    if (studentData || user?.studentId) {
+      fetchNotifications();
+    }
+  }, [studentData, user?.studentId, fetchNotifications]);
+
+  // Set up real-time subscription for notifications
+  useEffect(() => {
+    if (!studentData?.student_id && !user?.studentId) return;
+    
+    const studentId = studentData?.student_id || user?.studentId;
+    
+    console.log('🔔 Setting up real-time notifications for student:', studentId);
+    
+    const channel = supabase
+      .channel(`notifications:${studentId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notifications',
+          filter: `student_id=eq.${studentId}`
+        },
+        (payload) => {
+          console.log('🔔 New notification received:', payload.new);
+          
+          const newNotification = {
+            id: payload.new.id,
+            title: payload.new.title,
+            message: payload.new.message,
+            time: formatTimeAgo(payload.new.created_at),
+            read: payload.new.is_read,
+            type: payload.new.type || 'general',
+            rawData: payload.new
+          };
+          
+          setNotifications(prev => [newNotification, ...prev]);
+          
+          // Show desktop notification if browser supports it
+          if (Notification.permission === 'granted') {
+            new Notification(newNotification.title, {
+              body: newNotification.message,
+              icon: '/images/badge.png',
+              tag: 'student-notification'
+            });
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'notifications',
+          filter: `student_id=eq.${studentId}`
+        },
+        (payload) => {
+          console.log('🔔 Notification updated:', payload.new);
+          
+          setNotifications(prev =>
+            prev.map(notif =>
+              notif.id === payload.new.id
+                ? {
+                    ...notif,
+                    read: payload.new.is_read,
+                    title: payload.new.title,
+                    message: payload.new.message
+                  }
+                : notif
+            )
+          );
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'notifications',
+          filter: `student_id=eq.${studentId}`
+        },
+        (payload) => {
+          console.log('🔔 Notification deleted:', payload.old.id);
+          
+          setNotifications(prev => prev.filter(notif => notif.id !== payload.old.id));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      console.log('🔔 Cleaning up real-time notifications subscription');
+      supabase.removeChannel(channel);
+    };
+  }, [studentData?.student_id, user?.studentId]);
+
   // Update unread count
   useEffect(() => {
     const unread = notifications.filter(n => !n.read).length;
     setUnreadCount(unread);
   }, [notifications]);
+
+  // Request notification permission on mount
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, []);
 
   // Click outside handlers
   useEffect(() => {
@@ -280,51 +534,55 @@ const StudentLayout = () => {
     setShowNotifications(!showNotifications);
   };
 
-  const handleNotificationItemClick = (notificationId) => {
-    setNotifications(prev => 
-      prev.map(notif => 
-        notif.id === notificationId ? { ...notif, read: true } : notif
-      )
-    );
+  const handleNotificationItemClick = async (notificationId) => {
+    await markNotificationAsRead(notificationId);
     setShowNotifications(false);
-  };
-
-  const markAllAsRead = () => {
-    setNotifications(prev => 
-      prev.map(notif => ({ ...notif, read: true }))
-    );
-  };
-
-  const clearAllNotifications = () => {
-    setNotifications([]);
-    setShowNotifications(false);
-  };
-
-  const isActive = (path) => {
-    return location.pathname === path;
   };
 
   const getNotificationIcon = (type) => {
-    switch(type) {
+    switch(type.toLowerCase()) {
       case 'assignment':
+      case 'coursework':
         return 'fas fa-file-alt';
       case 'lecture':
+      case 'class':
         return 'fas fa-video';
       case 'finance':
+      case 'payment':
         return 'fas fa-money-bill-wave';
+      case 'exam':
+      case 'examination':
+      case 'result':
+        return 'fas fa-clipboard-list';
+      case 'timetable':
+        return 'fas fa-calendar-alt';
+      case 'announcement':
+        return 'fas fa-bullhorn';
       default:
         return 'fas fa-bell';
     }
   };
 
   const getNotificationColor = (type) => {
-    switch(type) {
+    switch(type.toLowerCase()) {
       case 'assignment':
+      case 'coursework':
         return '#4CAF50';
       case 'lecture':
+      case 'class':
         return '#2196F3';
       case 'finance':
+      case 'payment':
         return '#FF9800';
+      case 'exam':
+      case 'examination':
+        return '#f72585';
+      case 'result':
+        return '#9C27B0';
+      case 'timetable':
+        return '#00BCD4';
+      case 'announcement':
+        return '#FF5722';
       default:
         return '#9C27B0';
     }
@@ -614,13 +872,16 @@ const StudentLayout = () => {
         </div>
       )}
 
-      {/* Main Layout Container */}
+      {/* Main Layout Container - FIXED for dropdown positioning */}
       <div 
+        ref={layoutContainerRef}
         className="layout-container"
         style={{
           display: 'flex',
           flexDirection: 'column',
           minHeight: '100vh',
+          position: 'relative', // Added for proper dropdown positioning
+          overflow: 'visible !important', // Ensure dropdown can show outside
           opacity: isLoggingOut ? '0.5' : '1',
           pointerEvents: isLoggingOut ? 'none' : 'auto',
           transition: 'opacity 0.3s ease',
@@ -746,7 +1007,8 @@ const StudentLayout = () => {
             <div style={{ 
               display: 'flex', 
               alignItems: 'center', 
-              gap: isMobile ? '1rem' : '1.5rem' 
+              gap: isMobile ? '1rem' : '1.5rem',
+              position: 'relative', // Added for dropdown positioning
             }}>
               <div 
                 ref={bellIconRef}
@@ -883,219 +1145,301 @@ const StudentLayout = () => {
               )}
             </div>
           </div>
+        </header>
 
-          {/* Notifications Dropdown - Mobile Responsive */}
-          {showNotifications && (
-            <div 
-              ref={notificationRef}
-              className="notification-dropdown"
-              style={{
-                position: 'absolute',
-                top: isMobile ? '60px' : '70px',
-                right: isMobile ? '0.5rem' : '2rem',
-                width: isMobile ? 'calc(100% - 1rem)' : '350px',
-                maxWidth: isMobile ? '400px' : '350px',
-                backgroundColor: 'white',
-                borderRadius: '8px',
-                boxShadow: '0 5px 15px rgba(0,0,0,0.1)',
-                zIndex: 1000,
-                border: '1px solid #e9ecef',
-                overflow: 'hidden',
-                maxHeight: isMobile ? '70vh' : '400px',
-              }}
-            >
-              <div style={{
-                padding: '15px',
-                borderBottom: '1px solid #eee',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                backgroundColor: '#f8f9fa',
-              }}>
-                <div>
-                  <h4 style={{ 
-                    margin: 0, 
-                    fontSize: isMobile ? '15px' : '16px', 
-                    color: '#212529' 
-                  }}>
-                    Notifications
-                  </h4>
-                  <p style={{ 
-                    margin: '5px 0 0 0', 
-                    fontSize: isMobile ? '11px' : '12px', 
-                    color: '#6c757d' 
-                  }}>
-                    {unreadCount} unread {unreadCount === 1 ? 'message' : 'messages'}
-                  </p>
-                </div>
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  {unreadCount > 0 && (
-                    <button
-                      onClick={markAllAsRead}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        color: '#3498db',
-                        cursor: 'pointer',
-                        fontSize: isMobile ? '11px' : '12px',
-                        padding: '4px 8px',
-                        borderRadius: '4px',
-                        minHeight: 'auto !important',
-                      }}
-                    >
-                      Mark all as read
-                    </button>
-                  )}
-                  {notifications.length > 0 && (
-                    <button
-                      onClick={clearAllNotifications}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        color: '#e74c3c',
-                        cursor: 'pointer',
-                        fontSize: isMobile ? '11px' : '12px',
-                        padding: '4px 8px',
-                        borderRadius: '4px',
-                        minHeight: 'auto !important',
-                      }}
-                    >
-                      Clear all
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <div style={{ 
-                maxHeight: isMobile ? 'calc(70vh - 80px)' : '320px', 
-                overflowY: 'auto' 
-              }}>
-                {notifications.length === 0 ? (
-                  <div style={{
-                    padding: '30px 20px',
-                    textAlign: 'center',
-                    color: '#6c757d',
-                  }}>
-                    <i className="fas fa-bell-slash" style={{ 
-                      fontSize: isMobile ? '1.5rem' : '2rem', 
-                      marginBottom: '10px', 
-                      opacity: 0.5 
-                    }}></i>
-                    <p style={{ margin: 0 }}>No notifications</p>
-                  </div>
-                ) : (
-                  notifications.map((notification) => (
-                    <div
-                      key={notification.id}
-                      onClick={() => handleNotificationItemClick(notification.id)}
-                      style={{
-                        padding: isMobile ? '12px' : '15px',
-                        display: 'flex',
-                        borderBottom: '1px solid #f5f5f5',
-                        backgroundColor: notification.read ? 'white' : '#f8f9fa',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <div style={{
-                        width: isMobile ? '32px' : '40px',
-                        height: isMobile ? '32px' : '40px',
-                        borderRadius: '50%',
-                        backgroundColor: getNotificationColor(notification.type) + '20',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        marginRight: isMobile ? '10px' : '15px',
-                        flexShrink: 0,
-                      }}>
-                        <i 
-                          className={getNotificationIcon(notification.type)} 
-                          style={{ 
-                            color: getNotificationColor(notification.type), 
-                            fontSize: isMobile ? '16px' : '18px' 
-                          }}
-                        ></i>
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ 
-                          display: 'flex', 
-                          justifyContent: 'space-between', 
-                          alignItems: 'flex-start' 
-                        }}>
-                          <p style={{ 
-                            margin: '0 0 5px 0', 
-                            fontSize: isMobile ? '13px' : '14px', 
-                            fontWeight: notification.read ? '400' : '600',
-                            color: notification.read ? '#6c757d' : '#212529',
-                          }}>
-                            {notification.title}
-                          </p>
-                          {!notification.read && (
-                            <span style={{
-                              width: '8px',
-                              height: '8px',
-                              borderRadius: '50%',
-                              backgroundColor: '#f72585',
-                              flexShrink: 0,
-                              marginLeft: '10px',
-                              marginTop: '5px',
-                            }}></span>
-                          )}
-                        </div>
-                        <p style={{ 
-                          margin: '0 0 5px 0', 
-                          fontSize: isMobile ? '12px' : '13px', 
-                          color: '#6c757d',
-                          lineHeight: '1.4',
-                        }}>
-                          {notification.message}
-                        </p>
-                        <small style={{ 
-                          color: '#95a5a6', 
-                          fontSize: isMobile ? '10px' : '11px' 
-                        }}>
-                          {notification.time}
-                        </small>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {notifications.length > 0 && (
-                <div style={{
-                  padding: '10px 15px',
-                  borderTop: '1px solid #eee',
-                  textAlign: 'center',
-                  backgroundColor: '#f8f9fa',
+        {/* Notifications Dropdown - FIXED POSITIONING */}
+        {showNotifications && (
+          <div 
+            ref={notificationRef}
+            className="notification-dropdown"
+            style={{
+              position: 'fixed', // Changed from absolute to fixed
+              top: isMobile ? '70px' : '80px', // Adjusted for better positioning
+              right: isMobile ? '1rem' : '2rem',
+              width: isMobile ? 'calc(100% - 2rem)' : '350px',
+              maxWidth: '350px',
+              backgroundColor: 'white',
+              borderRadius: '8px',
+              boxShadow: '0 10px 30px rgba(0,0,0,0.15)',
+              zIndex: 9999, // Very high z-index to ensure it's on top
+              border: '1px solid #e9ecef',
+              overflow: 'hidden',
+              maxHeight: isMobile ? '60vh' : '400px',
+              animation: 'slideDown 0.2s ease-out',
+            }}
+          >
+            <div style={{
+              padding: '15px',
+              borderBottom: '1px solid #eee',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              backgroundColor: '#f8f9fa',
+            }}>
+              <div>
+                <h4 style={{ 
+                  margin: 0, 
+                  fontSize: isMobile ? '15px' : '16px', 
+                  color: '#212529' 
                 }}>
+                  Notifications
+                </h4>
+                <p style={{ 
+                  margin: '5px 0 0 0', 
+                  fontSize: isMobile ? '11px' : '12px', 
+                  color: '#6c757d' 
+                }}>
+                  {unreadCount} unread {unreadCount === 1 ? 'message' : 'messages'}
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                {unreadCount > 0 && (
                   <button
-                    onClick={() => {
-                      setShowNotifications(false);
-                    }}
+                    onClick={markAllNotificationsAsRead}
                     style={{
                       background: 'none',
                       border: 'none',
-                      color: '#4361ee',
+                      color: '#3498db',
                       cursor: 'pointer',
                       fontSize: isMobile ? '11px' : '12px',
-                      fontWeight: '500',
-                      padding: '5px 10px',
+                      padding: '4px 8px',
+                      borderRadius: '4px',
                       minHeight: 'auto !important',
                     }}
                   >
-                    View all notifications
+                    Mark all as read
                   </button>
+                )}
+                {notifications.length > 0 && (
+                  <button
+                    onClick={deleteAllNotifications}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#e74c3c',
+                      cursor: 'pointer',
+                      fontSize: isMobile ? '11px' : '12px',
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      minHeight: 'auto !important',
+                    }}
+                  >
+                    Clear all
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div style={{ 
+              maxHeight: isMobile ? 'calc(60vh - 80px)' : '320px', 
+              overflowY: 'auto',
+              overscrollBehavior: 'contain', // Prevent scroll chaining
+            }}>
+              {isLoadingNotifications ? (
+                <div style={{
+                  padding: '30px 20px',
+                  textAlign: 'center',
+                  color: '#6c757d',
+                }}>
+                  <div style={{
+                    width: '30px',
+                    height: '30px',
+                    border: '3px solid #f3f3f3',
+                    borderTopColor: '#3498db',
+                    borderRadius: '50%',
+                    animation: 'spin 1s linear infinite',
+                    margin: '0 auto 15px auto',
+                  }}></div>
+                  <p style={{ margin: 0 }}>Loading notifications...</p>
                 </div>
+              ) : notifications.length === 0 ? (
+                <div style={{
+                  padding: '30px 20px',
+                  textAlign: 'center',
+                  color: '#6c757d',
+                }}>
+                  <i className="fas fa-bell-slash" style={{ 
+                    fontSize: isMobile ? '1.5rem' : '2rem', 
+                    marginBottom: '10px', 
+                    opacity: 0.5 
+                  }}></i>
+                  <p style={{ margin: 0 }}>No notifications yet</p>
+                  <p style={{ 
+                    margin: '5px 0 0 0', 
+                    fontSize: '12px',
+                    opacity: 0.7
+                  }}>
+                    New notifications will appear here
+                  </p>
+                </div>
+              ) : (
+                notifications.map((notification) => (
+                  <div
+                    key={notification.id}
+                    onClick={() => handleNotificationItemClick(notification.id)}
+                    style={{
+                      padding: isMobile ? '12px' : '15px',
+                      display: 'flex',
+                      borderBottom: '1px solid #f5f5f5',
+                      backgroundColor: notification.read ? 'white' : '#f8f9fa',
+                      cursor: 'pointer',
+                      position: 'relative',
+                      transition: 'background-color 0.2s',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = notification.read ? '#f8f9fa' : '#edf2f7';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = notification.read ? 'white' : '#f8f9fa';
+                    }}
+                  >
+                    <div style={{
+                      width: isMobile ? '32px' : '40px',
+                      height: isMobile ? '32px' : '40px',
+                      borderRadius: '50%',
+                      backgroundColor: getNotificationColor(notification.type) + '20',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      marginRight: isMobile ? '10px' : '15px',
+                      flexShrink: 0,
+                    }}>
+                      <i 
+                        className={getNotificationIcon(notification.type)} 
+                        style={{ 
+                          color: getNotificationColor(notification.type), 
+                          fontSize: isMobile ? '16px' : '18px' 
+                        }}
+                      ></i>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}> {/* Added minWidth: 0 for text truncation */}
+                      <div style={{ 
+                        display: 'flex', 
+                        justifyContent: 'space-between', 
+                        alignItems: 'flex-start',
+                        gap: '8px',
+                      }}>
+                        <p style={{ 
+                          margin: '0 0 5px 0', 
+                          fontSize: isMobile ? '13px' : '14px', 
+                          fontWeight: notification.read ? '400' : '600',
+                          color: notification.read ? '#6c757d' : '#212529',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}>
+                          {notification.title}
+                        </p>
+                        {!notification.read && (
+                          <span style={{
+                            width: '8px',
+                            height: '8px',
+                            borderRadius: '50%',
+                            backgroundColor: '#f72585',
+                            flexShrink: 0,
+                            marginTop: '5px',
+                          }}></span>
+                        )}
+                      </div>
+                      <p style={{ 
+                        margin: '0 0 5px 0', 
+                        fontSize: isMobile ? '12px' : '13px', 
+                        color: '#6c757d',
+                        lineHeight: '1.4',
+                        overflow: 'hidden',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                      }}>
+                        {notification.message}
+                      </p>
+                      <small style={{ 
+                        color: '#95a5a6', 
+                        fontSize: isMobile ? '10px' : '11px' 
+                      }}>
+                        {notification.time}
+                      </small>
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteNotification(notification.id);
+                      }}
+                      style={{
+                        position: 'absolute',
+                        top: '5px',
+                        right: '5px',
+                        background: 'none',
+                        border: 'none',
+                        color: '#adb5bd',
+                        cursor: 'pointer',
+                        fontSize: '12px',
+                        padding: '5px',
+                        minHeight: 'auto !important',
+                        minWidth: 'auto !important',
+                        borderRadius: '4px',
+                        transition: 'all 0.2s',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = '#f8f9fa';
+                        e.currentTarget.style.color = '#e74c3c';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                        e.currentTarget.style.color = '#adb5bd';
+                      }}
+                    >
+                      <i className="fas fa-times"></i>
+                    </button>
+                  </div>
+                ))
               )}
             </div>
-          )}
-        </header>
+
+            {notifications.length > 0 && (
+              <div style={{
+                padding: '10px 15px',
+                borderTop: '1px solid #eee',
+                textAlign: 'center',
+                backgroundColor: '#f8f9fa',
+              }}>
+                <button
+                  onClick={() => {
+                    setShowNotifications(false);
+                    navigate('/notifications');
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#4361ee',
+                    cursor: 'pointer',
+                    fontSize: isMobile ? '11px' : '12px',
+                    fontWeight: '500',
+                    padding: '5px 10px',
+                    minHeight: 'auto !important',
+                    borderRadius: '4px',
+                    transition: 'all 0.2s',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#edf2f7';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
+                >
+                  View all notifications
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         <div 
           className="main-content"
           style={{
             display: 'flex',
             flex: 1,
+            position: 'relative', // Ensure proper stacking context
           }}
         >
           {/* Desktop Sidebar */}
@@ -1112,7 +1456,7 @@ const StudentLayout = () => {
                 top: isMobile ? '60px' : '70px',
                 height: `calc(100vh - ${isMobile ? '60px' : '70px'})`,
                 overflowY: 'auto',
-                display: isMobile ? 'none' : 'block',
+                zIndex: 90, // Lower than dropdown
               }}
             >
               <button 
@@ -1176,6 +1520,19 @@ const StudentLayout = () => {
                         position: 'relative',
                         justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
                         minHeight: 'auto !important',
+                        borderRadius: '0 30px 30px 0',
+                        transition: 'all 0.2s',
+                        marginRight: '10px',
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isActive(item.path)) {
+                          e.currentTarget.style.backgroundColor = '#f1f3f5';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isActive(item.path)) {
+                          e.currentTarget.style.backgroundColor = 'transparent';
+                        }
                       }}
                     >
                       {isActive(item.path) && !sidebarCollapsed && (
@@ -1231,6 +1588,15 @@ const StudentLayout = () => {
                       fontWeight: '500',
                       justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
                       minHeight: 'auto !important',
+                      borderRadius: '0 30px 30px 0',
+                      transition: 'all 0.2s',
+                      marginRight: '10px',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = '#f8f9fa';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
                     }}
                   >
                     <i className="fas fa-sign-out-alt" style={{ 
@@ -1244,7 +1610,7 @@ const StudentLayout = () => {
             </aside>
           )}
 
-          {/* Mobile Menu Overlay - Now covers half of the screen */}
+          {/* Mobile Menu Overlay */}
           {isMobile && mobileMenuOpen && (
             <>
               {/* Backdrop */}
@@ -1345,6 +1711,17 @@ const StudentLayout = () => {
                         fontWeight: isActive(item.path) ? '600' : '500',
                         borderLeft: isActive(item.path) ? '3px solid #4361ee' : '3px solid transparent',
                         minHeight: 'auto !important',
+                        transition: 'all 0.2s',
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isActive(item.path)) {
+                          e.currentTarget.style.backgroundColor = '#f1f3f5';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isActive(item.path)) {
+                          e.currentTarget.style.backgroundColor = 'transparent';
+                        }
                       }}
                     >
                       <i className={item.icon} style={{ 
@@ -1383,6 +1760,13 @@ const StudentLayout = () => {
                         marginTop: '0.5rem',
                         borderLeft: '3px solid transparent',
                         minHeight: 'auto !important',
+                        transition: 'all 0.2s',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = '#f8f9fa';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = 'transparent';
                       }}
                     >
                       <i className="fas fa-sign-out-alt" style={{ 
@@ -1407,8 +1791,8 @@ const StudentLayout = () => {
               backgroundColor: '#f5f7fb',
               overflowY: 'auto',
               minHeight: `calc(100vh - ${isMobile ? '60px' : '70px'})`,
-              transition: 'filter 0.3s ease',
-              filter: isMobile && mobileMenuOpen ? 'brightness(0.95)' : 'none',
+              position: 'relative',
+              zIndex: 1, // Ensure content stays behind dropdown
             }}
           >
             <Outlet />
@@ -1424,15 +1808,22 @@ const StudentLayout = () => {
           
           body {
             font-family: 'Inter', sans-serif;
+            overflow-x: hidden;
           }
           
           button {
             font-family: inherit;
             transition: all 0.2s;
+            outline: none;
           }
           
           button:hover {
             opacity: 0.9;
+          }
+          
+          button:focus {
+            outline: 2px solid #4361ee;
+            outline-offset: 2px;
           }
           
           .menu-item button:hover {
@@ -1501,10 +1892,26 @@ const StudentLayout = () => {
             min-width: auto !important;
           }
           
+          /* Fix dropdown positioning */
+          .notification-dropdown {
+            position: fixed !important;
+            z-index: 9999 !important;
+          }
+          
+          .layout-container {
+            overflow: visible !important;
+            position: relative !important;
+          }
+          
           /* Desktop */
           @media (min-width: 1024px) {
             .mobile-menu-toggle {
               display: none !important;
+            }
+            
+            .notification-dropdown {
+              right: 2rem !important;
+              top: 80px !important;
             }
           }
           
@@ -1520,7 +1927,8 @@ const StudentLayout = () => {
             
             .notification-dropdown {
               width: 300px !important;
-              right: 1rem !important;
+              right: 1.5rem !important;
+              top: 80px !important;
             }
             
             .header-logo h1 {
@@ -1535,8 +1943,10 @@ const StudentLayout = () => {
           /* Mobile */
           @media (max-width: 767px) {
             .notification-dropdown {
-              width: calc(100% - 1rem) !important;
-              right: 0.5rem !important;
+              width: calc(100% - 2rem) !important;
+              right: 1rem !important;
+              top: 70px !important;
+              max-height: 60vh !important;
             }
             
             .header-logo h1 {
@@ -1577,8 +1987,9 @@ const StudentLayout = () => {
             }
             
             .notification-dropdown {
-              width: calc(100% - 0.5rem) !important;
-              right: 0.25rem !important;
+              width: calc(100% - 1.5rem) !important;
+              right: 0.75rem !important;
+              top: 65px !important;
             }
             
             /* Mobile menu even smaller on very small screens */
@@ -1599,6 +2010,24 @@ const StudentLayout = () => {
           /* Prevent scrolling when mobile menu is open */
           body.mobile-menu-open {
             overflow: hidden;
+          }
+          
+          /* Custom scrollbar for dropdown */
+          .notification-dropdown div::-webkit-scrollbar {
+            width: 6px;
+          }
+          
+          .notification-dropdown div::-webkit-scrollbar-track {
+            background: #f1f1f1;
+          }
+          
+          .notification-dropdown div::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 3px;
+          }
+          
+          .notification-dropdown div::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
           }
         `}</style>
       </div>
