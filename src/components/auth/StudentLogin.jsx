@@ -610,8 +610,8 @@ const styles = {
   logoImg: {
     width: '120px',
     height: '120px',
-    borderRadius: '50%',
     objectFit: 'cover',
+    borderRadius: '5%',
     border: '3px solid #1a365d',
   },
 
