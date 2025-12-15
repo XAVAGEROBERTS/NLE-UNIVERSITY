@@ -7,7 +7,7 @@ const Settings = () => {
   const { user: authUser, signOut, loading: authLoading } = useStudentAuth();
   const navigate = useNavigate();
   
-  // Main state
+  // Main state (unchanged)
   const [isLoading, setIsLoading] = useState(true);
   const [studentData, setStudentData] = useState(null);
   const [profileData, setProfileData] = useState(null);
@@ -29,14 +29,14 @@ const Settings = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
 
-  // 1. Check authentication
+  // 1. Check authentication (unchanged)
   useEffect(() => {
     if (!authLoading && !authUser) {
       navigate('/login');
     }
   }, [authLoading, authUser, navigate]);
 
-  // Calculate GPA from completed courses (MATCHING DASHBOARD LOGIC)
+  // Calculate GPA from completed courses (MATCHING DASHBOARD LOGIC) (unchanged)
   const calculateGPA = (studentCourses) => {
     if (!studentCourses || studentCourses.length === 0) return 0;
     
@@ -59,7 +59,7 @@ const Settings = () => {
     return totalCredits > 0 ? totalPoints / totalCredits : 0;
   };
 
-  // 2. Fetch student data
+  // 2. Fetch student data (unchanged)
   useEffect(() => {
     const fetchStudentData = async () => {
       if (!authUser?.email) return;
@@ -124,7 +124,7 @@ const Settings = () => {
     }
   }, [authUser]);
 
-  // Fetch academic statistics (MATCHING DASHBOARD LOGIC)
+  // Fetch academic statistics (MATCHING DASHBOARD LOGIC) (unchanged)
   const fetchAcademicStats = async (studentId) => {
     try {
       // Get course statistics with proper join for credits
@@ -152,8 +152,6 @@ const Settings = () => {
       }));
       
       const currentGPA = calculateGPA(coursesWithGrades);
-
-     
 
       // Get pending assignments (MATCHING DASHBOARD)
       const { data: pendingAssignments, error: assignmentsError } = await supabase
@@ -194,13 +192,13 @@ const Settings = () => {
     }
   };
 
-  // Handle form input changes
+  // Handle form input changes (unchanged)
   const handleInputChange = (e) => {
     const { id, value } = e.target;
     setFormData(prev => ({ ...prev, [id]: value }));
   };
 
-  // Save profile changes
+  // Save profile changes (unchanged)
   const handleSaveProfile = async () => {
     if (!authUser?.email || !studentData?.id) {
       setMessage({ type: 'error', text: 'Please login to save changes' });
@@ -263,7 +261,7 @@ const Settings = () => {
     }
   };
 
-  // Reset form to original values
+  // Reset form to original values (unchanged)
   const handleResetForm = () => {
     if (profileData) {
       setFormData({
@@ -277,7 +275,7 @@ const Settings = () => {
     }
   };
 
-  // Handle logout
+  // Handle logout (unchanged)
   const handleLogout = async () => {
     try {
       await signOut();
@@ -288,7 +286,7 @@ const Settings = () => {
     }
   };
 
-  // Loading state
+  // Loading state (unchanged)
   if (authLoading || isLoading) {
     return (
       <div style={styles.container}>
@@ -303,7 +301,7 @@ const Settings = () => {
     );
   }
 
-  // Not logged in state
+  // Not logged in state (unchanged)
   if (!authUser) {
     return (
       <div style={styles.container}>
@@ -325,7 +323,7 @@ const Settings = () => {
     );
   }
 
-  // No student data state
+  // No student data state (unchanged)
   if (!studentData) {
     return (
       <div style={styles.container}>
@@ -347,7 +345,7 @@ const Settings = () => {
     );
   }
 
-  // Main content
+  // Main content (unchanged)
   return (
     <div style={styles.container}>
       {/* Header */}
@@ -597,83 +595,94 @@ const Settings = () => {
   );
 };
 
-// Styles
+// Styles with responsive updates
 const styles = {
   container: {
     backgroundColor: '#f8f9fa',
     minHeight: '100vh',
-    padding: '20px'
+    padding: 'clamp(10px, 3vw, 20px)',
+    boxSizing: 'border-box'
   },
   header: {
     display: 'flex',
+    flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '30px',
-    paddingBottom: '15px',
-    borderBottom: '2px solid #e9ecef'
+    alignItems: 'flex-start',
+    marginBottom: 'clamp(20px, 4vw, 30px)',
+    paddingBottom: 'clamp(10px, 2vw, 15px)',
+    borderBottom: '2px solid #e9ecef',
+    flexWrap: 'wrap',
+    gap: '15px'
   },
   title: {
-    margin: '0 0 5px 0',
+    margin: '0 0 clamp(5px, 1vw, 10px) 0',
     color: '#333',
-    fontSize: '24px',
+    fontSize: 'clamp(18px, 4vw, 24px)',
     display: 'flex',
-    alignItems: 'center'
+    alignItems: 'center',
+    flexWrap: 'wrap'
   },
   titleIcon: {
-    marginRight: '10px',
-    color: '#6c757d'
+    marginRight: 'clamp(5px, 1vw, 10px)',
+    color: '#6c757d',
+    fontSize: 'clamp(16px, 3vw, 20px)'
   },
   subtitle: {
     margin: '0',
     color: '#666',
-    fontSize: '14px'
+    fontSize: 'clamp(12px, 2vw, 14px)'
   },
   content: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '20px'
+    gap: 'clamp(15px, 3vw, 20px)'
   },
   card: {
     backgroundColor: 'white',
-    borderRadius: '10px',
-    padding: '25px',
+    borderRadius: 'clamp(8px, 2vw, 10px)',
+    padding: 'clamp(15px, 3vw, 25px)',
     boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-    border: '1px solid #e9ecef'
+    border: '1px solid #e9ecef',
+    width: '100%',
+    boxSizing: 'border-box'
   },
   cardTitle: {
-    margin: '0 0 20px 0',
+    margin: '0 0 clamp(15px, 3vw, 20px) 0',
     color: '#333',
-    fontSize: '18px',
+    fontSize: 'clamp(16px, 3vw, 18px)',
     display: 'flex',
     alignItems: 'center'
   },
   cardIcon: {
-    marginRight: '10px',
-    color: '#007bff'
+    marginRight: 'clamp(5px, 1vw, 10px)',
+    color: '#007bff',
+    fontSize: 'clamp(14px, 2.5vw, 16px)'
   },
   statsGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-    gap: '15px'
+    gridTemplateColumns: 'repeat(auto-fill, minmax(min(140px, 100%), 1fr))',
+    gap: 'clamp(10px, 2vw, 15px)',
+    width: '100%'
   },
   statCard: {
     backgroundColor: '#f8f9fa',
-    padding: '20px',
-    borderRadius: '8px',
+    padding: 'clamp(15px, 3vw, 20px)',
+    borderRadius: 'clamp(6px, 1.5vw, 8px)',
     textAlign: 'center',
     borderLeft: '4px solid #007bff',
-    position: 'relative'
+    minWidth: '0'
   },
   statValue: {
-    fontSize: '28px',
+    fontSize: 'clamp(20px, 4vw, 28px)',
     fontWeight: 'bold',
     color: '#007bff',
-    marginBottom: '5px'
+    marginBottom: 'clamp(3px, 1vw, 5px)',
+    wordBreak: 'break-word'
   },
   statLabel: {
-    fontSize: '14px',
+    fontSize: 'clamp(12px, 2vw, 14px)',
     color: '#6c757d',
-    marginBottom: '5px'
+    marginBottom: 'clamp(3px, 1vw, 5px)'
   },
   statSubtext: {
     fontSize: '10px',
@@ -686,179 +695,203 @@ const styles = {
   },
   profileSection: {
     display: 'flex',
-    gap: '30px',
-    alignItems: 'flex-start'
+    flexDirection: 'row',
+    gap: 'clamp(15px, 4vw, 30px)',
+    alignItems: 'flex-start',
+    flexWrap: 'wrap'
   },
   avatarContainer: {
-    flexShrink: 0
+    flexShrink: 0,
+    display: 'flex',
+    justifyContent: 'center',
+    width: '100%',
+    maxWidth: '120px'
   },
   avatar: {
-    width: '100px',
-    height: '100px',
+    width: 'clamp(80px, 15vw, 100px)',
+    height: 'clamp(80px, 15vw, 100px)',
     borderRadius: '50%',
     backgroundColor: '#e9ecef',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    fontSize: '40px',
-    color: '#6c757d'
+    fontSize: 'clamp(30px, 6vw, 40px)',
+    color: '#6c757d',
+    flexShrink: 0
   },
   avatarIcon: {
-    fontSize: '40px'
+    fontSize: 'clamp(30px, 6vw, 40px)'
   },
   profileInfo: {
-    flex: 1
+    flex: '1 1 300px',
+    minWidth: '0'
   },
   profileName: {
-    margin: '0 0 15px 0',
+    margin: '0 0 clamp(10px, 2vw, 15px) 0',
     color: '#333',
-    fontSize: '22px'
+    fontSize: 'clamp(18px, 4vw, 22px)',
+    wordBreak: 'break-word'
   },
   infoGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-    gap: '15px',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(min(250px, 100%), 1fr))',
+    gap: 'clamp(10px, 2vw, 15px)',
     marginBottom: '15px'
   },
   infoItem: {
-    marginBottom: '10px'
+    marginBottom: 'clamp(8px, 1.5vw, 10px)',
+    minWidth: '0'
   },
   infoLabel: {
     display: 'block',
-    fontSize: '12px',
+    fontSize: 'clamp(11px, 1.8vw, 12px)',
     color: '#6c757d',
-    marginBottom: '5px'
+    marginBottom: 'clamp(3px, 0.8vw, 5px)',
+    wordBreak: 'break-word'
   },
   infoValue: {
-    fontSize: '14px',
+    fontSize: 'clamp(13px, 2vw, 14px)',
     color: '#495057',
-    fontWeight: '500'
+    fontWeight: '500',
+    wordBreak: 'break-word'
   },
   form: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '15px'
+    gap: 'clamp(10px, 2vw, 15px)'
   },
   formGroup: {
-    marginBottom: '10px'
+    marginBottom: 'clamp(8px, 1.5vw, 10px)'
   },
   formLabel: {
     display: 'block',
-    fontSize: '14px',
+    fontSize: 'clamp(13px, 2vw, 14px)',
     color: '#495057',
-    marginBottom: '5px',
+    marginBottom: 'clamp(3px, 1vw, 5px)',
     fontWeight: '600'
   },
   input: {
     width: '100%',
-    padding: '10px 15px',
+    padding: 'clamp(8px, 2vw, 10px) clamp(12px, 2vw, 15px)',
     border: '1px solid #dee2e6',
-    borderRadius: '6px',
-    fontSize: '14px',
-    fontFamily: 'inherit'
+    borderRadius: 'clamp(4px, 1.5vw, 6px)',
+    fontSize: 'clamp(13px, 2vw, 14px)',
+    fontFamily: 'inherit',
+    boxSizing: 'border-box'
   },
   formButtons: {
     display: 'flex',
-    gap: '15px',
-    marginTop: '10px'
+    flexDirection: 'row',
+    gap: 'clamp(10px, 2vw, 15px)',
+    marginTop: 'clamp(10px, 2vw, 20px)',
+    flexWrap: 'wrap'
   },
   primaryButton: {
-    padding: '12px 25px',
+    padding: 'clamp(10px, 2vw, 12px) clamp(15px, 3vw, 25px)',
     backgroundColor: '#28a745',
     color: 'white',
     border: 'none',
-    borderRadius: '6px',
+    borderRadius: 'clamp(4px, 1.5vw, 6px)',
     cursor: 'pointer',
-    fontSize: '14px',
+    fontSize: 'clamp(13px, 2vw, 14px)',
     fontWeight: '500',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: '8px',
-    minWidth: '140px'
+    gap: 'clamp(5px, 1vw, 8px)',
+    minWidth: 'clamp(120px, 20vw, 140px)',
+    flex: '1 1 auto'
   },
   secondaryButton: {
-    padding: '12px 25px',
+    padding: 'clamp(10px, 2vw, 12px) clamp(15px, 3vw, 25px)',
     backgroundColor: '#6c757d',
     color: 'white',
     border: 'none',
-    borderRadius: '6px',
+    borderRadius: 'clamp(4px, 1.5vw, 6px)',
     cursor: 'pointer',
-    fontSize: '14px',
+    fontSize: 'clamp(13px, 2vw, 14px)',
     fontWeight: '500',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: '8px',
-    minWidth: '100px'
+    gap: 'clamp(5px, 1vw, 8px)',
+    minWidth: 'clamp(90px, 15vw, 100px)',
+    flex: '1 1 auto'
   },
   logoutButton: {
-    padding: '8px 16px',
+    padding: 'clamp(6px, 1.5vw, 8px) clamp(12px, 2vw, 16px)',
     backgroundColor: '#dc3545',
     color: 'white',
     border: 'none',
-    borderRadius: '6px',
+    borderRadius: 'clamp(4px, 1.5vw, 6px)',
     cursor: 'pointer',
-    fontSize: '14px',
+    fontSize: 'clamp(13px, 2vw, 14px)',
     fontWeight: '500',
     display: 'flex',
     alignItems: 'center',
-    gap: '8px'
+    gap: 'clamp(5px, 1vw, 8px)',
+    whiteSpace: 'nowrap',
+    alignSelf: 'flex-start'
   },
   messageBox: {
-    padding: '15px',
-    borderRadius: '8px',
-    marginBottom: '20px',
+    padding: 'clamp(10px, 2vw, 15px)',
+    borderRadius: 'clamp(6px, 1.5vw, 8px)',
+    marginBottom: 'clamp(15px, 3vw, 20px)',
     display: 'flex',
     alignItems: 'center',
-    gap: '10px',
-    fontSize: '14px'
+    gap: 'clamp(8px, 1.5vw, 10px)',
+    fontSize: 'clamp(13px, 2vw, 14px)',
+    wordBreak: 'break-word'
   },
   loadingContainer: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    height: '300px'
+    height: 'clamp(200px, 50vh, 300px)',
+    width: '100%'
   },
   spinner: {
-    width: '50px',
-    height: '50px',
-    border: '5px solid #f3f3f3',
-    borderTop: '5px solid #3498db',
+    width: 'clamp(40px, 10vw, 50px)',
+    height: 'clamp(40px, 10vw, 50px)',
+    border: 'clamp(3px, 1vw, 5px) solid #f3f3f3',
+    borderTop: 'clamp(3px, 1vw, 5px) solid #3498db',
     borderRadius: '50%',
     animation: 'spin 1s linear infinite',
-    marginBottom: '20px'
+    marginBottom: 'clamp(15px, 3vw, 20px)'
   },
   errorContainer: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: '40px',
+    padding: 'clamp(20px, 5vw, 40px)',
     textAlign: 'center',
     backgroundColor: '#f8f9fa',
-    borderRadius: '12px',
-    margin: '20px 0'
+    borderRadius: 'clamp(8px, 2vw, 12px)',
+    margin: 'clamp(15px, 3vw, 20px) 0',
+    width: '100%',
+    boxSizing: 'border-box'
   },
   errorIcon: {
-    fontSize: '64px',
+    fontSize: 'clamp(48px, 10vw, 64px)',
     color: '#dc3545',
-    marginBottom: '20px'
+    marginBottom: 'clamp(15px, 3vw, 20px)'
   },
   button: {
-    padding: '10px 20px',
+    padding: 'clamp(8px, 2vw, 10px) clamp(15px, 3vw, 20px)',
     backgroundColor: '#007bff',
     color: 'white',
     border: 'none',
-    borderRadius: '6px',
+    borderRadius: 'clamp(4px, 1.5vw, 6px)',
     cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: '500'
+    fontSize: 'clamp(13px, 2vw, 14px)',
+    fontWeight: '500',
+    marginTop: 'clamp(10px, 2vw, 15px)'
   }
 };
 
-// Add CSS animation
+// Add CSS animation with responsive improvements
 const styleSheet = document.createElement('style');
 styleSheet.textContent = `
   @keyframes spin {
@@ -869,6 +902,7 @@ styleSheet.textContent = `
   button:hover:not(:disabled) {
     opacity: 0.9;
     transform: translateY(-1px);
+    transition: all 0.2s ease;
   }
   
   button:disabled {
@@ -880,11 +914,79 @@ styleSheet.textContent = `
     outline: none;
     border-color: #007bff;
     box-shadow: 0 0 0 3px rgba(0,123,255,.1);
+    transition: all 0.2s ease;
   }
   
   input:disabled, select:disabled {
     background-color: #f8f9fa;
     cursor: not-allowed;
+  }
+  
+  /* Responsive media queries */
+  @media (max-width: 768px) {
+    .header {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    
+    .logout-button {
+      align-self: flex-end;
+      margin-top: 10px;
+    }
+    
+    .profile-section {
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+    
+    .avatar-container {
+      margin-bottom: 15px;
+    }
+    
+    .form-buttons {
+      flex-direction: column;
+    }
+    
+    .primary-button, .secondary-button {
+      width: 100%;
+    }
+  }
+  
+  @media (max-width: 480px) {
+    .stats-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    
+    .info-grid {
+      grid-template-columns: 1fr;
+    }
+    
+    .card {
+      padding: 15px;
+    }
+    
+    .header {
+      gap: 10px;
+    }
+    
+    .title {
+      font-size: 20px;
+    }
+  }
+  
+  @media (max-width: 360px) {
+    .stats-grid {
+      grid-template-columns: 1fr;
+    }
+    
+    .logout-button span {
+      display: none;
+    }
+    
+    .logout-button i {
+      margin-right: 0;
+    }
   }
 `;
 document.head.appendChild(styleSheet);

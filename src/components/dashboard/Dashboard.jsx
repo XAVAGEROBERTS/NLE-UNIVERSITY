@@ -43,10 +43,23 @@ const Dashboard = () => {
   const [upcomingLectures, setUpcomingLectures] = useState([]);
   const [studentDetails, setStudentDetails] = useState(null);
   const [chartError, setChartError] = useState(null);
+  const [isMobile, setIsMobile] = useState(false);
 
   const calendarContainerRef = useRef(null);
   const chartRef = useRef(null);
   const chartCanvasRef = useRef(null);
+
+  // Check screen size
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // Calculate GPA from completed courses
   const calculateGPA = (studentCourses) => {
@@ -71,14 +84,12 @@ const Dashboard = () => {
     return totalCredits > 0 ? totalPoints / totalCredits : 0;
   };
 
- // ============ REPLACE YOUR EXISTING getProgramDuration FUNCTION WITH THIS ============
   // Determine program duration based on program type
   const getProgramDuration = (program) => {
     if (!program) return { years: 4, semesters: 8 };
     
     const programLower = program.toLowerCase();
     
-    // Match the exact program names
     if (programLower.includes('bachelor of science in computer engineering')) {
       return { years: 4, semesters: 8 };
     } else if (programLower.includes('bachelor of science in computer science')) {
@@ -97,8 +108,9 @@ const Dashboard = () => {
       return { years: 3, semesters: 6 };
     }
     
-    return { years: 4, semesters: 8 }; // Default
+    return { years: 4, semesters: 8 };
   };
+
   // Fetch all dashboard data
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -111,26 +123,16 @@ const Dashboard = () => {
           return;
         }
 
-        console.log('Fetching dashboard data for:', user.email);
-
-        // 1. Fetch complete student details from database
+        // 1. Fetch complete student details
         const { data: student, error: studentError } = await supabase
           .from('students')
           .select('*')
           .eq('email', user.email)
           .single();
 
-        if (studentError) {
-          console.error('Error fetching student:', studentError);
-          throw studentError;
-        }
+        if (studentError) throw studentError;
+        if (!student) throw new Error('Student not found');
 
-        if (!student) {
-          console.error('Student not found');
-          throw new Error('Student not found in database');
-        }
-
-        console.log('Student data loaded:', student.full_name);
         setStudentDetails(student);
 
         // 2. Fetch student's courses with grades for GPA calculation
@@ -146,7 +148,6 @@ const Dashboard = () => {
           .eq('student_id', student.id);
 
         if (!coursesError && studentCourses) {
-          // Calculate GPA
           const coursesWithGrades = studentCourses.map(sc => ({
             ...sc,
             credits: sc.courses?.credits || 3,
@@ -155,15 +156,15 @@ const Dashboard = () => {
           
           const gpa = calculateGPA(coursesWithGrades);
           
-          // 3. Calculate program progress based on completed semesters
+          // 3. Calculate program progress
           const programDuration = getProgramDuration(student.program);
           const calculateProgramProgress = () => {
             const completedSemesters = ((student.year_of_study - 1) * 2) + (student.semester - 1);
             const progress = (completedSemesters / programDuration.semesters) * 100;
-            return Math.min(Math.round(progress), 85); // Cap at 85% until final project
+            return Math.min(Math.round(progress), 85);
           };
 
-          // 4. Fetch attendance data for the last 5 days
+          // 4. Fetch attendance data
           const { data: attendanceRecords, error: attendanceError } = await supabase
             .from('attendance_records')
             .select('date, status')
@@ -171,7 +172,7 @@ const Dashboard = () => {
             .order('date', { ascending: false })
             .limit(5);
 
-          let attendanceArray = [1, 1, 0, 1, 1]; // Default data
+          let attendanceArray = [1, 1, 0, 1, 1];
           
           if (!attendanceError && attendanceRecords && attendanceRecords.length > 0) {
             attendanceArray = attendanceRecords.reverse().map(record => 
@@ -179,29 +180,29 @@ const Dashboard = () => {
             );
           }
 
-          // 5. Fetch pending assignments count
-          const { data: assignments, error: assignmentsError } = await supabase
+          // 5. Fetch pending assignments
+          const { data: assignments } = await supabase
             .from('assignments')
             .select('id, due_date')
             .eq('status', 'published')
             .gt('due_date', new Date().toISOString());
 
-          // 6. Fetch upcoming exams count
-          const { data: exams, error: examsError } = await supabase
+          // 6. Fetch upcoming exams
+          const { data: exams } = await supabase
             .from('examinations')
             .select('id, start_time')
             .eq('status', 'published')
             .gt('start_time', new Date().toISOString());
 
           // 7. Fetch financial summary
-          const { data: financial, error: financialError } = await supabase
+          const { data: financial } = await supabase
             .from('financial_records')
             .select('amount, balance_due, status, academic_year')
             .eq('student_id', student.id)
             .eq('academic_year', student.academic_year);
 
           let financialSummary = { paid: 0, balance: 0 };
-          if (!financialError && financial) {
+          if (financial) {
             financialSummary = {
               paid: financial
                 .filter(f => f.status === 'paid')
@@ -220,7 +221,7 @@ const Dashboard = () => {
           const nextWeek = new Date();
           nextWeek.setDate(today.getDate() + 7);
 
-          const { data: lectures, error: lecturesError } = await supabase
+          const { data: lectures } = await supabase
             .from('lectures')
             .select(`
               *,
@@ -234,8 +235,7 @@ const Dashboard = () => {
             .order('start_time', { ascending: true });
 
           let formattedLectures = [];
-          if (!lecturesError && lectures) {
-            console.log('Fetched lectures:', lectures);
+          if (lectures) {
             formattedLectures = lectures.map(lecture => {
               const startTime = lecture.start_time || '09:00';
               const endTime = lecture.end_time || '11:00';
@@ -256,7 +256,6 @@ const Dashboard = () => {
                 status: lecture.status
               };
             });
-            console.log('Formatted lectures:', formattedLectures);
           }
 
           // Update all states
@@ -272,19 +271,9 @@ const Dashboard = () => {
 
           setAttendanceData(attendanceArray);
           setUpcomingLectures(formattedLectures);
-          console.log('Dashboard data loaded successfully', {
-            gpa: gpa.toFixed(2),
-            lectures: formattedLectures.length,
-            programProgress: calculateProgramProgress()
-          });
-
-        } else {
-          throw new Error('Failed to fetch student courses');
         }
-
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
-        // Use default data if fetch fails
         setDashboardStats({
           programProgress: 85,
           pendingAssignments: 3,
@@ -313,7 +302,6 @@ const Dashboard = () => {
     if (!ctx) return false;
 
     try {
-      // Generate labels for last 5 days
       const labels = [];
       for (let i = 4; i >= 0; i--) {
         const date = new Date();
@@ -400,22 +388,23 @@ const Dashboard = () => {
     const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     
     let calendarHTML = `
-      <div class="calendar-header">
-        <h4>${monthNames[currentMonth]} ${currentYear}</h4>
+      <div class="calendar-header" style="margin-bottom: 15px;">
+        <h4 style="margin: 0; font-size: clamp(1rem, 2.5vw, 1.2rem);">${monthNames[currentMonth]} ${currentYear}</h4>
       </div>
-      <table class="calendar-table">
-        <thead>
-          <tr>
+      <div style="overflow-x: auto;">
+        <table class="calendar-table" style="width: 100%; border-collapse: collapse; min-width: 300px;">
+          <thead>
+            <tr>
     `;
     
     dayNames.forEach(day => {
-      calendarHTML += `<th>${day}</th>`;
+      calendarHTML += `<th style="padding: 8px; text-align: center; border-bottom: 1px solid #ddd; color: #666; font-size: clamp(0.7rem, 2vw, 0.85rem);">${day}</th>`;
     });
     
     calendarHTML += `
-          </tr>
-        </thead>
-        <tbody>
+            </tr>
+          </thead>
+          <tbody>
     `;
     
     let day = 1;
@@ -426,13 +415,13 @@ const Dashboard = () => {
       
       for (let col = 0; col < 7; col++) {
         if (row === 0 && col < startingCell) {
-          calendarHTML += '<td></td>';
+          calendarHTML += '<td style="padding: 8px;"></td>';
         } else if (day > lastDay.getDate()) {
-          calendarHTML += '<td></td>';
+          calendarHTML += '<td style="padding: 8px;"></td>';
         } else {
           const isToday = day === now.getDate() && currentMonth === now.getMonth() && currentYear === now.getFullYear();
-          const cellClass = isToday ? 'class="current-day"' : '';
-          calendarHTML += `<td ${cellClass}>${day}</td>`;
+          const cellClass = isToday ? 'current-day' : '';
+          calendarHTML += `<td style="padding: 8px; text-align: center; height: clamp(35px, 8vw, 40px); cursor: pointer;" class="${cellClass}">${day}</td>`;
           day++;
         }
       }
@@ -445,8 +434,9 @@ const Dashboard = () => {
     }
     
     calendarHTML += `
-        </tbody>
-      </table>
+          </tbody>
+        </table>
+      </div>
     `;
     
     calendarContainerRef.current.innerHTML = calendarHTML;
@@ -459,9 +449,8 @@ const Dashboard = () => {
     const newData = [...attendanceData];
     newData[index] = newData[index] === 1 ? 0 : 1;
     
-    // Update in database
     const date = new Date();
-    date.setDate(date.getDate() - (4 - index)); // Adjust for last 5 days
+    date.setDate(date.getDate() - (4 - index));
     
     supabase
       .from('attendance_records')
@@ -578,6 +567,305 @@ const Dashboard = () => {
     alert(`${lecture.courseCode} added to calendar!`);
   };
 
+  // Render mobile-friendly lecture cards
+  const renderMobileLectureCards = () => {
+    return upcomingLectures.map((lecture) => (
+      <div 
+        key={lecture.id}
+        className="mobile-lecture-card"
+        style={{
+          backgroundColor: 'white',
+          borderRadius: '12px',
+          padding: '16px',
+          marginBottom: '12px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+          borderLeft: '4px solid #3498db'
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+          <div style={{ flex: 1 }}>
+            <h4 style={{ 
+              margin: '0 0 6px 0', 
+              fontSize: '16px',
+              color: '#333',
+              lineHeight: '1.3'
+            }}>
+              {lecture.title}
+            </h4>
+            <p style={{ 
+              margin: '0',
+              fontSize: '14px',
+              color: '#666',
+              fontWeight: '500'
+            }}>
+              {lecture.courseCode}
+            </p>
+          </div>
+          <div style={{
+            backgroundColor: new Date(lecture.date) < new Date() ? '#fff9e6' : '#f8f9fa',
+            padding: '6px 10px',
+            borderRadius: '6px',
+            fontSize: '12px',
+            fontWeight: '500',
+            whiteSpace: 'nowrap'
+          }}>
+            {formatDate(lecture.date)}
+          </div>
+        </div>
+        
+        <div style={{ 
+          display: 'grid', 
+          gridTemplateColumns: 'repeat(2, 1fr)', 
+          gap: '12px',
+          marginBottom: '16px'
+        }}>
+          <div>
+            <p style={{ 
+              margin: '0 0 4px 0',
+              fontSize: '12px',
+              color: '#999',
+              textTransform: 'uppercase'
+            }}>
+              Time
+            </p>
+            <p style={{ 
+              margin: '0',
+              fontSize: '14px',
+              fontWeight: '500',
+              color: '#333'
+            }}>
+              {formatTime(lecture.time)} - {formatTime(lecture.endTime)}
+            </p>
+          </div>
+          <div>
+            <p style={{ 
+              margin: '0 0 4px 0',
+              fontSize: '12px',
+              color: '#999',
+              textTransform: 'uppercase'
+            }}>
+              Duration
+            </p>
+            <p style={{ 
+              margin: '0',
+              fontSize: '14px',
+              fontWeight: '500',
+              color: '#333'
+            }}>
+              {lecture.duration} min
+            </p>
+          </div>
+        </div>
+        
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          paddingTop: '12px',
+          borderTop: '1px solid #eee'
+        }}>
+          <div>
+            <p style={{ 
+              margin: '0 0 4px 0',
+              fontSize: '12px',
+              color: '#999'
+            }}>
+              Lecturer
+            </p>
+            <p style={{ 
+              margin: '0',
+              fontSize: '14px',
+              color: '#555'
+            }}>
+              {lecture.lecturer}
+            </p>
+          </div>
+          <button 
+            onClick={() => addToCalendar(lecture)}
+            style={{
+              backgroundColor: '#f4f4f4',
+              color: '#333',
+              border: '1px solid #ddd',
+              padding: '8px 12px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '13px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            <i className="fas fa-calendar-plus"></i> Add
+          </button>
+        </div>
+      </div>
+    ));
+  };
+
+  // Render desktop table
+  const renderDesktopTable = () => (
+    <div style={{
+      overflowX: 'auto',
+      WebkitOverflowScrolling: 'touch',
+      borderRadius: '12px',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+      backgroundColor: 'white'
+    }}>
+      <table style={{
+        width: '100%',
+        borderCollapse: 'collapse',
+        minWidth: '650px'
+      }}>
+        <thead>
+          <tr style={{ backgroundColor: '#f8f9fa' }}>
+            <th style={{ 
+              padding: 'clamp(12px, 2.5vw, 15px)', 
+              textAlign: 'left', 
+              borderBottom: '2px solid #dee2e6',
+              fontSize: 'clamp(0.85rem, 2vw, 0.95rem)',
+              whiteSpace: 'nowrap'
+            }}>Date</th>
+            <th style={{ 
+              padding: 'clamp(12px, 2.5vw, 15px)', 
+              textAlign: 'left', 
+              borderBottom: '2px solid #dee2e6',
+              fontSize: 'clamp(0.85rem, 2vw, 0.95rem)',
+              whiteSpace: 'nowrap'
+            }}>Time</th>
+            <th style={{ 
+              padding: 'clamp(12px, 2.5vw, 15px)', 
+              textAlign: 'left', 
+              borderBottom: '2px solid #dee2e6',
+              fontSize: 'clamp(0.85rem, 2vw, 0.95rem)',
+              whiteSpace: 'nowrap'
+            }}>Course</th>
+            <th style={{ 
+              padding: 'clamp(12px, 2.5vw, 15px)', 
+              textAlign: 'left', 
+              borderBottom: '2px solid #dee2e6',
+              fontSize: 'clamp(0.85rem, 2vw, 0.95rem)',
+              whiteSpace: 'nowrap'
+            }}>Lecturer</th>
+            <th style={{ 
+              padding: 'clamp(12px, 2.5vw, 15px)', 
+              textAlign: 'left', 
+              borderBottom: '2px solid #dee2e6',
+              fontSize: 'clamp(0.85rem, 2vw, 0.95rem)',
+              whiteSpace: 'nowrap'
+            }}>Duration</th>
+            <th style={{ 
+              padding: 'clamp(12px, 2.5vw, 15px)', 
+              textAlign: 'left', 
+              borderBottom: '2px solid #dee2e6',
+              fontSize: 'clamp(0.85rem, 2vw, 0.95rem)',
+              whiteSpace: 'nowrap'
+            }}>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {upcomingLectures.map((lecture) => (
+            <tr 
+              key={lecture.id}
+              style={{ 
+                borderBottom: '1px solid #e9ecef',
+                backgroundColor: new Date(lecture.date) < new Date() ? '#fff9e6' : 'white'
+              }}
+            >
+              <td style={{ 
+                padding: 'clamp(12px, 2.5vw, 15px)',
+                fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+              }}>
+                <div style={{ fontWeight: '500', whiteSpace: 'nowrap' }}>{formatDate(lecture.date)}</div>
+                {new Date(lecture.date) < new Date() && (
+                  <span style={{ fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)', color: '#e74c3c' }}>Today</span>
+                )}
+              </td>
+              <td style={{ 
+                padding: 'clamp(12px, 2.5vw, 15px)',
+                fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+              }}>
+                <div style={{ whiteSpace: 'nowrap' }}>{formatTime(lecture.time)}</div>
+                <div style={{ 
+                  fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)', 
+                  color: '#666',
+                  whiteSpace: 'nowrap'
+                }}>
+                  to {formatTime(lecture.endTime)}
+                </div>
+              </td>
+              <td style={{ 
+                padding: 'clamp(12px, 2.5vw, 15px)',
+                fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+              }}>
+                <div style={{ 
+                  fontWeight: '500',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  maxWidth: '150px'
+                }}>
+                  {lecture.title}
+                </div>
+                <div style={{ 
+                  fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)', 
+                  color: '#666' 
+                }}>
+                  {lecture.courseCode}
+                </div>
+              </td>
+              <td style={{ 
+                padding: 'clamp(12px, 2.5vw, 15px)',
+                fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+              }}>
+                <div style={{
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  maxWidth: '120px'
+                }}>
+                  {lecture.lecturer}
+                </div>
+              </td>
+              <td style={{ 
+                padding: 'clamp(12px, 2.5vw, 15px)',
+                fontSize: 'clamp(0.85rem, 2vw, 0.95rem)',
+                whiteSpace: 'nowrap'
+              }}>
+                {lecture.duration} min
+              </td>
+              <td style={{ 
+                padding: 'clamp(12px, 2.5vw, 15px)',
+                fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+              }}>
+                <button 
+                  className="add-calendar"
+                  onClick={() => addToCalendar(lecture)}
+                  style={{
+                    backgroundColor: '#f4f4f4',
+                    color: '#333',
+                    border: '1px solid #ddd',
+                    padding: 'clamp(6px, 1.5vw, 8px) clamp(10px, 2vw, 12px)',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: 'clamp(0.8rem, 1.8vw, 0.9rem)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '5px',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  <i className="fas fa-calendar-plus"></i> Calendar
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
   if (loading) {
     return (
       <div className="dashboard-spinner" style={{ 
@@ -605,55 +893,125 @@ const Dashboard = () => {
   const programDuration = getProgramDuration(studentDetails?.program);
 
   return (
-    <div className="content">
+    <div className="content" style={{ padding: 'clamp(10px, 3vw, 20px)' }}>
       {/* Dashboard Header */}
-      <div className="dashboard-header">
-        <h2>{getGreeting()}, {studentName}</h2>
-        <div className="date-display" id="currentDate">
-          {new Date().toLocaleDateString('en-US', {
-            weekday: 'long',
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric'
-          })}
+      <div className="dashboard-header" style={{
+        marginBottom: 'clamp(20px, 4vw, 30px)'
+      }}>
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px'
+        }}>
+          <h2 style={{ 
+            margin: '0',
+            fontSize: 'clamp(1.3rem, 4vw, 1.8rem)',
+            lineHeight: '1.2'
+          }}>
+            {getGreeting()}, {studentName}
+          </h2>
+          <div className="date-display" style={{ 
+            color: '#666', 
+            fontSize: 'clamp(0.85rem, 2.5vw, 1rem)'
+          }}>
+            {new Date().toLocaleDateString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
+            })}
+          </div>
         </div>
       </div>
 
-      {/* Dashboard Cards */}
-      <div className="dashboard-cards">
+      {/* Dashboard Cards - Responsive Grid */}
+      <div className="dashboard-cards" style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 350px), 1fr))',
+        gap: 'clamp(15px, 3vw, 20px)',
+        marginBottom: 'clamp(20px, 4vw, 30px)'
+      }}>
         {/* Program Progress Card */}
-        <div className="card">
-          <div className="card-header">
-            <h3 className="card-title">My Program</h3>
-            <div className="card-icon primary">
-              <i className="fas fa-graduation-cap"></i>
+        <div className="card" style={{
+          backgroundColor: 'white',
+          borderRadius: '12px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+          padding: 'clamp(15px, 3vw, 20px)',
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100%'
+        }}>
+          <div className="card-header" style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            marginBottom: '15px'
+          }}>
+            <h3 className="card-title" style={{ 
+              margin: '0',
+              fontSize: 'clamp(1rem, 2.5vw, 1.2rem)',
+              color: '#333'
+            }}>
+              My Program
+            </h3>
+            <div className="card-icon primary" style={{
+              width: 'clamp(36px, 8vw, 44px)',
+              height: 'clamp(36px, 8vw, 44px)',
+              borderRadius: '50%',
+              backgroundColor: 'rgba(52, 152, 219, 0.1)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <i className="fas fa-graduation-cap" style={{ color: '#3498db', fontSize: 'clamp(16px, 3vw, 20px)' }}></i>
             </div>
           </div>
-          <div className="card-content">
-            <h3 style={{ margin: '0 0 10px 0', fontSize: '18px', color: '#333' }}>
+          <div className="card-content" style={{ flex: '1' }}>
+            <h3 style={{ 
+              margin: '0 0 clamp(8px, 2vw, 12px) 0', 
+              fontSize: 'clamp(0.95rem, 2.2vw, 1.1rem)',
+              color: '#333',
+              lineHeight: '1.3'
+            }}>
               {studentDetails?.program || 'Bachelor of Science in Computer Engineering'}
             </h3>
-            <p style={{ margin: '5px 0' }}>
+            <p style={{ 
+              margin: '4px 0',
+              fontSize: 'clamp(0.8rem, 2vw, 0.9rem)',
+              color: '#555'
+            }}>
               Duration: {programDuration.years} years ({programDuration.semesters} semesters)
             </p>
-            <p style={{ margin: '5px 0' }}>
+            <p style={{ 
+              margin: '4px 0',
+              fontSize: 'clamp(0.8rem, 2vw, 0.9rem)',
+              color: '#555'
+            }}>
               Intake: <span id="intakeType">{studentDetails?.intake || 'August'}</span>
             </p>
-            <p style={{ margin: '5px 0' }}>
+            <p style={{ 
+              margin: '4px 0',
+              fontSize: 'clamp(0.8rem, 2vw, 0.9rem)',
+              color: '#555'
+            }}>
               Academic Year: <span id="academicYear">{studentDetails?.academic_year || '2024/2025'}</span>
             </p>
-            <div className="course-progress" style={{ marginTop: '15px' }}>
-              <p style={{ margin: '5px 0' }}>
-                Progress: Year <span id="currentYear">{studentDetails?.year_of_study || 4}</span>, 
-                Semester <span id="currentSemester">{studentDetails?.semester || 2}</span> 
-                (<span id="progressPercentage">{dashboardStats.programProgress}</span>%)
+            <div className="course-progress" style={{ marginTop: 'clamp(12px, 2.5vw, 15px)' }}>
+              <p style={{ 
+                margin: '4px 0',
+                fontSize: 'clamp(0.85rem, 2vw, 0.95rem)',
+                color: '#555'
+              }}>
+                Progress: Year <span id="currentYear" style={{ fontWeight: '600' }}>{studentDetails?.year_of_study || 4}</span>, 
+                Semester <span id="currentSemester" style={{ fontWeight: '600' }}>{studentDetails?.semester || 2}</span> 
+                (<span id="progressPercentage" style={{ fontWeight: '600' }}>{dashboardStats.programProgress}</span>%)
               </p>
               <div className="progress-bar" style={{
-                height: '8px',
+                height: 'clamp(6px, 1.5vw, 8px)',
                 backgroundColor: '#e9ecef',
                 borderRadius: '4px',
                 overflow: 'hidden',
-                margin: '10px 0'
+                margin: 'clamp(8px, 2vw, 10px) 0'
               }}>
                 <div 
                   className="progress-fill" 
@@ -672,11 +1030,42 @@ const Dashboard = () => {
         </div>
 
         {/* Attendance Card */}
-        <div className="card">
-          <div className="card-header">
-            <h3 className="card-title">Lecture Attendance</h3>
-            <div className="card-icon success">
-              <i className="fas fa-user-check"></i>
+        <div className="card" style={{
+          backgroundColor: 'white',
+          borderRadius: '12px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+          padding: 'clamp(15px, 3vw, 20px)',
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100%'
+        }}>
+          <div className="card-header" style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            marginBottom: '15px',
+            flexWrap: 'wrap',
+            gap: '10px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <h3 className="card-title" style={{ 
+                margin: '0',
+                fontSize: 'clamp(1rem, 2.5vw, 1.2rem)',
+                color: '#333'
+              }}>
+                Lecture Attendance
+              </h3>
+              <div className="card-icon success" style={{
+                width: 'clamp(36px, 8vw, 44px)',
+                height: 'clamp(36px, 8vw, 44px)',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(46, 204, 113, 0.1)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}>
+                <i className="fas fa-user-check" style={{ color: '#2ecc71', fontSize: 'clamp(16px, 3vw, 20px)' }}></i>
+              </div>
             </div>
             <button 
               className="btn btn-sm btn-warning" 
@@ -685,26 +1074,33 @@ const Dashboard = () => {
                 backgroundColor: '#ffc107',
                 color: '#212529',
                 border: 'none',
-                padding: '5px 10px',
-                borderRadius: '4px',
+                padding: 'clamp(6px, 1.5vw, 8px) clamp(10px, 2vw, 12px)',
+                borderRadius: '6px',
                 cursor: 'pointer',
-                fontSize: '12px',
+                fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '5px'
+                gap: '5px',
+                whiteSpace: 'nowrap',
+                flexShrink: '0'
               }}
             >
-              <i className="fas fa-edit"></i> {showAdminControls ? 'Hide Controls' : 'Edit Attendance'}
+              <i className="fas fa-edit"></i> {showAdminControls ? 'Hide Controls' : 'Edit'}
             </button>
           </div>
-          <div className="card-content">
-            <p id="attendanceSummary" style={{ marginBottom: '15px', fontWeight: '500' }}>
+          <div className="card-content" style={{ flex: '1' }}>
+            <p id="attendanceSummary" style={{ 
+              marginBottom: 'clamp(12px, 2.5vw, 15px)', 
+              fontWeight: '500',
+              fontSize: 'clamp(0.85rem, 2vw, 0.95rem)',
+              lineHeight: '1.4'
+            }}>
               {attendanceStats.summary}
             </p>
             
             {chartError ? (
               <div style={{
-                height: '200px',
+                height: 'clamp(180px, 40vw, 200px)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -712,9 +1108,13 @@ const Dashboard = () => {
                 borderRadius: '8px',
                 color: '#dc3545',
                 flexDirection: 'column',
-                gap: '10px'
+                gap: '10px',
+                padding: '20px'
               }}>
-                <p style={{ textAlign: 'center' }}>{chartError}</p>
+                <p style={{ 
+                  textAlign: 'center',
+                  fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+                }}>{chartError}</p>
                 <button 
                   onClick={() => {
                     setChartError(null);
@@ -727,16 +1127,20 @@ const Dashboard = () => {
                     backgroundColor: '#007bff',
                     color: 'white',
                     border: 'none',
-                    padding: '8px 16px',
-                    borderRadius: '4px',
-                    cursor: 'pointer'
+                    padding: 'clamp(8px, 1.5vw, 10px) clamp(12px, 2vw, 16px)',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: 'clamp(0.8rem, 1.8vw, 0.9rem)'
                   }}
                 >
                   Retry
                 </button>
               </div>
             ) : (
-              <div className="attendance-chart" style={{ height: '200px', position: 'relative' }}>
+              <div className="attendance-chart" style={{ 
+                height: 'clamp(180px, 40vw, 200px)', 
+                position: 'relative' 
+              }}>
                 <canvas 
                   ref={chartCanvasRef}
                   id="attendanceChart"
@@ -748,18 +1152,23 @@ const Dashboard = () => {
             {showAdminControls && (
               <div id="adminControls" className="admin-controls" style={{
                 backgroundColor: '#f8f9fa',
-                padding: '15px',
+                padding: 'clamp(12px, 2.5vw, 15px)',
                 borderRadius: '8px',
-                marginTop: '15px',
+                marginTop: 'clamp(12px, 2.5vw, 15px)',
                 border: '1px solid #e9ecef'
               }}>
-                <p className="text-muted" style={{ color: '#6c757d', marginBottom: '10px' }}>
+                <p className="text-muted" style={{ 
+                  color: '#6c757d', 
+                  marginBottom: '10px',
+                  fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+                }}>
                   Toggle days attended:
                 </p>
                 <div className="day-toggles" style={{
                   display: 'flex',
-                  gap: '10px',
-                  margin: '10px 0'
+                  gap: 'clamp(6px, 1.5vw, 8px)',
+                  margin: '10px 0',
+                  flexWrap: 'wrap'
                 }}>
                   {attendanceData.map((attendance, index) => {
                     const date = new Date();
@@ -772,15 +1181,17 @@ const Dashboard = () => {
                         className={`day-toggle ${attendance === 1 ? 'btn-present' : 'btn-absent'}`}
                         onClick={() => handleToggleDayAttendance(index)}
                         style={{
-                          padding: '8px 16px',
+                          padding: 'clamp(6px, 1.5vw, 8px) clamp(12px, 2vw, 16px)',
                           border: 'none',
-                          borderRadius: '4px',
+                          borderRadius: '6px',
                           cursor: 'pointer',
                           fontWeight: '500',
                           transition: 'all 0.3s ease',
                           backgroundColor: attendance === 1 ? '#2ecc71' : '#e74c3c',
                           color: 'white',
-                          flex: 1
+                          flex: '1 0 auto',
+                          minWidth: '60px',
+                          fontSize: 'clamp(0.8rem, 1.8vw, 0.9rem)'
                         }}
                       >
                         {dayName}
@@ -796,13 +1207,16 @@ const Dashboard = () => {
                     backgroundColor: '#28a745',
                     color: 'white',
                     border: 'none',
-                    padding: '8px 16px',
-                    borderRadius: '4px',
+                    padding: 'clamp(8px, 1.5vw, 10px) clamp(12px, 2vw, 16px)',
+                    borderRadius: '6px',
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
+                    justifyContent: 'center',
                     gap: '5px',
-                    marginTop: '10px'
+                    marginTop: '10px',
+                    width: '100%',
+                    fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
                   }}
                 >
                   <i className="fas fa-save"></i> Save Changes
@@ -813,277 +1227,436 @@ const Dashboard = () => {
         </div>
 
         {/* Calendar Card */}
-        <div className="card">
-          <div className="card-header">
-            <h3 className="card-title">Academic Calendar</h3>
-            <div className="card-icon secondary">
-              <i className="fas fa-calendar-alt"></i>
+        <div className="card" style={{
+          backgroundColor: 'white',
+          borderRadius: '12px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+          padding: 'clamp(15px, 3vw, 20px)',
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100%',
+          minHeight: '300px'
+        }}>
+          <div className="card-header" style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            marginBottom: '15px'
+          }}>
+            <h3 className="card-title" style={{ 
+              margin: '0',
+              fontSize: 'clamp(1rem, 2.5vw, 1.2rem)',
+              color: '#333'
+            }}>
+              Academic Calendar
+            </h3>
+            <div className="card-icon secondary" style={{
+              width: 'clamp(36px, 8vw, 44px)',
+              height: 'clamp(36px, 8vw, 44px)',
+              borderRadius: '50%',
+              backgroundColor: 'rgba(155, 89, 182, 0.1)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <i className="fas fa-calendar-alt" style={{ color: '#9b59b6', fontSize: 'clamp(16px, 3vw, 20px)' }}></i>
             </div>
           </div>
           <div 
             className="card-content" 
             id="calendarContainer"
             ref={calendarContainerRef}
-            style={{ minHeight: '300px' }}
+            style={{ flex: '1', display: 'flex', flexDirection: 'column' }}
           >
             {/* Calendar will be inserted here */}
           </div>
         </div>
       </div>
 
-      {/* Quick Stats Row */}
+      {/* Quick Stats Row - Responsive Grid */}
       <div className="stats-row" style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-        gap: '20px',
-        marginTop: '30px'
+        gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))',
+        gap: 'clamp(12px, 2.5vw, 15px)',
+        marginTop: 'clamp(20px, 4vw, 30px)',
+        marginBottom: 'clamp(20px, 4vw, 30px)'
       }}>
+        {/* Pending Assignments */}
         <div className="stat-card" style={{
           backgroundColor: 'white',
-          padding: '20px',
-          borderRadius: '8px',
-          boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+          padding: 'clamp(15px, 3vw, 20px)',
+          borderRadius: '12px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <h4 style={{ margin: '0 0 5px 0', color: '#666' }}>Pending Assignments</h4>
-              <p style={{ margin: 0, fontSize: '24px', fontWeight: 'bold', color: '#e74c3c' }}>
+              <h4 style={{ 
+                margin: '0 0 5px 0', 
+                color: '#666',
+                fontSize: 'clamp(0.9rem, 2.2vw, 1rem)'
+              }}>
+                Pending Assignments
+              </h4>
+              <p style={{ 
+                margin: 0, 
+                fontSize: 'clamp(1.5rem, 4vw, 1.8rem)', 
+                fontWeight: 'bold', 
+                color: '#e74c3c' 
+              }}>
                 {dashboardStats.pendingAssignments}
               </p>
               {dashboardStats.pendingAssignments > 0 && (
-                <p style={{ margin: '5px 0 0 0', fontSize: '12px', color: '#666' }}>
+                <p style={{ 
+                  margin: '5px 0 0 0', 
+                  fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)', 
+                  color: '#666' 
+                }}>
                   Due soon
                 </p>
               )}
             </div>
             <div style={{
-              width: '40px',
-              height: '40px',
+              width: 'clamp(36px, 8vw, 44px)',
+              height: 'clamp(36px, 8vw, 44px)',
               borderRadius: '50%',
               backgroundColor: '#ffebee',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center'
+              justifyContent: 'center',
+              flexShrink: '0'
             }}>
-              <i className="fas fa-tasks" style={{ color: '#e74c3c', fontSize: '20px' }}></i>
+              <i className="fas fa-tasks" style={{ 
+                color: '#e74c3c', 
+                fontSize: 'clamp(16px, 3vw, 20px)' 
+              }}></i>
             </div>
           </div>
         </div>
 
+        {/* Upcoming Exams */}
         <div className="stat-card" style={{
           backgroundColor: 'white',
-          padding: '20px',
-          borderRadius: '8px',
-          boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+          padding: 'clamp(15px, 3vw, 20px)',
+          borderRadius: '12px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <h4 style={{ margin: '0 0 5px 0', color: '#666' }}>Upcoming Exams</h4>
-              <p style={{ margin: 0, fontSize: '24px', fontWeight: 'bold', color: '#3498db' }}>
+              <h4 style={{ 
+                margin: '0 0 5px 0', 
+                color: '#666',
+                fontSize: 'clamp(0.9rem, 2.2vw, 1rem)'
+              }}>
+                Upcoming Exams
+              </h4>
+              <p style={{ 
+                margin: 0, 
+                fontSize: 'clamp(1.5rem, 4vw, 1.8rem)', 
+                fontWeight: 'bold', 
+                color: '#3498db' 
+              }}>
                 {dashboardStats.upcomingExams}
               </p>
               {dashboardStats.upcomingExams > 0 && (
-                <p style={{ margin: '5px 0 0 0', fontSize: '12px', color: '#666' }}>
+                <p style={{ 
+                  margin: '5px 0 0 0', 
+                  fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)', 
+                  color: '#666' 
+                }}>
                   This week
                 </p>
               )}
             </div>
             <div style={{
-              width: '40px',
-              height: '40px',
+              width: 'clamp(36px, 8vw, 44px)',
+              height: 'clamp(36px, 8vw, 44px)',
               borderRadius: '50%',
               backgroundColor: '#e3f2fd',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center'
+              justifyContent: 'center',
+              flexShrink: '0'
             }}>
-              <i className="fas fa-clipboard-list" style={{ color: '#3498db', fontSize: '20px' }}></i>
+              <i className="fas fa-clipboard-list" style={{ 
+                color: '#3498db', 
+                fontSize: 'clamp(16px, 3vw, 20px)' 
+              }}></i>
             </div>
           </div>
         </div>
 
+        {/* Fees Paid */}
         <div className="stat-card" style={{
           backgroundColor: 'white',
-          padding: '20px',
-          borderRadius: '8px',
-          boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+          padding: 'clamp(15px, 3vw, 20px)',
+          borderRadius: '12px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <h4 style={{ margin: '0 0 5px 0', color: '#666' }}>Fees Paid</h4>
-              <p style={{ margin: 0, fontSize: '24px', fontWeight: 'bold', color: '#27ae60' }}>
+              <h4 style={{ 
+                margin: '0 0 5px 0', 
+                color: '#666',
+                fontSize: 'clamp(0.9rem, 2.2vw, 1rem)'
+              }}>
+                Fees Paid
+              </h4>
+              <p style={{ 
+                margin: 0, 
+                fontSize: 'clamp(1.5rem, 4vw, 1.8rem)', 
+                fontWeight: 'bold', 
+                color: '#27ae60' 
+              }}>
                 ${dashboardStats.financialPaid.toLocaleString()}
               </p>
-              <p style={{ margin: '5px 0 0 0', fontSize: '12px', color: '#666' }}>
+              <p style={{ 
+                margin: '5px 0 0 0', 
+                fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)', 
+                color: '#666' 
+              }}>
                 Balance: ${dashboardStats.financialBalance.toLocaleString()}
               </p>
             </div>
             <div style={{
-              width: '40px',
-              height: '40px',
+              width: 'clamp(36px, 8vw, 44px)',
+              height: 'clamp(36px, 8vw, 44px)',
               borderRadius: '50%',
               backgroundColor: '#e8f6ef',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center'
+              justifyContent: 'center',
+              flexShrink: '0'
             }}>
-              <i className="fas fa-money-bill-wave" style={{ color: '#27ae60', fontSize: '20px' }}></i>
+              <i className="fas fa-money-bill-wave" style={{ 
+                color: '#27ae60', 
+                fontSize: 'clamp(16px, 3vw, 20px)' 
+              }}></i>
             </div>
           </div>
         </div>
 
+        {/* Current CGPA */}
         <div className="stat-card" style={{
           backgroundColor: 'white',
-          padding: '20px',
-          borderRadius: '8px',
-          boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+          padding: 'clamp(15px, 3vw, 20px)',
+          borderRadius: '12px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <h4 style={{ margin: '0 0 5px 0', color: '#666' }}>Current CGPA</h4>
-              <p style={{ margin: 0, fontSize: '24px', fontWeight: 'bold', color: '#9b59b6' }}>
+              <h4 style={{ 
+                margin: '0 0 5px 0', 
+                color: '#666',
+                fontSize: 'clamp(0.9rem, 2.2vw, 1rem)'
+              }}>
+                Current CGPA
+              </h4>
+              <p style={{ 
+                margin: 0, 
+                fontSize: 'clamp(1.5rem, 4vw, 1.8rem)', 
+                fontWeight: 'bold', 
+                color: '#9b59b6' 
+              }}>
                 {dashboardStats.cgpa.toFixed(2)}
               </p>
             </div>
             <div style={{
-              width: '40px',
-              height: '40px',
+              width: 'clamp(36px, 8vw, 44px)',
+              height: 'clamp(36px, 8vw, 44px)',
               borderRadius: '50%',
               backgroundColor: '#f3e5f5',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center'
+              justifyContent: 'center',
+              flexShrink: '0'
             }}>
-              <i className="fas fa-chart-line" style={{ color: '#9b59b6', fontSize: '20px' }}></i>
+              <i className="fas fa-chart-line" style={{ 
+                color: '#9b59b6', 
+                fontSize: 'clamp(16px, 3vw, 20px)' 
+              }}></i>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Upcoming Lectures */}
-      <div className="upcoming-lectures" style={{ marginTop: '30px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-          <h3 style={{ margin: 0 }}>Upcoming Lectures This Week</h3>
-          <span style={{ fontSize: '14px', color: '#666' }}>
+      {/* Upcoming Lectures - Responsive View */}
+      <div className="upcoming-lectures" style={{ 
+        marginTop: 'clamp(20px, 4vw, 30px)',
+        overflow: 'hidden'
+      }}>
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center', 
+          marginBottom: 'clamp(12px, 2.5vw, 15px)',
+          flexWrap: 'wrap',
+          gap: '10px'
+        }}>
+          <h3 style={{ 
+            margin: 0,
+            fontSize: 'clamp(1.1rem, 2.8vw, 1.3rem)'
+          }}>
+            Upcoming Lectures This Week
+          </h3>
+          <span style={{ 
+            fontSize: 'clamp(0.85rem, 2vw, 0.95rem)', 
+            color: '#666',
+            whiteSpace: 'nowrap'
+          }}>
             {upcomingLectures.length} lecture{upcomingLectures.length !== 1 ? 's' : ''} found
           </span>
         </div>
+        
         {upcomingLectures.length === 0 ? (
-          <p style={{ 
+          <div style={{ 
             textAlign: 'center', 
-            padding: '20px', 
+            padding: 'clamp(25px, 5vw, 40px)', 
             backgroundColor: 'white',
-            borderRadius: '8px',
-            color: '#666'
+            borderRadius: '12px',
+            color: '#666',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
           }}>
-            No upcoming lectures scheduled for this week.
-          </p>
+            <i className="fas fa-calendar-times" style={{
+              fontSize: 'clamp(2rem, 5vw, 2.5rem)',
+              marginBottom: '15px',
+              color: '#dee2e6'
+            }}></i>
+            <p style={{ margin: '0 0 10px 0' }}>No upcoming lectures scheduled for this week.</p>
+            <p style={{ fontSize: 'clamp(0.85rem, 2vw, 0.95rem)', color: '#999' }}>
+              Check back later for updates
+            </p>
+          </div>
+        ) : isMobile ? (
+          // Mobile View: Compact Cards
+          <div className="mobile-lectures-container">
+            {renderMobileLectureCards()}
+          </div>
         ) : (
-          <table style={{
-            width: '100%',
-            borderCollapse: 'collapse',
-            backgroundColor: 'white',
-            borderRadius: '8px',
-            overflow: 'hidden',
-            boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
-          }}>
-            <thead>
-              <tr style={{ backgroundColor: '#f8f9fa' }}>
-                <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Date</th>
-                <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Time</th>
-                <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Course</th>
-                <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Lecturer</th>
-                <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Duration</th>
-                <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {upcomingLectures.map((lecture) => (
-                <tr 
-                  key={lecture.id}
-                  style={{ 
-                    borderBottom: '1px solid #dee2e6',
-                    backgroundColor: new Date(lecture.date) < new Date() ? '#fff9e6' : 'white'
-                  }}
-                >
-                  <td style={{ padding: '12px' }}>
-                    <div style={{ fontWeight: '500' }}>{formatDate(lecture.date)}</div>
-                    {new Date(lecture.date) < new Date() && (
-                      <span style={{ fontSize: '12px', color: '#e74c3c' }}>Today</span>
-                    )}
-                  </td>
-                  <td style={{ padding: '12px' }}>
-                    <div>{formatTime(lecture.time)}</div>
-                    <div style={{ fontSize: '12px', color: '#666' }}>
-                      to {formatTime(lecture.endTime)}
-                    </div>
-                  </td>
-                  <td style={{ padding: '12px' }}>
-                    <div style={{ fontWeight: '500' }}>{lecture.title}</div>
-                    <div style={{ fontSize: '12px', color: '#666' }}>{lecture.courseCode}</div>
-                  </td>
-                  <td style={{ padding: '12px' }}>{lecture.lecturer}</td>
-                  <td style={{ padding: '12px' }}>{lecture.duration} min</td>
-                  <td style={{ padding: '12px' }}>
-                    <button 
-                      className="add-calendar"
-                      onClick={() => addToCalendar(lecture)}
-                      style={{
-                        backgroundColor: '#f4f4f4',
-                        color: '#333',
-                        border: '1px solid #ddd',
-                        padding: '6px 12px',
-                        borderRadius: '4px',
-                        cursor: 'pointer',
-                        fontSize: '14px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '5px'
-                      }}
-                    >
-                      <i className="fas fa-calendar-plus"></i> Add to Calendar
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          // Desktop View: Full Table
+          renderDesktopTable()
         )}
       </div>
 
+      {/* Responsive CSS */}
       <style>{`
         @keyframes spin {
           0% { transform: rotate(0deg); }
           100% { transform: rotate(360deg); }
         }
+        
         .current-day {
-          background-color: #3498db;
-          color: white;
+          background-color: #3498db !important;
+          color: white !important;
           border-radius: 50%;
-          width: 30px;
-          height: 30px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          width: clamp(30px, 7vw, 36px) !important;
+          height: clamp(30px, 7vw, 36px) !important;
+          margin: 0 auto;
         }
-        .calendar-table {
-          width: 100%;
-          border-collapse: collapse;
-        }
-        .calendar-table th {
-          padding: 8px;
-          text-align: center;
-          border-bottom: 1px solid #ddd;
-          color: #666;
-        }
-        .calendar-table td {
-          padding: 8px;
-          text-align: center;
-          height: 40px;
-          cursor: pointer;
-        }
+        
         .calendar-table td:hover {
           background-color: #f5f5f5;
+        }
+        
+        /* Mobile-specific optimizations */
+        @media (max-width: 768px) {
+          .dashboard-cards {
+            grid-template-columns: 1fr;
+          }
+          
+          .stats-row {
+            grid-template-columns: repeat(2, 1fr);
+          }
+          
+          .card-header {
+            flex-direction: column;
+            align-items: flex-start !important;
+            gap: 12px;
+          }
+          
+          .card-header button {
+            width: 100%;
+            justify-content: center;
+          }
+          
+          .mobile-lecture-card:hover {
+            transform: translateY(-2px);
+            transition: transform 0.3s ease;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+          }
+        }
+        
+        @media (max-width: 480px) {
+          .stats-row {
+            grid-template-columns: 1fr;
+          }
+          
+          .day-toggles button {
+            flex: 1 0 45%;
+          }
+          
+          .mobile-lecture-card {
+            padding: 14px;
+          }
+        }
+        
+        /* Table responsive behavior */
+        @media (max-width: 768px) {
+          table {
+            font-size: 14px;
+          }
+          
+          table td, table th {
+            padding: 10px 8px;
+          }
+        }
+        
+        /* Hover effects for desktop */
+        @media (hover: hover) {
+          .stat-card:hover {
+            transform: translateY(-2px);
+            transition: transform 0.3s ease;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+          }
+          
+          .card:hover {
+            transform: translateY(-2px);
+            transition: transform 0.3s ease;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.12);
+          }
+          
+          .add-calendar:hover,
+          .mobile-lecture-card button:hover {
+            background-color: #007bff !important;
+            color: white !important;
+            border-color: #007bff !important;
+            transition: all 0.3s ease;
+          }
+        }
+        
+        /* Remove blue focus outlines and use better ones */
+        button:focus {
+          outline: 2px solid #3498db;
+          outline-offset: 2px;
+        }
+        
+        /* Improve touch targets on mobile */
+        @media (max-width: 768px) {
+          button, .add-calendar {
+            min-height: 44px;
+            min-width: 44px;
+          }
+          
+          table td {
+            padding: 12px 8px !important;
+          }
+        }
+        
+        /* Loading spinner */
+        .spinner {
+          animation: spin 1s linear infinite;
         }
       `}</style>
     </div>

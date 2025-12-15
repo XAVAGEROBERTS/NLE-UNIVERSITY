@@ -12,7 +12,7 @@ const StudentLayout = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
-  const [showAIChat, setShowAIChat] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [studentData, setStudentData] = useState(null);
   const [notifications, setNotifications] = useState([
     {
@@ -43,17 +43,14 @@ const StudentLayout = () => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [logoutProgress, setLogoutProgress] = useState(0);
-  const [aiMessages, setAiMessages] = useState([
-    { id: 1, text: 'Hello! I\'m your AI assistant. How can I help you today?', sender: 'ai', time: 'Just now' }
-  ]);
-  const [userInput, setUserInput] = useState('');
   const [isLoadingUser, setIsLoadingUser] = useState(true);
+  const [isMobile, setIsMobile] = useState(false);
 
   const notificationRef = useRef(null);
   const bellIconRef = useRef(null);
   const logoutModalRef = useRef(null);
-  const aiChatRef = useRef(null);
   const logoutProgressRef = useRef(null);
+  const mobileMenuRef = useRef(null);
 
   const menuItems = [
     { id: 'dashboard', label: 'Home', icon: 'fas fa-home', path: '/dashboard' },
@@ -65,8 +62,27 @@ const StudentLayout = () => {
     { id: 'results', label: 'Examination Results', icon: 'fas fa-chart-bar', path: '/results' },
     { id: 'finance', label: 'Financial Statements', icon: 'fas fa-money-bill-wave', path: '/finance' },
     { id: 'tutorials', label: 'Tutorials', icon: 'fas fa-chalkboard-teacher', path: '/tutorials' },
+    { id: 'chatbot', label: 'Student Assistant', icon: 'fas fa-robot', path: '/chatbot' },
     { id: 'settings', label: 'Settings', icon: 'fas fa-cog', path: '/settings' },
   ];
+
+  // Check mobile on mount and resize
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 1024);
+      if (window.innerWidth < 1024) {
+        setSidebarCollapsed(true);
+        setMobileMenuOpen(false);
+      } else {
+        setMobileMenuOpen(false);
+      }
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // Fetch detailed student data
   const fetchStudentData = useCallback(async () => {
@@ -153,10 +169,11 @@ const StudentLayout = () => {
         }
       }
 
-      if (showAIChat && 
-          aiChatRef.current && 
-          !aiChatRef.current.contains(event.target)) {
-        setShowAIChat(false);
+      if (mobileMenuOpen && 
+          mobileMenuRef.current && 
+          !mobileMenuRef.current.contains(event.target) &&
+          !event.target.closest('.mobile-menu-toggle')) {
+        setMobileMenuOpen(false);
       }
     };
 
@@ -164,7 +181,7 @@ const StudentLayout = () => {
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [showNotifications, showLogoutModal, showAIChat, isLoggingOut]);
+  }, [showNotifications, showLogoutModal, isLoggingOut, mobileMenuOpen]);
 
   // Animate logout progress
   useEffect(() => {
@@ -183,12 +200,26 @@ const StudentLayout = () => {
     }
   }, [isLoggingOut]);
 
+  // Close mobile menu on route change
+  useEffect(() => {
+    if (mobileMenuOpen) {
+      setMobileMenuOpen(false);
+    }
+  }, [location.pathname]);
+
   const handleNavigation = (path) => {
     navigate(path);
+    if (isMobile) {
+      setMobileMenuOpen(false);
+    }
   };
 
   const handleLogout = () => {
     setShowLogoutModal(true);
+  };
+
+  const toggleMobileMenu = () => {
+    setMobileMenuOpen(!mobileMenuOpen);
   };
 
   // FIXED LOGOUT FUNCTION
@@ -269,51 +300,6 @@ const StudentLayout = () => {
     setShowNotifications(false);
   };
 
-  const toggleAIChat = () => {
-    setShowAIChat(!showAIChat);
-  };
-
-  const handleSendMessage = () => {
-    if (userInput.trim() === '') return;
-
-    const newUserMessage = {
-      id: Date.now(),
-      text: userInput,
-      sender: 'user',
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
-
-    const aiResponses = [
-      "I can help you with course materials, assignments, and schedule information.",
-      "You have upcoming lectures in Machine Learning and Internet of Things.",
-      "Your attendance for this week is 80%. Keep up the good work!",
-      "There are 3 new assignments posted in your course dashboard.",
-      "Would you like me to help you prepare for your upcoming exams?",
-      "I can assist with finding tutorial videos and study materials.",
-      "Your current GPA is 3.7. You're doing great!",
-      "Need help with a specific topic? Just ask!"
-    ];
-
-    const randomResponse = aiResponses[Math.floor(Math.random() * aiResponses.length)];
-    
-    const newAiMessage = {
-      id: Date.now() + 1,
-      text: randomResponse,
-      sender: 'ai',
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
-
-    setAiMessages(prev => [...prev, newUserMessage, newAiMessage]);
-    setUserInput('');
-  };
-
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
-    }
-  };
-
   const isActive = (path) => {
     return location.pathname === path;
   };
@@ -391,7 +377,7 @@ const StudentLayout = () => {
 
   return (
     <>
-      {/* Logout Modal */}
+      {/* Logout Modal - Mobile Responsive */}
       {showLogoutModal && (
         <div style={{
           position: 'fixed',
@@ -405,13 +391,14 @@ const StudentLayout = () => {
           alignItems: 'center',
           zIndex: 2000,
           animation: 'fadeIn 0.3s ease-out',
+          padding: '1rem',
         }}>
           <div 
             ref={logoutModalRef}
             style={{
               backgroundColor: 'white',
               borderRadius: '12px',
-              width: '90%',
+              width: '100%',
               maxWidth: '400px',
               boxShadow: '0 10px 30px rgba(0, 0, 0, 0.2)',
               overflow: 'hidden',
@@ -436,6 +423,7 @@ const StudentLayout = () => {
                 justifyContent: 'center',
                 color: 'white',
                 fontSize: '24px',
+                flexShrink: 0,
               }}>
                 <i className="fas fa-sign-out-alt"></i>
               </div>
@@ -475,6 +463,7 @@ const StudentLayout = () => {
               display: 'flex',
               justifyContent: 'flex-end',
               gap: '10px',
+              flexWrap: 'wrap',
             }}>
               <button
                 onClick={cancelLogout}
@@ -489,6 +478,9 @@ const StudentLayout = () => {
                   fontSize: '14px',
                   fontWeight: '500',
                   transition: 'all 0.2s',
+                  flex: '1',
+                  minWidth: '120px',
+                  minHeight: 'auto !important',
                 }}
                 onMouseEnter={(e) => {
                   if (!isLoggingOut) {
@@ -520,7 +512,9 @@ const StudentLayout = () => {
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '8px',
+                  flex: '1',
                   minWidth: '120px',
+                  minHeight: 'auto !important',
                 }}
                 onMouseEnter={(e) => {
                   if (!isLoggingOut) {
@@ -620,137 +614,6 @@ const StudentLayout = () => {
         </div>
       )}
 
-      {/* AI Chat Container */}
-      {showAIChat && (
-        <div 
-          ref={aiChatRef}
-          style={{
-            position: 'fixed',
-            bottom: '20px',
-            right: '20px',
-            width: '350px',
-            height: '500px',
-            backgroundColor: 'white',
-            borderRadius: '10px',
-            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
-            zIndex: 1000,
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-          }}
-        >
-          <div style={{
-            padding: '15px',
-            backgroundColor: '#3498db',
-            color: 'white',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <i className="fas fa-robot" style={{ fontSize: '20px' }}></i>
-              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '600' }}>
-                AI Assistant
-              </h3>
-            </div>
-            <button
-              onClick={toggleAIChat}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: 'white',
-                fontSize: '20px',
-                cursor: 'pointer',
-                padding: '5px',
-                borderRadius: '4px',
-              }}
-            >
-              <i className="fas fa-times"></i>
-            </button>
-          </div>
-
-          <div style={{
-            flex: 1,
-            padding: '15px',
-            overflowY: 'auto',
-            backgroundColor: '#f9f9f9',
-          }}>
-            {aiMessages.map((message) => (
-              <div
-                key={message.id}
-                style={{
-                  marginBottom: '15px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: message.sender === 'user' ? 'flex-end' : 'flex-start',
-                }}
-              >
-                <div
-                  style={{
-                    maxWidth: '80%',
-                    padding: '10px 15px',
-                    borderRadius: message.sender === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
-                    backgroundColor: message.sender === 'user' ? '#3498db' : '#e5e5ea',
-                    color: message.sender === 'user' ? 'white' : '#000',
-                    fontSize: '14px',
-                    lineHeight: '1.4',
-                  }}
-                >
-                  {message.text}
-                </div>
-                <span style={{
-                  fontSize: '11px',
-                  color: '#999',
-                  marginTop: '5px',
-                }}>
-                  {message.time}
-                </span>
-              </div>
-            ))}
-          </div>
-
-          <div style={{
-            padding: '10px',
-            borderTop: '1px solid #eee',
-            backgroundColor: 'white',
-          }}>
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <input
-                type="text"
-                value={userInput}
-                onChange={(e) => setUserInput(e.target.value)}
-                onKeyPress={handleKeyPress}
-                placeholder="Type your message..."
-                style={{
-                  flex: 1,
-                  padding: '10px 15px',
-                  border: '1px solid #ddd',
-                  borderRadius: '20px',
-                  fontSize: '14px',
-                  outline: 'none',
-                }}
-              />
-              <button
-                onClick={handleSendMessage}
-                disabled={!userInput.trim()}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#3498db',
-                  fontSize: '18px',
-                  cursor: userInput.trim() ? 'pointer' : 'not-allowed',
-                  opacity: userInput.trim() ? 1 : 0.5,
-                  padding: '8px',
-                  borderRadius: '50%',
-                }}
-              >
-                <i className="fas fa-paper-plane"></i>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Main Layout Container */}
       <div 
         className="layout-container"
@@ -766,12 +629,12 @@ const StudentLayout = () => {
         <header 
           className="layout-header"
           style={{
-            height: '70px',
+            height: isMobile ? '60px' : '70px',
             backgroundColor: 'white',
             boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
             display: 'flex',
             alignItems: 'center',
-            padding: '0 2rem',
+            padding: isMobile ? '0 1rem' : '0 2rem',
             position: 'sticky',
             top: 0,
             zIndex: 100,
@@ -792,19 +655,45 @@ const StudentLayout = () => {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '1rem',
+                gap: isMobile ? '0.75rem' : '1rem',
               }}
             >
+              {/* Mobile Menu Toggle */}
+              {isMobile && (
+                <button
+                  className="mobile-menu-toggle"
+                  onClick={toggleMobileMenu}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '1.5rem',
+                    color: '#4361ee',
+                    cursor: 'pointer',
+                    padding: '5px',
+                    borderRadius: '4px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minHeight: 'auto !important',
+                    minWidth: 'auto !important',
+                    width: '40px',
+                    height: '40px',
+                  }}
+                >
+                  <i className={mobileMenuOpen ? 'fas fa-times' : 'fas fa-bars'}></i>
+                </button>
+              )}
+              
               <div 
                 className="logo"
                 style={{
-                  width: '40px',
-                  height: '40px',
+                  width: isMobile ? '32px' : '40px',
+                  height: isMobile ? '32px' : '40px',
                   position: 'relative',
                 }}
               >
                 <img 
-                  src="/images/badge.png" 
+                  src="/public/badge.png" 
                   alt="Logo" 
                   style={{
                     width: '100%',
@@ -823,15 +712,16 @@ const StudentLayout = () => {
                     fontWeight: 'bold',
                     padding: '2px 6px',
                     borderRadius: '10px',
+                    display: isMobile ? 'none' : 'block',
                   }}
                 >
-                  LMS
+                  ERP
                 </span>
               </div>
               <div>
                 <h1 
                   style={{
-                    fontSize: '1.3rem',
+                    fontSize: isMobile ? '1rem' : '1.3rem',
                     fontWeight: '700',
                     margin: 0,
                     background: 'linear-gradient(90deg, #4361ee, #3f37c9)',
@@ -843,7 +733,7 @@ const StudentLayout = () => {
                 </h1>
                 <p 
                   style={{
-                    fontSize: '0.75rem',
+                    fontSize: isMobile ? '0.65rem' : '0.75rem',
                     color: '#6c757d',
                     margin: 0,
                   }}
@@ -853,20 +743,31 @@ const StudentLayout = () => {
               </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: isMobile ? '1rem' : '1.5rem' 
+            }}>
               <div 
                 ref={bellIconRef}
                 className="notification-icon"
                 onClick={handleNotificationClick}
                 style={{
                   position: 'relative',
-                  fontSize: '1.2rem',
+                  fontSize: isMobile ? '1.1rem' : '1.2rem',
                   color: '#adb5bd',
                   cursor: 'pointer',
                   padding: '8px',
                   borderRadius: '50%',
                   transition: 'all 0.2s',
                   backgroundColor: showNotifications ? 'rgba(0, 0, 0, 0.05)' : 'transparent',
+                  minHeight: 'auto !important',
+                  minWidth: 'auto !important',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '40px',
+                  height: '40px',
                 }}
               >
                 <i className="fas fa-bell"></i>
@@ -893,108 +794,114 @@ const StudentLayout = () => {
                 )}
               </div>
 
-              <div 
-                className="user-info"
-                onClick={() => navigate('/settings')}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.8rem',
-                  padding: '0.5rem 0.8rem',
-                  borderRadius: '30px',
-                  cursor: 'pointer',
-                  position: 'relative',
-                }}
-              >
-                {isLoadingUser && (
-                  <div style={{
-                    position: 'absolute',
-                    top: '-5px',
-                    right: '-5px',
-                    width: '20px',
-                    height: '20px',
-                    borderRadius: '50%',
-                    backgroundColor: '#3498db',
+              {!isMobile && (
+                <div 
+                  className="user-info"
+                  onClick={() => navigate('/settings')}
+                  style={{
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'center',
-                    color: 'white',
-                    fontSize: '10px',
-                    border: '2px solid white',
-                  }}>
-                    <div style={{
-                      width: '12px',
-                      height: '12px',
-                      border: '2px solid rgba(255,255,255,0.3)',
-                      borderTopColor: 'white',
-                      borderRadius: '50%',
-                      animation: 'spin 1s linear infinite',
-                    }}></div>
-                  </div>
-                )}
-                <img 
-                  src="https://ui-avatars.com/api/?name=${encodeURIComponent(studentData?.full_name || user?.name || 'Student')}&background=3498db&color=fff&size=128" 
-                  alt="User"
-                  style={{
-                    width: '36px',
-                    height: '36px',
-                    borderRadius: '50%',
-                    objectFit: 'cover',
-                    border: '2px solid #e9ecef',
+                    gap: '0.8rem',
+                    padding: '0.5rem 0.8rem',
+                    borderRadius: '30px',
+                    cursor: 'pointer',
+                    position: 'relative',
+                    minHeight: 'auto !important',
                   }}
-                />
-                <div>
-                  <div 
-                    style={{
-                      fontSize: '0.85rem',
-                      fontWeight: '600',
-                      color: '#212529',
+                >
+                  {isLoadingUser && (
+                    <div style={{
+                      position: 'absolute',
+                      top: '-5px',
+                      right: '-5px',
+                      width: '20px',
+                      height: '20px',
+                      borderRadius: '50%',
+                      backgroundColor: '#3498db',
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '8px',
-                    }}
-                  >
-                    {studentData?.full_name || user?.name || 'Loading...'}
-                    {isLoadingUser && (
+                      justifyContent: 'center',
+                      color: 'white',
+                      fontSize: '10px',
+                      border: '2px solid white',
+                    }}>
                       <div style={{
                         width: '12px',
                         height: '12px',
-                        border: '2px solid #e9ecef',
-                        borderTopColor: '#3498db',
+                        border: '2px solid rgba(255,255,255,0.3)',
+                        borderTopColor: 'white',
                         borderRadius: '50%',
                         animation: 'spin 1s linear infinite',
                       }}></div>
-                    )}
-                  </div>
-                  <div 
+                    </div>
+                  )}
+                  <img 
+                    src={`https://ui-avatars.com/api/?name=${encodeURIComponent(studentData?.full_name || user?.name || 'Student')}&background=3498db&color=fff&size=128`} 
+                    alt="User"
                     style={{
-                      fontSize: '0.7rem',
-                      color: '#adb5bd',
-                      textTransform: 'uppercase',
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '50%',
+                      objectFit: 'cover',
+                      border: '2px solid #e9ecef',
                     }}
-                  >
-                    Student
+                  />
+                  <div>
+                    <div 
+                      style={{
+                        fontSize: '0.85rem',
+                        fontWeight: '600',
+                        color: '#212529',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                      }}
+                    >
+                      {studentData?.full_name || user?.name || 'Loading...'}
+                      {isLoadingUser && (
+                        <div style={{
+                          width: '12px',
+                          height: '12px',
+                          border: '2px solid #e9ecef',
+                          borderTopColor: '#3498db',
+                          borderRadius: '50%',
+                          animation: 'spin 1s linear infinite',
+                        }}></div>
+                      )}
+                    </div>
+                    <div 
+                      style={{
+                        fontSize: '0.7rem',
+                        color: '#adb5bd',
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      Student
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
 
+          {/* Notifications Dropdown - Mobile Responsive */}
           {showNotifications && (
             <div 
               ref={notificationRef}
               className="notification-dropdown"
               style={{
                 position: 'absolute',
-                top: '70px',
-                right: '2rem',
-                width: '350px',
+                top: isMobile ? '60px' : '70px',
+                right: isMobile ? '0.5rem' : '2rem',
+                width: isMobile ? 'calc(100% - 1rem)' : '350px',
+                maxWidth: isMobile ? '400px' : '350px',
                 backgroundColor: 'white',
                 borderRadius: '8px',
                 boxShadow: '0 5px 15px rgba(0,0,0,0.1)',
                 zIndex: 1000,
                 border: '1px solid #e9ecef',
                 overflow: 'hidden',
+                maxHeight: isMobile ? '70vh' : '400px',
               }}
             >
               <div style={{
@@ -1006,10 +913,18 @@ const StudentLayout = () => {
                 backgroundColor: '#f8f9fa',
               }}>
                 <div>
-                  <h4 style={{ margin: 0, fontSize: '16px', color: '#212529' }}>
+                  <h4 style={{ 
+                    margin: 0, 
+                    fontSize: isMobile ? '15px' : '16px', 
+                    color: '#212529' 
+                  }}>
                     Notifications
                   </h4>
-                  <p style={{ margin: '5px 0 0 0', fontSize: '12px', color: '#6c757d' }}>
+                  <p style={{ 
+                    margin: '5px 0 0 0', 
+                    fontSize: isMobile ? '11px' : '12px', 
+                    color: '#6c757d' 
+                  }}>
                     {unreadCount} unread {unreadCount === 1 ? 'message' : 'messages'}
                   </p>
                 </div>
@@ -1022,9 +937,10 @@ const StudentLayout = () => {
                         border: 'none',
                         color: '#3498db',
                         cursor: 'pointer',
-                        fontSize: '12px',
+                        fontSize: isMobile ? '11px' : '12px',
                         padding: '4px 8px',
                         borderRadius: '4px',
+                        minHeight: 'auto !important',
                       }}
                     >
                       Mark all as read
@@ -1038,9 +954,10 @@ const StudentLayout = () => {
                         border: 'none',
                         color: '#e74c3c',
                         cursor: 'pointer',
-                        fontSize: '12px',
+                        fontSize: isMobile ? '11px' : '12px',
                         padding: '4px 8px',
                         borderRadius: '4px',
+                        minHeight: 'auto !important',
                       }}
                     >
                       Clear all
@@ -1049,14 +966,21 @@ const StudentLayout = () => {
                 </div>
               </div>
 
-              <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+              <div style={{ 
+                maxHeight: isMobile ? 'calc(70vh - 80px)' : '320px', 
+                overflowY: 'auto' 
+              }}>
                 {notifications.length === 0 ? (
                   <div style={{
                     padding: '30px 20px',
                     textAlign: 'center',
                     color: '#6c757d',
                   }}>
-                    <i className="fas fa-bell-slash" style={{ fontSize: '2rem', marginBottom: '10px', opacity: 0.5 }}></i>
+                    <i className="fas fa-bell-slash" style={{ 
+                      fontSize: isMobile ? '1.5rem' : '2rem', 
+                      marginBottom: '10px', 
+                      opacity: 0.5 
+                    }}></i>
                     <p style={{ margin: 0 }}>No notifications</p>
                   </div>
                 ) : (
@@ -1065,7 +989,7 @@ const StudentLayout = () => {
                       key={notification.id}
                       onClick={() => handleNotificationItemClick(notification.id)}
                       style={{
-                        padding: '15px',
+                        padding: isMobile ? '12px' : '15px',
                         display: 'flex',
                         borderBottom: '1px solid #f5f5f5',
                         backgroundColor: notification.read ? 'white' : '#f8f9fa',
@@ -1073,26 +997,33 @@ const StudentLayout = () => {
                       }}
                     >
                       <div style={{
-                        width: '40px',
-                        height: '40px',
+                        width: isMobile ? '32px' : '40px',
+                        height: isMobile ? '32px' : '40px',
                         borderRadius: '50%',
                         backgroundColor: getNotificationColor(notification.type) + '20',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        marginRight: '15px',
+                        marginRight: isMobile ? '10px' : '15px',
                         flexShrink: 0,
                       }}>
                         <i 
                           className={getNotificationIcon(notification.type)} 
-                          style={{ color: getNotificationColor(notification.type), fontSize: '18px' }}
+                          style={{ 
+                            color: getNotificationColor(notification.type), 
+                            fontSize: isMobile ? '16px' : '18px' 
+                          }}
                         ></i>
                       </div>
                       <div style={{ flex: 1 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div style={{ 
+                          display: 'flex', 
+                          justifyContent: 'space-between', 
+                          alignItems: 'flex-start' 
+                        }}>
                           <p style={{ 
                             margin: '0 0 5px 0', 
-                            fontSize: '14px', 
+                            fontSize: isMobile ? '13px' : '14px', 
                             fontWeight: notification.read ? '400' : '600',
                             color: notification.read ? '#6c757d' : '#212529',
                           }}>
@@ -1112,13 +1043,16 @@ const StudentLayout = () => {
                         </div>
                         <p style={{ 
                           margin: '0 0 5px 0', 
-                          fontSize: '13px', 
+                          fontSize: isMobile ? '12px' : '13px', 
                           color: '#6c757d',
                           lineHeight: '1.4',
                         }}>
                           {notification.message}
                         </p>
-                        <small style={{ color: '#95a5a6', fontSize: '11px' }}>
+                        <small style={{ 
+                          color: '#95a5a6', 
+                          fontSize: isMobile ? '10px' : '11px' 
+                        }}>
                           {notification.time}
                         </small>
                       </div>
@@ -1143,9 +1077,10 @@ const StudentLayout = () => {
                       border: 'none',
                       color: '#4361ee',
                       cursor: 'pointer',
-                      fontSize: '12px',
+                      fontSize: isMobile ? '11px' : '12px',
                       fontWeight: '500',
                       padding: '5px 10px',
+                      minHeight: 'auto !important',
                     }}
                   >
                     View all notifications
@@ -1163,167 +1098,317 @@ const StudentLayout = () => {
             flex: 1,
           }}
         >
-          <aside 
-            className="sidebar"
-            style={{
-              width: sidebarCollapsed ? '70px' : '260px',
-              backgroundColor: 'white',
-              borderRight: '1px solid #e9ecef',
-              padding: '1.5rem 0',
-              transition: 'all 0.3s',
-              position: 'sticky',
-              top: '70px',
-              height: 'calc(100vh - 70px)',
-              overflowY: 'auto',
-            }}
-          >
-            <button 
-              className="sidebar-toggle"
-              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          {/* Desktop Sidebar */}
+          {!isMobile && (
+            <aside 
+              className="sidebar"
               style={{
-                position: 'absolute',
-                top: '2px',
-                right: '24px',
-                background: 'white',
-                border: '1px solid #dee2e6',
-                borderRadius: '50%',
-                width: '20px',
-                height: '20px',
-                cursor: 'pointer',
-                zIndex: 95,
-                fontSize: '0.8rem',
-                color: '#6c757d',
+                width: sidebarCollapsed ? '70px' : '260px',
+                backgroundColor: 'white',
+                borderRight: '1px solid #e9ecef',
+                padding: '1.5rem 0',
+                transition: 'all 0.3s',
+                position: 'sticky',
+                top: isMobile ? '60px' : '70px',
+                height: `calc(100vh - ${isMobile ? '60px' : '70px'})`,
+                overflowY: 'auto',
+                display: isMobile ? 'none' : 'block',
               }}
             >
-              <i className={`fas fa-chevron-${sidebarCollapsed ? 'right' : 'left'}`}></i>
-            </button>
+              <button 
+                className="sidebar-toggle"
+                onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                style={{
+                  position: 'absolute',
+                  top: '6px',
+                  right: '22px',
+                  background: 'white',
+                  border: '1px solid #dee2e6',
+                  borderRadius: '50%',
+                  width: '24px',
+                  height: '24px',
+                  cursor: 'pointer',
+                  zIndex: 95,
+                  fontSize: '0.8rem',
+                  color: '#6c757d',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minHeight: 'auto !important',
+                  minWidth: 'auto !important',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                }}
+              >
+                <i className={`fas fa-chevron-${sidebarCollapsed ? 'right' : 'left'}`}></i>
+              </button>
 
-            <nav 
-              className="sidebar-nav"
-              style={{
-                listStyle: 'none',
-                padding: 0,
-                margin: 0,
-              }}
-            >
-              {menuItems.map((item) => (
+              <nav 
+                className="sidebar-nav"
+                style={{
+                  listStyle: 'none',
+                  padding: 0,
+                  margin: 0,
+                }}
+              >
+                {menuItems.map((item) => (
+                  <div 
+                    key={item.id}
+                    className="menu-item"
+                    style={{
+                      marginBottom: '0.25rem',
+                    }}
+                  >
+                    <button
+                      onClick={() => handleNavigation(item.path)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.8rem',
+                        padding: '0.7rem 1.5rem',
+                        color: isActive(item.path) ? '#4361ee' : '#6c757d',
+                        backgroundColor: isActive(item.path) ? 'rgba(67, 97, 238, 0.1)' : 'transparent',
+                        border: 'none',
+                        width: '100%',
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                        fontSize: '0.9rem',
+                        fontWeight: isActive(item.path) ? '600' : '500',
+                        position: 'relative',
+                        justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
+                        minHeight: 'auto !important',
+                      }}
+                    >
+                      {isActive(item.path) && !sidebarCollapsed && (
+                        <div 
+                          style={{
+                            position: 'absolute',
+                            left: 0,
+                            top: 0,
+                            bottom: 0,
+                            width: '3px',
+                            backgroundColor: '#4361ee',
+                            borderRadius: '0 3px 3px 0',
+                          }}
+                        />
+                      )}
+                      <i className={item.icon} style={{ 
+                        fontSize: '1rem', 
+                        width: '20px' 
+                      }}></i>
+                      {!sidebarCollapsed && <span>{item.label}</span>}
+                      {sidebarCollapsed && isActive(item.path) && (
+                        <div style={{
+                          position: 'absolute',
+                          right: '5px',
+                          width: '6px',
+                          height: '6px',
+                          borderRadius: '50%',
+                          backgroundColor: '#4361ee',
+                        }}></div>
+                      )}
+                    </button>
+                  </div>
+                ))}
+
                 <div 
-                  key={item.id}
                   className="menu-item"
-                  style={{
-                    marginBottom: '0.25rem',
-                  }}
+                  style={{ marginBottom: '0.25rem' }}
                 >
                   <button
-                    onClick={() => handleNavigation(item.path)}
+                    onClick={handleLogout}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       gap: '0.8rem',
                       padding: '0.7rem 1.5rem',
-                      color: isActive(item.path) ? '#4361ee' : '#6c757d',
-                      backgroundColor: isActive(item.path) ? 'rgba(67, 97, 238, 0.1)' : 'transparent',
+                      color: '#f72585',
+                      backgroundColor: 'transparent',
                       border: 'none',
                       width: '100%',
                       textAlign: 'left',
                       cursor: 'pointer',
                       fontSize: '0.9rem',
-                      fontWeight: isActive(item.path) ? '600' : '500',
-                      position: 'relative',
+                      fontWeight: '500',
+                      justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
+                      minHeight: 'auto !important',
                     }}
                   >
-                    {isActive(item.path) && (
-                      <div 
-                        style={{
-                          position: 'absolute',
-                          left: 0,
-                          top: 0,
-                          bottom: 0,
-                          width: '3px',
-                          backgroundColor: '#4361ee',
-                          borderRadius: '0 3px 3px 0',
-                        }}
-                      />
-                    )}
-                    <i className={item.icon} style={{ fontSize: '1rem', width: '20px' }}></i>
-                    {!sidebarCollapsed && <span>{item.label}</span>}
+                    <i className="fas fa-sign-out-alt" style={{ 
+                      fontSize: '1rem', 
+                      width: '20px' 
+                    }}></i>
+                    {!sidebarCollapsed && <span>Log Out</span>}
                   </button>
                 </div>
-              ))}
+              </nav>
+            </aside>
+          )}
 
+          {/* Mobile Menu Overlay - Now covers half of the screen */}
+          {isMobile && mobileMenuOpen && (
+            <>
+              {/* Backdrop */}
               <div 
-                className="menu-item"
-                style={{ marginBottom: '0.25rem' }}
+                style={{
+                  position: 'fixed',
+                  top: '60px',
+                  left: 0,
+                  width: '100%',
+                  height: 'calc(100vh - 60px)',
+                  backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                  zIndex: 98,
+                  animation: 'fadeIn 0.3s ease-out',
+                }}
+                onClick={() => setMobileMenuOpen(false)}
+              />
+              
+              {/* Mobile Menu Sidebar */}
+              <div 
+                ref={mobileMenuRef}
+                style={{
+                  position: 'fixed',
+                  top: '60px',
+                  left: 0,
+                  width: '80%',
+                  maxWidth: '300px',
+                  height: 'calc(100vh - 60px)',
+                  backgroundColor: 'white',
+                  zIndex: 99,
+                  overflowY: 'auto',
+                  animation: 'slideInLeft 0.3s ease-out',
+                  boxShadow: '2px 0 10px rgba(0, 0, 0, 0.1)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                }}
               >
-                <button
-                  onClick={toggleAIChat}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.8rem',
-                    padding: '0.7rem 1.5rem',
-                    color: showAIChat ? '#4361ee' : '#6c757d',
-                    backgroundColor: showAIChat ? 'rgba(67, 97, 238, 0.1)' : 'transparent',
-                    border: 'none',
-                    width: '100%',
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                    fontSize: '0.9rem',
-                    fontWeight: showAIChat ? '600' : '500',
-                  }}
-                >
-                  <i className="fas fa-robot" style={{ fontSize: '1rem', width: '20px' }}></i>
-                  {!sidebarCollapsed && (
-                    <>
-                      <span>AI Chat Bot</span>
-                      {showAIChat && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '1rem',
+                  padding: '1.5rem 1rem',
+                  backgroundColor: '#f8f9fa',
+                  borderBottom: '1px solid #e9ecef',
+                }}>
+                  <img 
+                    src={`https://ui-avatars.com/api/?name=${encodeURIComponent(studentData?.full_name || user?.name || 'Student')}&background=3498db&color=fff&size=128`} 
+                    alt="User"
+                    style={{
+                      width: '48px',
+                      height: '48px',
+                      borderRadius: '50%',
+                      objectFit: 'cover',
+                      border: '2px solid #e9ecef',
+                    }}
+                  />
+                  <div>
+                    <div style={{
+                      fontSize: '1rem',
+                      fontWeight: '600',
+                      color: '#212529',
+                      marginBottom: '4px',
+                    }}>
+                      {studentData?.full_name || user?.name || 'Loading...'}
+                    </div>
+                    <div style={{
+                      fontSize: '0.8rem',
+                      color: '#adb5bd',
+                      textTransform: 'uppercase',
+                    }}>
+                      Student
+                    </div>
+                  </div>
+                </div>
+
+                <nav style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.25rem',
+                  padding: '1rem 0',
+                  flex: 1,
+                }}>
+                  {menuItems.map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => handleNavigation(item.path)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '1rem',
+                        padding: '0.9rem 1rem',
+                        color: isActive(item.path) ? '#4361ee' : '#6c757d',
+                        backgroundColor: isActive(item.path) ? 'rgba(67, 97, 238, 0.1)' : 'transparent',
+                        border: 'none',
+                        width: '100%',
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                        fontSize: '0.9rem',
+                        fontWeight: isActive(item.path) ? '600' : '500',
+                        borderLeft: isActive(item.path) ? '3px solid #4361ee' : '3px solid transparent',
+                        minHeight: 'auto !important',
+                      }}
+                    >
+                      <i className={item.icon} style={{ 
+                        fontSize: '1rem', 
+                        width: '24px',
+                        textAlign: 'center',
+                      }}></i>
+                      <span>{item.label}</span>
+                      {isActive(item.path) && (
                         <i className="fas fa-circle" style={{
                           fontSize: '8px',
                           color: '#4361ee',
                           marginLeft: 'auto',
+                          marginRight: '10px',
                         }}></i>
                       )}
-                    </>
-                  )}
-                </button>
-              </div>
+                    </button>
+                  ))}
 
-              <div 
-                className="menu-item"
-                style={{ marginBottom: '0.25rem' }}
-              >
-                <button
-                  onClick={handleLogout}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.8rem',
-                    padding: '0.7rem 1.5rem',
-                    color: '#f72585',
-                    backgroundColor: 'transparent',
-                    border: 'none',
-                    width: '100%',
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                    fontSize: '0.9rem',
-                    fontWeight: '500',
-                  }}
-                >
-                  <i className="fas fa-sign-out-alt" style={{ fontSize: '1rem', width: '20px' }}></i>
-                  {!sidebarCollapsed && <span>Log Out</span>}
-                </button>
+                  <div style={{ marginTop: 'auto', paddingTop: '1rem', borderTop: '1px solid #eee' }}>
+                    <button
+                      onClick={handleLogout}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '1rem',
+                        padding: '0.9rem 1rem',
+                        color: '#f72585',
+                        backgroundColor: 'transparent',
+                        border: 'none',
+                        width: '100%',
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                        fontSize: '0.9rem',
+                        fontWeight: '600',
+                        marginTop: '0.5rem',
+                        borderLeft: '3px solid transparent',
+                        minHeight: 'auto !important',
+                      }}
+                    >
+                      <i className="fas fa-sign-out-alt" style={{ 
+                        fontSize: '1rem', 
+                        width: '24px',
+                        textAlign: 'center',
+                      }}></i>
+                      <span>Log Out</span>
+                    </button>
+                  </div>
+                </nav>
               </div>
-            </nav>
-          </aside>
+            </>
+          )}
 
+          {/* Main Content Area */}
           <main 
             className="content-area"
             style={{
               flex: 1,
-              padding: '2rem',
+              padding: isMobile ? '1rem' : '2rem',
               backgroundColor: '#f5f7fb',
               overflowY: 'auto',
-              minHeight: 'calc(100vh - 70px)', 
+              minHeight: `calc(100vh - ${isMobile ? '60px' : '70px'})`,
+              transition: 'filter 0.3s ease',
+              filter: isMobile && mobileMenuOpen ? 'brightness(0.95)' : 'none',
             }}
           >
             <Outlet />
@@ -1374,6 +1459,28 @@ const StudentLayout = () => {
             }
           }
           
+          @keyframes slideInLeft {
+            from {
+              opacity: 0;
+              transform: translateX(-100%);
+            }
+            to {
+              opacity: 1;
+              transform: translateX(0);
+            }
+          }
+          
+          @keyframes slideDown {
+            from {
+              opacity: 0;
+              transform: translateY(-10px);
+            }
+            to {
+              opacity: 1;
+              transform: translateY(0);
+            }
+          }
+          
           @keyframes spin {
             0% {
               transform: rotate(0deg);
@@ -1383,9 +1490,28 @@ const StudentLayout = () => {
             }
           }
           
-          @media (max-width: 1200px) {
+          /* PROTECTED ELEMENTS - Override Chatbot CSS */
+          .sidebar-toggle,
+          .mobile-menu-toggle,
+          .notification-icon,
+          .menu-item button,
+          .notification-dropdown button,
+          .logout-modal button {
+            min-height: auto !important;
+            min-width: auto !important;
+          }
+          
+          /* Desktop */
+          @media (min-width: 1024px) {
+            .mobile-menu-toggle {
+              display: none !important;
+            }
+          }
+          
+          /* Tablet */
+          @media (max-width: 1024px) and (min-width: 768px) {
             .sidebar {
-              width: 70px;
+              width: 70px !important;
             }
             
             .sidebar-toggle {
@@ -1396,28 +1522,83 @@ const StudentLayout = () => {
               width: 300px !important;
               right: 1rem !important;
             }
-          }
-          
-          @media (max-width: 768px) {
-            .ai-chat-container {
-              width: calc(100% - 40px) !important;
-              height: 400px !important;
-              bottom: 10px !important;
-              right: 10px !important;
-            }
-            
-            .notification-dropdown {
-              width: 280px !important;
-              right: 0.5rem !important;
-            }
             
             .header-logo h1 {
               font-size: 1.1rem !important;
             }
             
-            .header-logo p {
-              font-size: 0.7rem !important;
+            .user-info div:first-child {
+              font-size: 0.8rem !important;
             }
+          }
+          
+          /* Mobile */
+          @media (max-width: 767px) {
+            .notification-dropdown {
+              width: calc(100% - 1rem) !important;
+              right: 0.5rem !important;
+            }
+            
+            .header-logo h1 {
+              font-size: 1rem !important;
+            }
+            
+            .header-logo p {
+              display: none !important;
+            }
+            
+            .user-info {
+              padding: 0.3rem !important;
+            }
+            
+            .content-area {
+              padding: 1rem !important;
+            }
+            
+            /* Mobile menu takes half of the screen */
+            .mobile-menu {
+              width: 80% !important;
+              max-width: 300px !important;
+            }
+          }
+          
+          /* Small Mobile */
+          @media (max-width: 480px) {
+            .layout-header {
+              padding: 0 0.75rem !important;
+            }
+            
+            .header-logo {
+              gap: 0.5rem !important;
+            }
+            
+            .header-logo h1 {
+              font-size: 0.9rem !important;
+            }
+            
+            .notification-dropdown {
+              width: calc(100% - 0.5rem) !important;
+              right: 0.25rem !important;
+            }
+            
+            /* Mobile menu even smaller on very small screens */
+            .mobile-menu {
+              width: 85% !important;
+              max-width: 280px !important;
+            }
+          }
+          
+          /* Medium Mobile */
+          @media (max-width: 767px) and (min-width: 481px) {
+            .mobile-menu {
+              width: 75% !important;
+              max-width: 320px !important;
+            }
+          }
+          
+          /* Prevent scrolling when mobile menu is open */
+          body.mobile-menu-open {
+            overflow: hidden;
           }
         `}</style>
       </div>

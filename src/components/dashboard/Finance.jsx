@@ -12,7 +12,20 @@ const Finance = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [studentInfo, setStudentInfo] = useState(null);
+  const [isMobile, setIsMobile] = useState(false);
   const { user } = useStudentAuth();
+
+  // Check screen size
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   useEffect(() => {
     if (user?.email) {
@@ -215,18 +228,540 @@ const Finance = () => {
     alert(`Receipt #${receiptNumber}\n\nA receipt viewer or PDF download would be implemented here.`);
   };
 
+  // Mobile-friendly payment history card view
+  const renderMobilePaymentHistory = () => {
+    return (
+      <div style={{ 
+        display: 'flex', 
+        flexDirection: 'column', 
+        gap: '12px' 
+      }}>
+        {paymentHistory.map((payment, index) => (
+          <div 
+            key={payment.id || index}
+            style={{
+              backgroundColor: 'white',
+              borderRadius: '10px',
+              padding: '16px',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+              borderLeft: `4px solid ${payment.semester === 1 ? '#3498db' : '#2ecc71'}`
+            }}
+          >
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'flex-start',
+              marginBottom: '12px'
+            }}>
+              <div style={{ flex: 1 }}>
+                <h4 style={{ 
+                  margin: '0 0 6px 0', 
+                  fontSize: '15px',
+                  color: '#2c3e50',
+                  lineHeight: '1.3'
+                }}>
+                  {payment.description}
+                </h4>
+                <p style={{ 
+                  margin: '0',
+                  fontSize: '13px',
+                  color: '#7f8c8d'
+                }}>
+                  {payment.date}
+                </p>
+              </div>
+              <div style={{
+                backgroundColor: payment.semester === 1 ? '#e8f4fd' : '#e8f6ef',
+                color: payment.semester === 1 ? '#3498db' : '#27ae60',
+                padding: '4px 10px',
+                borderRadius: '12px',
+                fontSize: '12px',
+                fontWeight: '500',
+                whiteSpace: 'nowrap'
+              }}>
+                Sem {payment.semester}
+              </div>
+            </div>
+            
+            <div style={{ 
+              display: 'grid', 
+              gridTemplateColumns: 'repeat(2, 1fr)', 
+              gap: '12px',
+              marginBottom: '12px'
+            }}>
+              <div>
+                <p style={{ 
+                  margin: '0 0 4px 0',
+                  fontSize: '12px',
+                  color: '#95a5a6',
+                  textTransform: 'uppercase'
+                }}>
+                  Amount
+                </p>
+                <p style={{ 
+                  margin: '0',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  color: '#2c3e50'
+                }}>
+                  {formatCurrency(payment.amount)}
+                </p>
+              </div>
+              <div>
+                <p style={{ 
+                  margin: '0 0 4px 0',
+                  fontSize: '12px',
+                  color: '#95a5a6',
+                  textTransform: 'uppercase'
+                }}>
+                  Method
+                </p>
+                <p style={{ 
+                  margin: '0',
+                  fontSize: '14px',
+                  color: '#34495e'
+                }}>
+                  {payment.method}
+                </p>
+              </div>
+            </div>
+            
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center',
+              paddingTop: '12px',
+              borderTop: '1px solid #eee'
+            }}>
+              <button 
+                onClick={() => viewReceipt(payment.receipt)}
+                style={{
+                  backgroundColor: '#f4f4f4',
+                  color: '#333',
+                  border: '1px solid #ddd',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                <i className="fas fa-receipt"></i> Receipt #{payment.receipt}
+              </button>
+              <div style={{
+                padding: '4px 10px',
+                backgroundColor: getStatusColor(payment.status),
+                color: 'white',
+                borderRadius: '12px',
+                fontSize: '12px',
+                fontWeight: '500'
+              }}>
+                {payment.status.toUpperCase()}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  // Mobile-friendly fee item card
+  const renderMobileFeeItem = (item, semester) => {
+    return (
+      <div 
+        key={item.id}
+        style={{
+          backgroundColor: 'white',
+          borderRadius: '10px',
+          padding: '16px',
+          marginBottom: '12px',
+          boxShadow: '0 2px 6px rgba(0,0,0,0.08)',
+          borderLeft: `4px solid ${getStatusColor(item.status)}`
+        }}
+      >
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'flex-start',
+          marginBottom: '12px'
+        }}>
+          <div style={{ flex: 1 }}>
+            <h4 style={{ 
+              margin: '0 0 6px 0', 
+              fontSize: '15px',
+              color: '#2c3e50',
+              lineHeight: '1.3'
+            }}>
+              {item.description}
+            </h4>
+            <p style={{ 
+              margin: '0',
+              fontSize: '12px',
+              color: '#7f8c8d'
+            }}>
+              {item.feeType || 'General'} • Due: {item.dueDate || 'N/A'}
+            </p>
+          </div>
+          <div style={{
+            padding: '4px 10px',
+            backgroundColor: getStatusColor(item.status),
+            color: 'white',
+            borderRadius: '12px',
+            fontSize: '12px',
+            fontWeight: '500',
+            whiteSpace: 'nowrap'
+          }}>
+            {item.status.toUpperCase()}
+          </div>
+        </div>
+        
+        <div style={{ 
+          display: 'grid', 
+          gridTemplateColumns: 'repeat(3, 1fr)', 
+          gap: '10px',
+          marginBottom: '12px'
+        }}>
+          <div>
+            <p style={{ 
+              margin: '0 0 4px 0',
+              fontSize: '11px',
+              color: '#95a5a6',
+              textTransform: 'uppercase'
+            }}>
+              Total
+            </p>
+            <p style={{ 
+              margin: '0',
+              fontSize: '14px',
+              fontWeight: '600',
+              color: '#2c3e50'
+            }}>
+              {formatCurrency(item.amount)}
+            </p>
+          </div>
+          <div>
+            <p style={{ 
+              margin: '0 0 4px 0',
+              fontSize: '11px',
+              color: '#95a5a6',
+              textTransform: 'uppercase'
+            }}>
+              Paid
+            </p>
+            <p style={{ 
+              margin: '0',
+              fontSize: '14px',
+              fontWeight: '600',
+              color: '#28a745'
+            }}>
+              {item.status === 'paid' ? formatCurrency(item.amount) : formatCurrency(0)}
+            </p>
+          </div>
+          <div>
+            <p style={{ 
+              margin: '0 0 4px 0',
+              fontSize: '11px',
+              color: '#95a5a6',
+              textTransform: 'uppercase'
+            }}>
+              Balance
+            </p>
+            <p style={{ 
+              margin: '0',
+              fontSize: '14px',
+              fontWeight: '600',
+              color: item.status === 'paid' ? '#7f8c8d' : '#e74c3c'
+            }}>
+              {item.status === 'paid' ? formatCurrency(0) : formatCurrency(item.balanceDue || item.amount)}
+            </p>
+          </div>
+        </div>
+        
+        {item.paymentDate && (
+          <div style={{ 
+            fontSize: '11px',
+            color: '#95a5a6',
+            paddingTop: '8px',
+            borderTop: '1px solid #eee'
+          }}>
+            Paid on: {new Date(item.paymentDate).toLocaleDateString()}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Mobile-friendly semester summary
+  const renderMobileSemesterSummary = (semesterData, semesterNumber) => {
+    const color = semesterNumber === 1 ? '#3498db' : '#2ecc71';
+    
+    return (
+      <div style={{
+        backgroundColor: 'white',
+        borderRadius: '12px',
+        padding: '20px',
+        marginBottom: '20px',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+        borderTop: `4px solid ${color}`
+      }}>
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          marginBottom: '16px'
+        }}>
+          <h3 style={{ 
+            margin: 0, 
+            fontSize: '18px',
+            color: '#2c3e50',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}>
+            <i className="fas fa-money-bill-wave" style={{ color }}></i>
+            Semester {semesterNumber}
+          </h3>
+          <button 
+            onClick={() => makePayment(semesterNumber)}
+            style={{
+              padding: '10px 16px',
+              backgroundColor: '#28a745',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              fontSize: '14px',
+              fontWeight: '500',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            <i className="fas fa-credit-card"></i>
+            Pay Now
+          </button>
+        </div>
+
+        <div style={{ 
+          display: 'grid', 
+          gridTemplateColumns: 'repeat(3, 1fr)', 
+          gap: '12px',
+          marginBottom: '20px'
+        }}>
+          <div style={{
+            backgroundColor: '#f8f9fa',
+            padding: '15px',
+            borderRadius: '8px',
+            textAlign: 'center'
+          }}>
+            <p style={{ 
+              margin: '0 0 6px 0',
+              fontSize: '12px',
+              color: '#7f8c8d',
+              textTransform: 'uppercase'
+            }}>
+              Total
+            </p>
+            <p style={{ 
+              margin: 0,
+              fontSize: '18px',
+              fontWeight: 'bold',
+              color: '#2c3e50'
+            }}>
+              {formatCurrency(semesterData.total)}
+            </p>
+          </div>
+          <div style={{
+            backgroundColor: '#f8f9fa',
+            padding: '15px',
+            borderRadius: '8px',
+            textAlign: 'center'
+          }}>
+            <p style={{ 
+              margin: '0 0 6px 0',
+              fontSize: '12px',
+              color: '#7f8c8d',
+              textTransform: 'uppercase'
+            }}>
+              Paid
+            </p>
+            <p style={{ 
+              margin: 0,
+              fontSize: '18px',
+              fontWeight: 'bold',
+              color: '#28a745'
+            }}>
+              {formatCurrency(semesterData.paid)}
+            </p>
+          </div>
+          <div style={{
+            backgroundColor: '#f8f9fa',
+            padding: '15px',
+            borderRadius: '8px',
+            textAlign: 'center'
+          }}>
+            <p style={{ 
+              margin: '0 0 6px 0',
+              fontSize: '12px',
+              color: '#7f8c8d',
+              textTransform: 'uppercase'
+            }}>
+              Balance
+            </p>
+            <p style={{ 
+              margin: 0,
+              fontSize: '18px',
+              fontWeight: 'bold',
+              color: semesterData.balance > 0 ? '#e74c3c' : '#28a745'
+            }}>
+              {formatCurrency(semesterData.balance)}
+            </p>
+          </div>
+        </div>
+
+        {/* Progress circle for mobile */}
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'center', 
+          alignItems: 'center',
+          margin: '20px 0'
+        }}>
+          <div style={{ position: 'relative', width: '100px', height: '100px' }}>
+            <svg width="100" height="100" viewBox="0 0 36 36">
+              <path
+                d="M18 2.0845
+                  a 15.9155 15.9155 0 0 1 0 31.831
+                  a 15.9155 15.9155 0 0 1 0 -31.831"
+                fill="none"
+                stroke="#e9ecef"
+                strokeWidth="3"
+              />
+              <path
+                d="M18 2.0845
+                  a 15.9155 15.9155 0 0 1 0 31.831
+                  a 15.9155 15.9155 0 0 1 0 -31.831"
+                fill="none"
+                stroke={getStatusColor(semesterData.status)}
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeDasharray={`${getStatusPercentage(semesterData)}, 100`}
+                style={{ transition: 'stroke-dasharray 0.5s ease' }}
+              />
+            </svg>
+            <div style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              textAlign: 'center'
+            }}>
+              <div style={{ fontSize: '16px', fontWeight: 'bold' }}>
+                {getStatusPercentage(semesterData)}%
+              </div>
+              <div style={{ 
+                fontSize: '12px', 
+                color: getStatusColor(semesterData.status),
+                fontWeight: '500'
+              }}>
+                {getStatusText(semesterData.status)}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ marginTop: '20px' }}>
+          <h4 style={{ 
+            margin: '0 0 12px 0',
+            fontSize: '16px',
+            color: '#2c3e50',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}>
+            <i className="fas fa-list" style={{ color: '#95a5a6' }}></i>
+            Fee Items
+          </h4>
+          {semesterData.items && semesterData.items.length > 0 ? (
+            <div>
+              {semesterData.items.map((item, index) => 
+                renderMobileFeeItem(item, semesterNumber)
+              )}
+            </div>
+          ) : (
+            <div style={{
+              padding: '20px',
+              textAlign: 'center',
+              backgroundColor: '#f8f9fa',
+              borderRadius: '8px',
+              border: '2px dashed #dee2e6'
+            }}>
+              <i className="fas fa-file-invoice" style={{
+                fontSize: '32px',
+                color: '#bdc3c7',
+                marginBottom: '10px'
+              }}></i>
+              <p style={{ 
+                margin: 0,
+                color: '#95a5a6',
+                fontSize: '14px'
+              }}>
+                No fee items found for this semester
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   if (loading) {
     return (
-      <div className="content">
-        <div className="dashboard-header">
-          <h2><i className="fas fa-file-invoice-dollar"></i> Financial Statements</h2>
-          <div className="date-display">Loading financial data...</div>
+      <div style={{
+        padding: '1rem',
+        maxWidth: '100%',
+        overflowX: 'hidden'
+      }}>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '15px',
+          marginBottom: '20px'
+        }}>
+          <div>
+            <h2 style={{ 
+              margin: '0 0 5px 0', 
+              fontSize: 'clamp(1.5rem, 4vw, 1.8rem)',
+              fontWeight: '600',
+              color: '#2c3e50',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px'
+            }}>
+              <i className="fas fa-file-invoice-dollar" style={{ color: '#28a745' }}></i>
+              Financial Statements
+            </h2>
+            <div style={{ 
+              color: '#7f8c8d', 
+              fontSize: 'clamp(0.85rem, 2.5vw, 0.95rem)'
+            }}>
+              Loading financial data...
+            </div>
+          </div>
         </div>
         <div style={{
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
-          height: '300px'
+          height: '300px',
+          backgroundColor: 'white',
+          borderRadius: '12px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
         }}>
           <div style={{
             width: '50px',
@@ -249,10 +784,39 @@ const Finance = () => {
 
   if (error) {
     return (
-      <div className="content">
-        <div className="dashboard-header">
-          <h2><i className="fas fa-file-invoice-dollar"></i> Financial Statements</h2>
-          <div className="date-display">Error</div>
+      <div style={{
+        padding: '1rem',
+        maxWidth: '100%',
+        overflowX: 'hidden'
+      }}>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '15px',
+          marginBottom: '20px'
+        }}>
+          <div>
+            <h2 style={{ 
+              margin: '0 0 5px 0', 
+              fontSize: 'clamp(1.5rem, 4vw, 1.8rem)',
+              fontWeight: '600',
+              color: '#2c3e50',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px'
+            }}>
+              <i className="fas fa-file-invoice-dollar" style={{ color: '#28a745' }}></i>
+              Financial Statements
+            </h2>
+            <div style={{ 
+              color: '#7f8c8d', 
+              fontSize: 'clamp(0.85rem, 2.5vw, 0.95rem)'
+            }}>
+              Error
+            </div>
+          </div>
         </div>
         <div style={{
           padding: '30px',
@@ -267,22 +831,28 @@ const Finance = () => {
             color: '#dc3545',
             marginBottom: '20px'
           }}></i>
-          <p style={{ color: '#d33', marginBottom: '20px', fontSize: '16px' }}>
+          <p style={{ 
+            color: '#d33', 
+            marginBottom: '20px', 
+            fontSize: '16px',
+            lineHeight: '1.5'
+          }}>
             {error}
           </p>
           <button 
             onClick={refreshFinancialData}
             style={{
-              padding: '10px 20px',
+              padding: '12px 24px',
               backgroundColor: '#007bff',
               color: 'white',
               border: 'none',
-              borderRadius: '4px',
+              borderRadius: '6px',
               cursor: 'pointer',
               fontSize: '14px',
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '8px'
+              gap: '8px',
+              fontWeight: '500'
             }}
           >
             <i className="fas fa-sync-alt"></i>
@@ -294,45 +864,75 @@ const Finance = () => {
   }
 
   return (
-    <div className="content">
-      <div className="dashboard-header" style={{
+    <div style={{
+      padding: '1rem',
+      maxWidth: '100%',
+      overflowX: 'hidden'
+    }}>
+      {/* Header */}
+      <div style={{
         display: 'flex',
         justifyContent: 'space-between',
-        alignItems: 'center',
+        alignItems: isMobile ? 'flex-start' : 'center',
+        flexWrap: 'wrap',
+        gap: '15px',
         marginBottom: '20px'
       }}>
         <div>
-          <h2 style={{ margin: '0 0 5px 0' }}>
-            <i className="fas fa-file-invoice-dollar" style={{ marginRight: '10px', color: '#28a745' }}></i>
-            Financial Statements
-          </h2>
-          <div className="date-display" style={{ color: '#666', fontSize: '14px' }}>
-            Academic Year: {studentInfo?.academic_year || '2024/2025'} | 
-            Student ID: {studentInfo?.student_id || 'N/A'}
-          </div>
-        </div>
-        <button 
-          onClick={refreshFinancialData}
-          style={{
-            padding: '8px 16px',
-            backgroundColor: '#28a745',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
+          <h2 style={{ 
+            margin: '0 0 5px 0', 
+            fontSize: 'clamp(1.5rem, 4vw, 1.8rem)',
+            fontWeight: '600',
+            color: '#2c3e50',
             display: 'flex',
             alignItems: 'center',
-            gap: '8px',
-            fontSize: '14px'
-          }}
-        >
-          <i className="fas fa-sync-alt"></i>
-          Refresh
-        </button>
+            gap: '10px'
+          }}>
+            <i className="fas fa-file-invoice-dollar" style={{ color: '#28a745' }}></i>
+            Financial Statements
+          </h2>
+          <div style={{ 
+            color: '#7f8c8d', 
+            fontSize: 'clamp(0.85rem, 2.5vw, 0.95rem)',
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '10px'
+          }}>
+            <span>Academic Year: {studentInfo?.academic_year || '2024/2025'}</span>
+            <span>•</span>
+            <span>Student ID: {studentInfo?.student_id || 'N/A'}</span>
+          </div>
+        </div>
+        <div style={{ 
+          display: 'flex',
+          gap: '10px',
+          flexWrap: 'wrap'
+        }}>
+          <button 
+            onClick={refreshFinancialData}
+            style={{
+              padding: '10px 16px',
+              backgroundColor: '#28a745',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              fontSize: '14px',
+              whiteSpace: 'nowrap',
+              fontWeight: '500'
+            }}
+          >
+            <i className="fas fa-sync-alt"></i>
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Currency Selector */}
-      <div className="currency-selector" style={{
+      <div style={{
         display: 'flex',
         alignItems: 'center',
         gap: '10px',
@@ -340,10 +940,17 @@ const Finance = () => {
         padding: '15px',
         backgroundColor: '#f8f9fa',
         borderRadius: '8px',
-        border: '1px solid #dee2e6'
+        border: '1px solid #dee2e6',
+        flexWrap: 'wrap'
       }}>
-        <label style={{ fontWeight: '500', color: '#495057' }}>
-          <i className="fas fa-money-bill-wave" style={{ marginRight: '8px', color: '#28a745' }}></i>
+        <label style={{ 
+          fontWeight: '500', 
+          color: '#495057',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px'
+        }}>
+          <i className="fas fa-money-bill-wave" style={{ color: '#28a745' }}></i>
           Display Currency:
         </label>
         <select 
@@ -362,503 +969,637 @@ const Finance = () => {
           <option value="USD">USD ($) - US Dollar</option>
           <option value="UGX">UGX (Shs) - Ugandan Shilling</option>
         </select>
-        <div style={{ fontSize: '12px', color: '#6c757d', marginLeft: 'auto' }}>
+        <div style={{ 
+          fontSize: '12px', 
+          color: '#6c757d',
+          marginLeft: isMobile ? '0' : 'auto',
+          width: isMobile ? '100%' : 'auto',
+          marginTop: isMobile ? '8px' : '0'
+        }}>
           Exchange Rate: 1 USD ≈ 3,750 UGX
         </div>
       </div>
 
-      {/* Semester 1 Fees */}
-      <div className="fee-table-container" style={{
-        backgroundColor: 'white',
-        borderRadius: '12px',
-        padding: '25px',
-        marginBottom: '30px',
-        boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-      }}>
-        <div style={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center',
-          marginBottom: '20px'
+      {/* Semester 1 - Mobile or Desktop View */}
+      {isMobile ? (
+        renderMobileSemesterSummary(financialData.semester1, 1)
+      ) : (
+        <div style={{
+          backgroundColor: 'white',
+          borderRadius: '12px',
+          padding: 'clamp(15px, 3vw, 25px)',
+          marginBottom: '30px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
         }}>
-          <h3 style={{ margin: 0, color: '#333' }}>
-            <i className="fas fa-money-bill-wave" style={{ marginRight: '10px', color: '#007bff' }}></i>
-            Semester 1 Fees - Academic Year {studentInfo?.academic_year || '2024/2025'}
-          </h3>
-          <button 
-            onClick={() => makePayment(1)}
-            style={{
-              padding: '8px 16px',
-              backgroundColor: '#28a745',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center',
+            marginBottom: '20px'
+          }}>
+            <h3 style={{ 
+              margin: 0, 
+              fontSize: 'clamp(1.1rem, 2.5vw, 1.3rem)',
+              color: '#2c3e50',
               display: 'flex',
               alignItems: 'center',
-              gap: '8px',
-              fontSize: '14px',
-              fontWeight: '500'
-            }}
-          >
-            <i className="fas fa-credit-card"></i>
-            Make Payment
-          </button>
-        </div>
+              gap: '10px'
+            }}>
+              <i className="fas fa-money-bill-wave" style={{ color: '#007bff' }}></i>
+              Semester 1 Fees - Academic Year {studentInfo?.academic_year || '2024/2025'}
+            </h3>
+            <button 
+              onClick={() => makePayment(1)}
+              style={{
+                padding: '10px 16px',
+                backgroundColor: '#28a745',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '14px',
+                fontWeight: '500',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              <i className="fas fa-credit-card"></i>
+              Make Payment
+            </button>
+          </div>
 
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{
-            width: '100%',
-            borderCollapse: 'collapse',
-            minWidth: '700px'
-          }}>
-            <thead>
-              <tr style={{ 
-                backgroundColor: '#f8f9fa',
-                borderBottom: '2px solid #dee2e6'
-              }}>
-                <th style={{ 
-                  padding: '12px 15px',
-                  textAlign: 'left',
-                  fontWeight: '600',
-                  color: '#495057'
-                }}>Description</th>
-                <th style={{ 
-                  padding: '12px 15px',
-                  textAlign: 'right',
-                  fontWeight: '600',
-                  color: '#495057'
-                }}>Total Amount</th>
-                <th style={{ 
-                  padding: '12px 15px',
-                  textAlign: 'right',
-                  fontWeight: '600',
-                  color: '#495057'
-                }}>Paid Amount</th>
-                <th style={{ 
-                  padding: '12px 15px',
-                  textAlign: 'right',
-                  fontWeight: '600',
-                  color: '#495057'
-                }}>Balance Due</th>
-                <th style={{ 
-                  padding: '12px 15px',
-                  textAlign: 'center',
-                  fontWeight: '600',
-                  color: '#495057'
-                }}>Payment Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {/* Individual fee items */}
-              {financialData.semester1.items && financialData.semester1.items.map((item, index) => (
-                <tr key={item.id || index} style={{
-                  borderBottom: '1px solid #dee2e6',
-                  backgroundColor: item.status === 'paid' ? '#f8fff9' : 'white'
+          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+            <table style={{
+              width: '100%',
+              borderCollapse: 'collapse',
+              minWidth: '700px'
+            }}>
+              <thead>
+                <tr style={{ 
+                  backgroundColor: '#f8f9fa',
+                  borderBottom: '2px solid #dee2e6'
                 }}>
-                  <td style={{ padding: '12px 15px' }}>
-                    <div style={{ fontWeight: '500' }}>{item.description}</div>
-                    <div style={{ fontSize: '12px', color: '#6c757d', marginTop: '4px' }}>
-                      Fee Type: {item.feeType || 'General'} | 
-                      Due: {item.dueDate || 'N/A'}
-                    </div>
-                  </td>
-                  <td style={{ 
-                    padding: '12px 15px',
+                  <th style={{ 
+                    padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
+                    textAlign: 'left',
+                    fontWeight: '600',
+                    color: '#495057',
+                    fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+                  }}>Description</th>
+                  <th style={{ 
+                    padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
                     textAlign: 'right',
-                    fontWeight: '500',
-                    color: '#333'
+                    fontWeight: '600',
+                    color: '#495057',
+                    fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+                  }}>Total Amount</th>
+                  <th style={{ 
+                    padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
+                    textAlign: 'right',
+                    fontWeight: '600',
+                    color: '#495057',
+                    fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+                  }}>Paid Amount</th>
+                  <th style={{ 
+                    padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
+                    textAlign: 'right',
+                    fontWeight: '600',
+                    color: '#495057',
+                    fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+                  }}>Balance Due</th>
+                  <th style={{ 
+                    padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
+                    textAlign: 'center',
+                    fontWeight: '600',
+                    color: '#495057',
+                    fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+                  }}>Payment Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {financialData.semester1.items && financialData.semester1.items.map((item, index) => (
+                  <tr key={item.id || index} style={{
+                    borderBottom: '1px solid #dee2e6',
+                    backgroundColor: item.status === 'paid' ? '#f8fff9' : 'white'
                   }}>
-                    {formatCurrency(item.amount)}
-                  </td>
-                  <td style={{ 
-                    padding: '12px 15px',
-                    textAlign: 'right'
-                  }}>
-                    <div style={{
-                      color: item.status === 'paid' ? '#28a745' : '#6c757d',
-                      fontWeight: item.status === 'paid' ? 'bold' : 'normal'
+                    <td style={{ 
+                      padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
+                      fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
                     }}>
-                      {item.status === 'paid' ? formatCurrency(item.amount) : formatCurrency(0)}
-                    </div>
-                    {item.paymentDate && (
-                      <div style={{ fontSize: '11px', color: '#6c757d', marginTop: '4px' }}>
-                        Paid on: {new Date(item.paymentDate).toLocaleDateString()}
+                      <div style={{ fontWeight: '500' }}>{item.description}</div>
+                      <div style={{ 
+                        fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)', 
+                        color: '#6c757d', 
+                        marginTop: '4px' 
+                      }}>
+                        Fee Type: {item.feeType || 'General'} | Due: {item.dueDate || 'N/A'}
                       </div>
-                    )}
-                  </td>
-                  <td style={{ 
-                    padding: '12px 15px',
-                    textAlign: 'right'
-                  }}>
-                    <div style={{
-                      color: item.status === 'paid' ? '#6c757d' : '#dc3545',
-                      fontWeight: item.status !== 'paid' ? 'bold' : 'normal'
+                    </td>
+                    <td style={{ 
+                      padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
+                      textAlign: 'right',
+                      fontWeight: '500',
+                      color: '#333',
+                      fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
                     }}>
-                      {item.status === 'paid' ? formatCurrency(0) : formatCurrency(item.balanceDue || item.amount)}
+                      {formatCurrency(item.amount)}
+                    </td>
+                    <td style={{ 
+                      padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
+                      textAlign: 'right',
+                      fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+                    }}>
+                      <div style={{
+                        color: item.status === 'paid' ? '#28a745' : '#6c757d',
+                        fontWeight: item.status === 'paid' ? 'bold' : 'normal'
+                      }}>
+                        {item.status === 'paid' ? formatCurrency(item.amount) : formatCurrency(0)}
+                      </div>
+                      {item.paymentDate && (
+                        <div style={{ 
+                          fontSize: 'clamp(0.7rem, 1.6vw, 0.8rem)', 
+                          color: '#6c757d', 
+                          marginTop: '4px' 
+                        }}>
+                          Paid on: {new Date(item.paymentDate).toLocaleDateString()}
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ 
+                      padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
+                      textAlign: 'right',
+                      fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+                    }}>
+                      <div style={{
+                        color: item.status === 'paid' ? '#6c757d' : '#dc3545',
+                        fontWeight: item.status !== 'paid' ? 'bold' : 'normal'
+                      }}>
+                        {item.status === 'paid' ? formatCurrency(0) : formatCurrency(item.balanceDue || item.amount)}
+                      </div>
+                    </td>
+                    <td style={{ 
+                      padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
+                      textAlign: 'center',
+                      fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+                    }}>
+                      <div style={{
+                        display: 'inline-block',
+                        padding: '4px 12px',
+                        borderRadius: '20px',
+                        backgroundColor: getStatusColor(item.status),
+                        color: 'white',
+                        fontWeight: 'bold',
+                        fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)',
+                        minWidth: '70px'
+                      }}>
+                        {item.status.toUpperCase()}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                
+                {/* Summary Row */}
+                <tr style={{ 
+                  backgroundColor: '#e8f4fc',
+                  fontWeight: 'bold',
+                  borderTop: '2px solid #007bff'
+                }}>
+                  <td style={{ 
+                    padding: 'clamp(12px, 2.5vw, 15px)',
+                    fontSize: 'clamp(0.9rem, 2vw, 1rem)'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <i className="fas fa-calculator" style={{ color: '#007bff' }}></i>
+                      <span>SEMESTER 1 TOTAL</span>
                     </div>
                   </td>
-                  <td style={{ padding: '12px 15px', textAlign: 'center' }}>
-                    <div style={{
-                      display: 'inline-block',
-                      padding: '4px 12px',
-                      borderRadius: '20px',
-                      backgroundColor: getStatusColor(item.status),
-                      color: 'white',
-                      fontWeight: 'bold',
-                      fontSize: '12px',
-                      minWidth: '70px'
-                    }}>
-                      {item.status.toUpperCase()}
+                  <td style={{ 
+                    padding: 'clamp(12px, 2.5vw, 15px)',
+                    textAlign: 'right',
+                    fontSize: 'clamp(0.9rem, 2vw, 1rem)',
+                    color: '#0056b3'
+                  }}>
+                    {formatCurrency(financialData.semester1.total)}
+                  </td>
+                  <td style={{ 
+                    padding: 'clamp(12px, 2.5vw, 15px)',
+                    textAlign: 'right',
+                    fontSize: 'clamp(0.9rem, 2vw, 1rem)',
+                    color: '#28a745'
+                  }}>
+                    {formatCurrency(financialData.semester1.paid)}
+                  </td>
+                  <td style={{ 
+                    padding: 'clamp(12px, 2.5vw, 15px)',
+                    textAlign: 'right',
+                    fontSize: 'clamp(0.9rem, 2vw, 1rem)',
+                    color: financialData.semester1.balance > 0 ? '#dc3545' : '#28a745'
+                  }}>
+                    {formatCurrency(financialData.semester1.balance)}
+                  </td>
+                  <td style={{ 
+                    padding: 'clamp(12px, 2.5vw, 15px)',
+                    textAlign: 'center',
+                    fontSize: 'clamp(0.9rem, 2vw, 1rem)'
+                  }}>
+                    <div style={{ position: 'relative', display: 'inline-block' }}>
+                      <svg width="80" height="80" viewBox="0 0 36 36">
+                        <path
+                          d="M18 2.0845
+                            a 15.9155 15.9155 0 0 1 0 31.831
+                            a 15.9155 15.9155 0 0 1 0 -31.831"
+                          fill="none"
+                          stroke="#e9ecef"
+                          strokeWidth="3"
+                        />
+                        <path
+                          d="M18 2.0845
+                            a 15.9155 15.9155 0 0 1 0 31.831
+                            a 15.9155 15.9155 0 0 1 0 -31.831"
+                          fill="none"
+                          stroke={getStatusColor(financialData.semester1.status)}
+                          strokeWidth="3"
+                          strokeLinecap="round"
+                          strokeDasharray={`${getStatusPercentage(financialData.semester1)}, 100`}
+                          style={{ transition: 'stroke-dasharray 0.5s ease' }}
+                        />
+                      </svg>
+                      <div style={{
+                        position: 'absolute',
+                        top: '50%',
+                        left: '50%',
+                        transform: 'translate(-50%, -50%)',
+                        textAlign: 'center'
+                      }}>
+                        <div style={{ 
+                          fontSize: 'clamp(0.9rem, 2vw, 1rem)', 
+                          fontWeight: 'bold' 
+                        }}>
+                          {getStatusPercentage(financialData.semester1)}%
+                        </div>
+                        <div style={{ 
+                          fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)', 
+                          color: getStatusColor(financialData.semester1.status) 
+                        }}>
+                          {getStatusText(financialData.semester1.status)}
+                        </div>
+                      </div>
                     </div>
                   </td>
                 </tr>
-              ))}
-              
-              {/* Summary Row */}
-              <tr style={{ 
-                backgroundColor: '#e8f4fc',
-                fontWeight: 'bold',
-                borderTop: '2px solid #007bff'
-              }}>
-                <td style={{ padding: '15px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <i className="fas fa-calculator" style={{ color: '#007bff' }}></i>
-                    <span>SEMESTER 1 TOTAL</span>
-                  </div>
-                </td>
-                <td style={{ 
-                  padding: '15px',
-                  textAlign: 'right',
-                  fontSize: '16px',
-                  color: '#0056b3'
-                }}>
-                  {formatCurrency(financialData.semester1.total)}
-                </td>
-                <td style={{ 
-                  padding: '15px',
-                  textAlign: 'right',
-                  fontSize: '16px',
-                  color: '#28a745'
-                }}>
-                  {formatCurrency(financialData.semester1.paid)}
-                </td>
-                <td style={{ 
-                  padding: '15px',
-                  textAlign: 'right',
-                  fontSize: '16px',
-                  color: financialData.semester1.balance > 0 ? '#dc3545' : '#28a745'
-                }}>
-                  {formatCurrency(financialData.semester1.balance)}
-                </td>
-                <td style={{ padding: '15px', textAlign: 'center' }}>
-                  <div style={{ position: 'relative', display: 'inline-block' }}>
-                    <svg width="80" height="80" viewBox="0 0 36 36">
-                      <path
-                        d="M18 2.0845
-                          a 15.9155 15.9155 0 0 1 0 31.831
-                          a 15.9155 15.9155 0 0 1 0 -31.831"
-                        fill="none"
-                        stroke="#e9ecef"
-                        strokeWidth="3"
-                      />
-                      <path
-                        d="M18 2.0845
-                          a 15.9155 15.9155 0 0 1 0 31.831
-                          a 15.9155 15.9155 0 0 1 0 -31.831"
-                        fill="none"
-                        stroke={getStatusColor(financialData.semester1.status)}
-                        strokeWidth="3"
-                        strokeLinecap="round"
-                        strokeDasharray={`${getStatusPercentage(financialData.semester1)}, 100`}
-                        style={{ transition: 'stroke-dasharray 0.5s ease' }}
-                      />
-                    </svg>
-                    <div style={{
-                      position: 'absolute',
-                      top: '50%',
-                      left: '50%',
-                      transform: 'translate(-50%, -50%)',
-                      textAlign: 'center'
-                    }}>
-                      <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
-                        {getStatusPercentage(financialData.semester1)}%
-                      </div>
-                      <div style={{ fontSize: '10px', color: getStatusColor(financialData.semester1.status) }}>
-                        {getStatusText(financialData.semester1.status)}
-                      </div>
-                    </div>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Semester 2 Fees */}
-      <div className="fee-table-container" style={{
-        backgroundColor: 'white',
-        borderRadius: '12px',
-        padding: '25px',
-        marginBottom: '30px',
-        boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-      }}>
-        <div style={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center',
-          marginBottom: '20px'
+      {/* Semester 2 - Mobile or Desktop View */}
+      {isMobile ? (
+        renderMobileSemesterSummary(financialData.semester2, 2)
+      ) : (
+        <div style={{
+          backgroundColor: 'white',
+          borderRadius: '12px',
+          padding: 'clamp(15px, 3vw, 25px)',
+          marginBottom: '30px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
         }}>
-          <h3 style={{ margin: 0, color: '#333' }}>
-            <i className="fas fa-money-bill-wave" style={{ marginRight: '10px', color: '#28a745' }}></i>
-            Semester 2 Fees - Academic Year {studentInfo?.academic_year || '2024/2025'}
-          </h3>
-          <button 
-            onClick={() => makePayment(2)}
-            style={{
-              padding: '8px 16px',
-              backgroundColor: '#28a745',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center',
+            marginBottom: '20px'
+          }}>
+            <h3 style={{ 
+              margin: 0, 
+              fontSize: 'clamp(1.1rem, 2.5vw, 1.3rem)',
+              color: '#2c3e50',
               display: 'flex',
               alignItems: 'center',
-              gap: '8px',
-              fontSize: '14px',
-              fontWeight: '500'
-            }}
-          >
-            <i className="fas fa-credit-card"></i>
-            Make Payment
-          </button>
-        </div>
+              gap: '10px'
+            }}>
+              <i className="fas fa-money-bill-wave" style={{ color: '#28a745' }}></i>
+              Semester 2 Fees - Academic Year {studentInfo?.academic_year || '2024/2025'}
+            </h3>
+            <button 
+              onClick={() => makePayment(2)}
+              style={{
+                padding: '10px 16px',
+                backgroundColor: '#28a745',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '14px',
+                fontWeight: '500',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              <i className="fas fa-credit-card"></i>
+              Make Payment
+            </button>
+          </div>
 
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{
-            width: '100%',
-            borderCollapse: 'collapse',
-            minWidth: '700px'
-          }}>
-            <thead>
-              <tr style={{ 
-                backgroundColor: '#f8f9fa',
-                borderBottom: '2px solid #dee2e6'
-              }}>
-                <th style={{ 
-                  padding: '12px 15px',
-                  textAlign: 'left',
-                  fontWeight: '600',
-                  color: '#495057'
-                }}>Description</th>
-                <th style={{ 
-                  padding: '12px 15px',
-                  textAlign: 'right',
-                  fontWeight: '600',
-                  color: '#495057'
-                }}>Total Amount</th>
-                <th style={{ 
-                  padding: '12px 15px',
-                  textAlign: 'right',
-                  fontWeight: '600',
-                  color: '#495057'
-                }}>Paid Amount</th>
-                <th style={{ 
-                  padding: '12px 15px',
-                  textAlign: 'right',
-                  fontWeight: '600',
-                  color: '#495057'
-                }}>Balance Due</th>
-                <th style={{ 
-                  padding: '12px 15px',
-                  textAlign: 'center',
-                  fontWeight: '600',
-                  color: '#495057'
-                }}>Payment Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {/* Individual fee items */}
-              {financialData.semester2.items && financialData.semester2.items.map((item, index) => (
-                <tr key={item.id || index} style={{
-                  borderBottom: '1px solid #dee2e6',
-                  backgroundColor: item.status === 'paid' ? '#f8fff9' : 'white'
+          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+            <table style={{
+              width: '100%',
+              borderCollapse: 'collapse',
+              minWidth: '700px'
+            }}>
+              <thead>
+                <tr style={{ 
+                  backgroundColor: '#f8f9fa',
+                  borderBottom: '2px solid #dee2e6'
                 }}>
-                  <td style={{ padding: '12px 15px' }}>
-                    <div style={{ fontWeight: '500' }}>{item.description}</div>
-                    <div style={{ fontSize: '12px', color: '#6c757d', marginTop: '4px' }}>
-                      Fee Type: {item.feeType || 'General'} | 
-                      Due: {item.dueDate || 'N/A'}
-                    </div>
-                  </td>
-                  <td style={{ 
-                    padding: '12px 15px',
+                  <th style={{ 
+                    padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
+                    textAlign: 'left',
+                    fontWeight: '600',
+                    color: '#495057',
+                    fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+                  }}>Description</th>
+                  <th style={{ 
+                    padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
                     textAlign: 'right',
-                    fontWeight: '500',
-                    color: '#333'
+                    fontWeight: '600',
+                    color: '#495057',
+                    fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+                  }}>Total Amount</th>
+                  <th style={{ 
+                    padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
+                    textAlign: 'right',
+                    fontWeight: '600',
+                    color: '#495057',
+                    fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+                  }}>Paid Amount</th>
+                  <th style={{ 
+                    padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
+                    textAlign: 'right',
+                    fontWeight: '600',
+                    color: '#495057',
+                    fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+                  }}>Balance Due</th>
+                  <th style={{ 
+                    padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
+                    textAlign: 'center',
+                    fontWeight: '600',
+                    color: '#495057',
+                    fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+                  }}>Payment Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {financialData.semester2.items && financialData.semester2.items.map((item, index) => (
+                  <tr key={item.id || index} style={{
+                    borderBottom: '1px solid #dee2e6',
+                    backgroundColor: item.status === 'paid' ? '#f8fff9' : 'white'
                   }}>
-                    {formatCurrency(item.amount)}
-                  </td>
-                  <td style={{ 
-                    padding: '12px 15px',
-                    textAlign: 'right'
-                  }}>
-                    <div style={{
-                      color: item.status === 'paid' ? '#28a745' : '#6c757d',
-                      fontWeight: item.status === 'paid' ? 'bold' : 'normal'
+                    <td style={{ 
+                      padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
+                      fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
                     }}>
-                      {item.status === 'paid' ? formatCurrency(item.amount) : formatCurrency(0)}
-                    </div>
-                    {item.paymentDate && (
-                      <div style={{ fontSize: '11px', color: '#6c757d', marginTop: '4px' }}>
-                        Paid on: {new Date(item.paymentDate).toLocaleDateString()}
+                      <div style={{ fontWeight: '500' }}>{item.description}</div>
+                      <div style={{ 
+                        fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)', 
+                        color: '#6c757d', 
+                        marginTop: '4px' 
+                      }}>
+                        Fee Type: {item.feeType || 'General'} | Due: {item.dueDate || 'N/A'}
                       </div>
-                    )}
-                  </td>
-                  <td style={{ 
-                    padding: '12px 15px',
-                    textAlign: 'right'
-                  }}>
-                    <div style={{
-                      color: item.status === 'paid' ? '#6c757d' : '#dc3545',
-                      fontWeight: item.status !== 'paid' ? 'bold' : 'normal'
+                    </td>
+                    <td style={{ 
+                      padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
+                      textAlign: 'right',
+                      fontWeight: '500',
+                      color: '#333',
+                      fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
                     }}>
-                      {item.status === 'paid' ? formatCurrency(0) : formatCurrency(item.balanceDue || item.amount)}
+                      {formatCurrency(item.amount)}
+                    </td>
+                    <td style={{ 
+                      padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
+                      textAlign: 'right',
+                      fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+                    }}>
+                      <div style={{
+                        color: item.status === 'paid' ? '#28a745' : '#6c757d',
+                        fontWeight: item.status === 'paid' ? 'bold' : 'normal'
+                      }}>
+                        {item.status === 'paid' ? formatCurrency(item.amount) : formatCurrency(0)}
+                      </div>
+                      {item.paymentDate && (
+                        <div style={{ 
+                          fontSize: 'clamp(0.7rem, 1.6vw, 0.8rem)', 
+                          color: '#6c757d', 
+                          marginTop: '4px' 
+                        }}>
+                          Paid on: {new Date(item.paymentDate).toLocaleDateString()}
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ 
+                      padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
+                      textAlign: 'right',
+                      fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+                    }}>
+                      <div style={{
+                        color: item.status === 'paid' ? '#6c757d' : '#dc3545',
+                        fontWeight: item.status !== 'paid' ? 'bold' : 'normal'
+                      }}>
+                        {item.status === 'paid' ? formatCurrency(0) : formatCurrency(item.balanceDue || item.amount)}
+                      </div>
+                    </td>
+                    <td style={{ 
+                      padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
+                      textAlign: 'center',
+                      fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+                    }}>
+                      <div style={{
+                        display: 'inline-block',
+                        padding: '4px 12px',
+                        borderRadius: '20px',
+                        backgroundColor: getStatusColor(item.status),
+                        color: 'white',
+                        fontWeight: 'bold',
+                        fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)',
+                        minWidth: '70px'
+                      }}>
+                        {item.status.toUpperCase()}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                
+                {/* Summary Row */}
+                <tr style={{ 
+                  backgroundColor: '#e8f4fc',
+                  fontWeight: 'bold',
+                  borderTop: '2px solid #28a745'
+                }}>
+                  <td style={{ 
+                    padding: 'clamp(12px, 2.5vw, 15px)',
+                    fontSize: 'clamp(0.9rem, 2vw, 1rem)'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <i className="fas fa-calculator" style={{ color: '#28a745' }}></i>
+                      <span>SEMESTER 2 TOTAL</span>
                     </div>
                   </td>
-                  <td style={{ padding: '12px 15px', textAlign: 'center' }}>
-                    <div style={{
-                      display: 'inline-block',
-                      padding: '4px 12px',
-                      borderRadius: '20px',
-                      backgroundColor: getStatusColor(item.status),
-                      color: 'white',
-                      fontWeight: 'bold',
-                      fontSize: '12px',
-                      minWidth: '70px'
-                    }}>
-                      {item.status.toUpperCase()}
+                  <td style={{ 
+                    padding: 'clamp(12px, 2.5vw, 15px)',
+                    textAlign: 'right',
+                    fontSize: 'clamp(0.9rem, 2vw, 1rem)',
+                    color: '#0056b3'
+                  }}>
+                    {formatCurrency(financialData.semester2.total)}
+                  </td>
+                  <td style={{ 
+                    padding: 'clamp(12px, 2.5vw, 15px)',
+                    textAlign: 'right',
+                    fontSize: 'clamp(0.9rem, 2vw, 1rem)',
+                    color: '#28a745'
+                  }}>
+                    {formatCurrency(financialData.semester2.paid)}
+                  </td>
+                  <td style={{ 
+                    padding: 'clamp(12px, 2.5vw, 15px)',
+                    textAlign: 'right',
+                    fontSize: 'clamp(0.9rem, 2vw, 1rem)',
+                    color: financialData.semester2.balance > 0 ? '#dc3545' : '#28a745'
+                  }}>
+                    {formatCurrency(financialData.semester2.balance)}
+                  </td>
+                  <td style={{ 
+                    padding: 'clamp(12px, 2.5vw, 15px)',
+                    textAlign: 'center',
+                    fontSize: 'clamp(0.9rem, 2vw, 1rem)'
+                  }}>
+                    <div style={{ position: 'relative', display: 'inline-block' }}>
+                      <svg width="80" height="80" viewBox="0 0 36 36">
+                        <path
+                          d="M18 2.0845
+                            a 15.9155 15.9155 0 0 1 0 31.831
+                            a 15.9155 15.9155 0 0 1 0 -31.831"
+                          fill="none"
+                          stroke="#e9ecef"
+                          strokeWidth="3"
+                        />
+                        <path
+                          d="M18 2.0845
+                            a 15.9155 15.9155 0 0 1 0 31.831
+                            a 15.9155 15.9155 0 0 1 0 -31.831"
+                          fill="none"
+                          stroke={getStatusColor(financialData.semester2.status)}
+                          strokeWidth="3"
+                          strokeLinecap="round"
+                          strokeDasharray={`${getStatusPercentage(financialData.semester2)}, 100`}
+                          style={{ transition: 'stroke-dasharray 0.5s ease' }}
+                        />
+                      </svg>
+                      <div style={{
+                        position: 'absolute',
+                        top: '50%',
+                        left: '50%',
+                        transform: 'translate(-50%, -50%)',
+                        textAlign: 'center'
+                      }}>
+                        <div style={{ 
+                          fontSize: 'clamp(0.9rem, 2vw, 1rem)', 
+                          fontWeight: 'bold' 
+                        }}>
+                          {getStatusPercentage(financialData.semester2)}%
+                        </div>
+                        <div style={{ 
+                          fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)', 
+                          color: getStatusColor(financialData.semester2.status) 
+                        }}>
+                          {getStatusText(financialData.semester2.status)}
+                        </div>
+                      </div>
                     </div>
                   </td>
                 </tr>
-              ))}
-              
-              {/* Summary Row */}
-              <tr style={{ 
-                backgroundColor: '#e8f4fc',
-                fontWeight: 'bold',
-                borderTop: '2px solid #28a745'
-              }}>
-                <td style={{ padding: '15px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <i className="fas fa-calculator" style={{ color: '#28a745' }}></i>
-                    <span>SEMESTER 2 TOTAL</span>
-                  </div>
-                </td>
-                <td style={{ 
-                  padding: '15px',
-                  textAlign: 'right',
-                  fontSize: '16px',
-                  color: '#0056b3'
-                }}>
-                  {formatCurrency(financialData.semester2.total)}
-                </td>
-                <td style={{ 
-                  padding: '15px',
-                  textAlign: 'right',
-                  fontSize: '16px',
-                  color: '#28a745'
-                }}>
-                  {formatCurrency(financialData.semester2.paid)}
-                </td>
-                <td style={{ 
-                  padding: '15px',
-                  textAlign: 'right',
-                  fontSize: '16px',
-                  color: financialData.semester2.balance > 0 ? '#dc3545' : '#28a745'
-                }}>
-                  {formatCurrency(financialData.semester2.balance)}
-                </td>
-                <td style={{ padding: '15px', textAlign: 'center' }}>
-                  <div style={{ position: 'relative', display: 'inline-block' }}>
-                    <svg width="80" height="80" viewBox="0 0 36 36">
-                      <path
-                        d="M18 2.0845
-                          a 15.9155 15.9155 0 0 1 0 31.831
-                          a 15.9155 15.9155 0 0 1 0 -31.831"
-                        fill="none"
-                        stroke="#e9ecef"
-                        strokeWidth="3"
-                      />
-                      <path
-                        d="M18 2.0845
-                          a 15.9155 15.9155 0 0 1 0 31.831
-                          a 15.9155 15.9155 0 0 1 0 -31.831"
-                        fill="none"
-                        stroke={getStatusColor(financialData.semester2.status)}
-                        strokeWidth="3"
-                        strokeLinecap="round"
-                        strokeDasharray={`${getStatusPercentage(financialData.semester2)}, 100`}
-                        style={{ transition: 'stroke-dasharray 0.5s ease' }}
-                      />
-                    </svg>
-                    <div style={{
-                      position: 'absolute',
-                      top: '50%',
-                      left: '50%',
-                      transform: 'translate(-50%, -50%)',
-                      textAlign: 'center'
-                    }}>
-                      <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
-                        {getStatusPercentage(financialData.semester2)}%
-                      </div>
-                      <div style={{ fontSize: '10px', color: getStatusColor(financialData.semester2.status) }}>
-                        {getStatusText(financialData.semester2.status)}
-                      </div>
-                    </div>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Payment History */}
-      <div className="fee-table-container" style={{
+      <div style={{
         backgroundColor: 'white',
         borderRadius: '12px',
-        padding: '25px',
+        padding: 'clamp(15px, 3vw, 25px)',
         boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
       }}>
-        <h3 style={{ margin: '0 0 20px 0', color: '#333' }}>
-          <i className="fas fa-history" style={{ marginRight: '10px', color: '#6c757d' }}></i>
-          Payment History
-        </h3>
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          marginBottom: '20px'
+        }}>
+          <h3 style={{ 
+            margin: 0, 
+            fontSize: 'clamp(1.1rem, 2.5vw, 1.3rem)',
+            color: '#2c3e50',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px'
+          }}>
+            <i className="fas fa-history" style={{ color: '#6c757d' }}></i>
+            Payment History
+          </h3>
+          {paymentHistory.length > 0 && (
+            <div style={{ 
+              fontSize: 'clamp(0.85rem, 2vw, 0.95rem)', 
+              color: '#6c757d',
+              whiteSpace: 'nowrap'
+            }}>
+              {paymentHistory.length} payment{paymentHistory.length !== 1 ? 's' : ''}
+            </div>
+          )}
+        </div>
         
         {paymentHistory.length === 0 ? (
           <div style={{
-            padding: '40px',
+            padding: '40px 20px',
             textAlign: 'center',
             backgroundColor: '#f8f9fa',
             borderRadius: '8px',
             border: '2px dashed #dee2e6'
           }}>
             <i className="fas fa-receipt" style={{
-              fontSize: '48px',
-              color: '#6c757d',
+              fontSize: 'clamp(2.5rem, 6vw, 3rem)',
+              color: '#bdc3c7',
               marginBottom: '20px'
             }}></i>
-            <p style={{ color: '#6c757d', fontSize: '16px', margin: '0 0 10px 0' }}>
+            <p style={{ 
+              color: '#7f8c8d', 
+              fontSize: 'clamp(0.9rem, 2.5vw, 1rem)', 
+              margin: '0 0 10px 0',
+              fontWeight: '500'
+            }}>
               No payment history found
             </p>
-            <p style={{ color: '#999', fontSize: '14px', margin: 0 }}>
+            <p style={{ 
+              color: '#95a5a6', 
+              fontSize: 'clamp(0.85rem, 2vw, 0.9rem)', 
+              margin: 0 
+            }}>
               Your payment history will appear here once you make payments
             </p>
           </div>
+        ) : isMobile ? (
+          // Mobile view: Cards
+          renderMobilePaymentHistory()
         ) : (
-          <div style={{ overflowX: 'auto' }}>
+          // Desktop view: Table
+          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
             <table style={{
               width: '100%',
               borderCollapse: 'collapse',
@@ -870,46 +1611,53 @@ const Finance = () => {
                   borderBottom: '2px solid #dee2e6'
                 }}>
                   <th style={{ 
-                    padding: '12px 15px',
+                    padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
                     textAlign: 'left',
                     fontWeight: '600',
-                    color: '#495057'
+                    color: '#495057',
+                    fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
                   }}>Date</th>
                   <th style={{ 
-                    padding: '12px 15px',
+                    padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
                     textAlign: 'left',
                     fontWeight: '600',
-                    color: '#495057'
+                    color: '#495057',
+                    fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
                   }}>Description</th>
                   <th style={{ 
-                    padding: '12px 15px',
+                    padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
                     textAlign: 'right',
                     fontWeight: '600',
-                    color: '#495057'
+                    color: '#495057',
+                    fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
                   }}>Amount</th>
                   <th style={{ 
-                    padding: '12px 15px',
+                    padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
                     textAlign: 'left',
                     fontWeight: '600',
-                    color: '#495057'
+                    color: '#495057',
+                    fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
                   }}>Payment Method</th>
                   <th style={{ 
-                    padding: '12px 15px',
+                    padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
                     textAlign: 'left',
                     fontWeight: '600',
-                    color: '#495057'
+                    color: '#495057',
+                    fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
                   }}>Receipt</th>
                   <th style={{ 
-                    padding: '12px 15px',
+                    padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
                     textAlign: 'left',
                     fontWeight: '600',
-                    color: '#495057'
+                    color: '#495057',
+                    fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
                   }}>Semester</th>
                   <th style={{ 
-                    padding: '12px 15px',
+                    padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
                     textAlign: 'center',
                     fontWeight: '600',
-                    color: '#495057'
+                    color: '#495057',
+                    fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
                   }}>Status</th>
                 </tr>
               </thead>
@@ -922,26 +1670,40 @@ const Finance = () => {
                       transition: 'background-color 0.2s'
                     }}
                   >
-                    <td style={{ padding: '12px 15px', whiteSpace: 'nowrap' }}>
+                    <td style={{ 
+                      padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
+                      whiteSpace: 'nowrap',
+                      fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+                    }}>
                       {payment.date}
                     </td>
-                    <td style={{ padding: '12px 15px' }}>
+                    <td style={{ 
+                      padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
+                      fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+                    }}>
                       {payment.description}
                     </td>
                     <td style={{ 
-                      padding: '12px 15px',
+                      padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
                       textAlign: 'right',
-                      fontWeight: '500'
+                      fontWeight: '500',
+                      fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
                     }}>
                       {formatCurrency(payment.amount)}
                     </td>
-                    <td style={{ padding: '12px 15px' }}>
+                    <td style={{ 
+                      padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
+                      fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+                    }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <i className="fas fa-credit-card" style={{ color: '#6c757d' }}></i>
                         {payment.method}
                       </div>
                     </td>
-                    <td style={{ padding: '12px 15px' }}>
+                    <td style={{ 
+                      padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
+                      fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+                    }}>
                       <button 
                         onClick={() => viewReceipt(payment.receipt)}
                         style={{
@@ -953,27 +1715,35 @@ const Finance = () => {
                           display: 'flex',
                           alignItems: 'center',
                           gap: '5px',
-                          fontSize: '14px'
+                          fontSize: 'clamp(0.85rem, 2vw, 0.95rem)',
+                          padding: '0'
                         }}
                       >
                         #{payment.receipt}
                         <i className="fas fa-external-link-alt" style={{ fontSize: '12px' }}></i>
                       </button>
                     </td>
-                    <td style={{ padding: '12px 15px' }}>
+                    <td style={{ 
+                      padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
+                      fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+                    }}>
                       <div style={{
                         display: 'inline-block',
                         padding: '3px 10px',
                         borderRadius: '12px',
                         backgroundColor: payment.semester === 1 ? '#cfe2ff' : '#d1e7dd',
                         color: payment.semester === 1 ? '#084298' : '#0f5132',
-                        fontSize: '12px',
+                        fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)',
                         fontWeight: '500'
                       }}>
                         Semester {payment.semester}
                       </div>
                     </td>
-                    <td style={{ padding: '12px 15px', textAlign: 'center' }}>
+                    <td style={{ 
+                      padding: 'clamp(10px, 2vw, 12px) clamp(8px, 1.5vw, 15px)',
+                      textAlign: 'center',
+                      fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
+                    }}>
                       <div style={{
                         display: 'inline-block',
                         padding: '4px 12px',
@@ -981,7 +1751,7 @@ const Finance = () => {
                         backgroundColor: getStatusColor(payment.status),
                         color: 'white',
                         fontWeight: 'bold',
-                        fontSize: '12px',
+                        fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)',
                         minWidth: '70px'
                       }}>
                         {payment.status.toUpperCase()}
@@ -995,31 +1765,107 @@ const Finance = () => {
         )}
       </div>
 
+      {/* Responsive CSS */}
       <style>{`
+        /* Animation for loading spinner */
         @keyframes spin {
           0% { transform: rotate(0deg); }
           100% { transform: rotate(360deg); }
         }
         
-        tr:hover {
-          background-color: #f8f9fa !important;
-          transition: background-color 0.2s;
+        /* Hover effects for desktop */
+        @media (hover: hover) and (pointer: fine) {
+          tr:hover {
+            background-color: #f8f9fa !important;
+            transition: background-color 0.2s;
+          }
+          
+          button:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+            transition: all 0.2s ease;
+          }
+          
+          div[style*="cursor: pointer"]:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+            transition: all 0.2s ease;
+          }
         }
         
+        /* Focus styles for accessibility */
         select:focus {
           outline: none;
           border-color: #007bff !important;
           box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25);
         }
         
-        button:hover {
-          opacity: 0.9;
-          transform: translateY(-1px);
-          transition: all 0.2s ease;
+        button:focus {
+          outline: 2px solid #3498db;
+          outline-offset: 2px;
         }
         
-        button:active {
-          transform: translateY(0);
+        /* Mobile-specific optimizations */
+        @media (max-width: 480px) {
+          div[style*="padding: '1rem'"] {
+            padding: 0.75rem !important;
+          }
+          
+          h2 {
+            font-size: 1.3rem !important;
+          }
+          
+          h3 {
+            font-size: 1rem !important;
+          }
+          
+          /* Improve touch targets */
+          button, 
+          select,
+          div[style*="cursor: pointer"] {
+            min-height: 44px;
+          }
+          
+          /* Optimize table scrolling */
+          div[style*="overflow-x: auto"] table {
+            min-width: 650px;
+          }
+        }
+        
+        /* Tablet-specific optimizations */
+        @media (max-width: 768px) and (min-width: 481px) {
+          div[style*="overflow-x: auto"] table {
+            min-width: 700px;
+          }
+        }
+        
+        /* Improve mobile tables */
+        @media (max-width: 768px) {
+          div[style*="overflow-x: auto"] {
+            margin-left: -0.5rem;
+            margin-right: -0.5rem;
+            width: calc(100% + 1rem);
+          }
+          
+          div[style*="overflow-x: auto"] table {
+            border-radius: 0;
+          }
+        }
+        
+        /* Print styles */
+        @media print {
+          button {
+            display: none !important;
+          }
+          
+          div[style*="box-shadow"] {
+            box-shadow: none !important;
+            border: 1px solid #ddd !important;
+          }
+          
+          div[style*="padding: '1rem'"] {
+            padding: 0 !important;
+          }
         }
       `}</style>
     </div>

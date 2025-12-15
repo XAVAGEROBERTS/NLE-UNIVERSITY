@@ -353,7 +353,7 @@ const StudentLogin = () => {
                     type="email"
                     value={email}
                     onChange={handleEmailChange}
-                    placeholder="student@nleuniversity.edu"
+                    placeholder="User email"
                     style={styles.input}
                     required
                     disabled={isSubmitting}
@@ -370,7 +370,7 @@ const StudentLogin = () => {
                       type={showPassword ? "text" : "password"}
                       value={password}
                       onChange={handlePasswordChange}
-                      placeholder="Enter your password"
+                      placeholder="User password"
                       style={styles.input}
                       required
                       disabled={isSubmitting}

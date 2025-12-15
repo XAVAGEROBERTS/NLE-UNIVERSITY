@@ -318,27 +318,9 @@ const Tutorials = () => {
           <h2><i className="fas fa-video"></i> Tutorials</h2>
           <div className="date-display">Loading tutorials...</div>
         </div>
-        <div style={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          height: '300px'
-        }}>
-          <div style={{
-            width: '50px',
-            height: '50px',
-            border: '5px solid #f3f3f3',
-            borderTop: '5px solid #3498db',
-            borderRadius: '50%',
-            animation: 'spin 1s linear infinite'
-          }}></div>
+        <div className="loading-container">
+          <div className="loading-spinner"></div>
         </div>
-        <style>{`
-          @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-          }
-        `}</style>
       </div>
     );
   }
@@ -350,36 +332,12 @@ const Tutorials = () => {
           <h2><i className="fas fa-video"></i> Tutorials</h2>
           <div className="date-display">Error</div>
         </div>
-        <div style={{
-          padding: '30px',
-          backgroundColor: '#fee',
-          border: '1px solid #f99',
-          borderRadius: '8px',
-          margin: '20px 0',
-          textAlign: 'center'
-        }}>
-          <i className="fas fa-exclamation-triangle" style={{
-            fontSize: '48px',
-            color: '#dc3545',
-            marginBottom: '20px'
-          }}></i>
-          <p style={{ color: '#d33', marginBottom: '20px', fontSize: '16px' }}>
-            {error}
-          </p>
+        <div className="error-container">
+          <i className="fas fa-exclamation-triangle error-icon"></i>
+          <p className="error-message">{error}</p>
           <button 
             onClick={refreshTutorials}
-            style={{
-              padding: '10px 20px',
-              backgroundColor: '#007bff',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '14px',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px'
-            }}
+            className="refresh-button"
           >
             <i className="fas fa-sync-alt"></i>
             Try Again
@@ -391,35 +349,19 @@ const Tutorials = () => {
 
   return (
     <div className="content">
-      <div className="dashboard-header" style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '20px'
-      }}>
+      <div className="dashboard-header tutorials-header">
         <div>
-          <h2 style={{ margin: '0 0 5px 0' }}>
-            <i className="fas fa-video" style={{ marginRight: '10px', color: '#007bff' }}></i>
+          <h2 className="tutorials-title">
+            <i className="fas fa-video header-icon"></i>
             Video Tutorials
           </h2>
-          <div className="date-display" style={{ color: '#666', fontSize: '14px' }}>
+          <div className="date-display tutorials-subtitle">
             {tutorials.length} tutorials available | Progress automatically saved
           </div>
         </div>
         <button 
           onClick={refreshTutorials}
-          style={{
-            padding: '8px 16px',
-            backgroundColor: '#28a745',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            fontSize: '14px'
-          }}
+          className="refresh-button header-refresh"
         >
           <i className="fas fa-sync-alt"></i>
           Refresh
@@ -427,29 +369,12 @@ const Tutorials = () => {
       </div>
 
       {/* Tutorials Grid */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))',
-        gap: '25px',
-        marginBottom: '40px'
-      }}>
+      <div className="tutorials-grid">
         {tutorials.length === 0 ? (
-          <div style={{
-            gridColumn: '1 / -1',
-            padding: '60px 20px',
-            textAlign: 'center',
-            backgroundColor: '#f8f9fa',
-            borderRadius: '8px'
-          }}>
-            <i className="fas fa-video-slash" style={{
-              fontSize: '64px',
-              color: '#dee2e6',
-              marginBottom: '20px'
-            }}></i>
-            <h3 style={{ color: '#6c757d', marginBottom: '15px' }}>
-              No Tutorials Available
-            </h3>
-            <p style={{ color: '#999', marginBottom: '25px', maxWidth: '500px', margin: '0 auto' }}>
+          <div className="no-tutorials">
+            <i className="fas fa-video-slash no-tutorials-icon"></i>
+            <h3 className="no-tutorials-title">No Tutorials Available</h3>
+            <p className="no-tutorials-message">
               Tutorials will appear here once your lecturers upload them. Check back later!
             </p>
           </div>
@@ -457,123 +382,50 @@ const Tutorials = () => {
           tutorials.map(tutorial => (
             <div 
               key={tutorial.id} 
-              style={{
-                backgroundColor: 'white',
-                borderRadius: '12px',
-                overflow: 'hidden',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                transition: 'transform 0.3s ease, box-shadow 0.3s ease',
-                borderTop: `4px solid ${getDifficultyColor(tutorial.difficulty)}`
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.transform = 'translateY(-8px)';
-                e.currentTarget.style.boxShadow = '0 8px 25px rgba(0,0,0,0.15)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = 'translateY(0)';
-                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
-              }}
+              className="tutorial-card"
+              style={{ borderTopColor: getDifficultyColor(tutorial.difficulty) }}
             >
               {/* Thumbnail/Preview */}
               <div 
+                className="tutorial-thumbnail"
                 style={{
-                  height: '200px',
-                  backgroundColor: '#f8f9fa',
-                  backgroundImage: tutorial.thumbnailUrl ? `url(${tutorial.thumbnailUrl})` : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                  backgroundSize: 'cover',
-                  backgroundPosition: 'center',
-                  position: 'relative',
-                  cursor: 'pointer'
+                  backgroundImage: tutorial.thumbnailUrl ? `url(${tutorial.thumbnailUrl})` : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
                 }}
                 onClick={() => openVideoPlayer(tutorial)}
               >
-                <div style={{
-                  position: 'absolute',
-                  top: '10px',
-                  right: '10px',
-                  backgroundColor: getDifficultyColor(tutorial.difficulty),
-                  color: 'white',
-                  padding: '4px 12px',
-                  borderRadius: '20px',
-                  fontSize: '12px',
-                  fontWeight: 'bold'
-                }}>
+                <div 
+                  className="difficulty-badge"
+                  style={{ backgroundColor: getDifficultyColor(tutorial.difficulty) }}
+                >
                   {tutorial.difficulty.toUpperCase()}
                 </div>
                 
-                <div style={{
-                  position: 'absolute',
-                  bottom: '0',
-                  left: '0',
-                  right: '0',
-                  backgroundColor: 'rgba(0,0,0,0.7)',
-                  padding: '8px 15px',
-                  color: 'white',
-                  fontSize: '14px',
-                  fontWeight: '500'
-                }}>
+                <div className="course-info-overlay">
                   {tutorial.courseCode}: {tutorial.courseName}
                 </div>
                 
-                <div style={{
-                  position: 'absolute',
-                  top: '50%',
-                  left: '50%',
-                  transform: 'translate(-50%, -50%)',
-                  width: '60px',
-                  height: '60px',
-                  backgroundColor: 'rgba(255,255,255,0.9)',
-                  borderRadius: '50%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '24px',
-                  color: '#007bff'
-                }}>
+                <div className="play-button-overlay">
                   <i className="fas fa-play"></i>
                 </div>
               </div>
 
               {/* Tutorial Info */}
-              <div style={{ padding: '20px' }}>
-                <div style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'flex-start',
-                  marginBottom: '12px'
-                }}>
-                  <h4 style={{ 
-                    margin: 0,
-                    fontSize: '16px',
-                    color: '#333',
-                    lineHeight: '1.4',
-                    flex: 1
-                  }}>
-                    {tutorial.title}
-                  </h4>
-                  <span style={{
-                    fontSize: '12px',
-                    color: '#6c757d',
-                    whiteSpace: 'nowrap',
-                    marginLeft: '10px'
-                  }}>
-                    <i className="far fa-clock" style={{ marginRight: '4px' }}></i>
+              <div className="tutorial-info">
+                <div className="tutorial-header">
+                  <h4 className="tutorial-title">{tutorial.title}</h4>
+                  <span className="tutorial-duration">
+                    <i className="far fa-clock"></i>
                     {tutorial.duration} min
                   </span>
                 </div>
 
-                <div style={{ marginBottom: '15px', fontSize: '14px', color: '#666' }}>
-                  <div style={{ marginBottom: '5px' }}>
-                    <i className="fas fa-chalkboard-teacher" style={{ marginRight: '8px', color: '#6c757d' }}></i>
+                <div className="tutorial-details">
+                  <div className="lecturer-info">
+                    <i className="fas fa-chalkboard-teacher"></i>
                     {tutorial.lecturer}
                   </div>
                   {tutorial.description && (
-                    <div style={{ 
-                      color: '#777',
-                      fontSize: '13px',
-                      lineHeight: '1.5',
-                      marginTop: '8px'
-                    }}>
+                    <div className="tutorial-description">
                       {tutorial.description.length > 100 
                         ? `${tutorial.description.substring(0, 100)}...` 
                         : tutorial.description}
@@ -582,67 +434,41 @@ const Tutorials = () => {
                 </div>
 
                 {/* Progress Bar */}
-                <div style={{ marginBottom: '15px' }}>
-                  <div style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginBottom: '6px'
-                  }}>
-                    <span style={{ fontSize: '12px', color: '#6c757d' }}>
-                      Progress: {tutorial.progress}%
-                    </span>
-                    <span style={{
-                      fontSize: '11px',
-                      padding: '2px 8px',
-                      borderRadius: '10px',
-                      backgroundColor: tutorial.status === 'completed' ? '#d4edda' : 
-                                     tutorial.status === 'in-progress' ? '#fff3cd' : '#f8d7da',
-                      color: tutorial.status === 'completed' ? '#155724' : 
-                            tutorial.status === 'in-progress' ? '#856404' : '#721c24',
-                      fontWeight: '500'
-                    }}>
+                <div className="progress-section">
+                  <div className="progress-header">
+                    <span className="progress-text">Progress: {tutorial.progress}%</span>
+                    <span 
+                      className="status-badge"
+                      style={{
+                        backgroundColor: tutorial.status === 'completed' ? '#d4edda' : 
+                                       tutorial.status === 'in-progress' ? '#fff3cd' : '#f8d7da',
+                        color: tutorial.status === 'completed' ? '#155724' : 
+                              tutorial.status === 'in-progress' ? '#856404' : '#721c24'
+                      }}
+                    >
                       {tutorial.status === 'completed' ? '✓ Completed' : 
                        tutorial.status === 'in-progress' ? '▶ In Progress' : 'New'}
                     </span>
                   </div>
-                  <div style={{
-                    height: '6px',
-                    backgroundColor: '#e9ecef',
-                    borderRadius: '3px',
-                    overflow: 'hidden'
-                  }}>
+                  <div className="progress-bar-container">
                     <div 
+                      className="progress-bar"
                       style={{
-                        height: '100%',
                         width: `${tutorial.progress}%`,
                         backgroundColor: tutorial.progress === 100 ? '#28a745' : 
-                                       tutorial.progress > 0 ? '#007bff' : '#6c757d',
-                        transition: 'width 0.3s ease',
-                        borderRadius: '3px'
+                                       tutorial.progress > 0 ? '#007bff' : '#6c757d'
                       }}
                     ></div>
                   </div>
                 </div>
 
                 {/* Action Buttons */}
-                <div style={{ display: 'flex', gap: '10px' }}>
+                <div className="action-buttons">
                   <button
                     onClick={() => openVideoPlayer(tutorial)}
+                    className="watch-button"
                     style={{
-                      flex: 1,
-                      padding: '10px',
-                      backgroundColor: tutorial.progress === 100 ? '#6c757d' : '#007bff',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      fontSize: '14px',
-                      fontWeight: '500',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '8px'
+                      backgroundColor: tutorial.progress === 100 ? '#6c757d' : '#007bff'
                     }}
                   >
                     {tutorial.progress === 100 ? (
@@ -667,18 +493,7 @@ const Tutorials = () => {
                   {tutorial.fileUrls && tutorial.fileUrls.length > 0 && (
                     <button
                       onClick={() => downloadFile(tutorial.fileUrls[0], `${tutorial.title}.zip`)}
-                      style={{
-                        padding: '10px 15px',
-                        backgroundColor: '#28a745',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                        fontSize: '14px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '5px'
-                      }}
+                      className="download-button"
                       title="Download materials"
                     >
                       <i className="fas fa-download"></i>
@@ -695,96 +510,46 @@ const Tutorials = () => {
       <Modal
         isOpen={isModalOpen}
         onRequestClose={closeModal}
-        style={{
-          overlay: {
-            backgroundColor: 'rgba(0, 0, 0, 0.75)',
-            zIndex: 1000,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          },
-          content: {
-            position: 'relative',
-            top: 'auto',
-            left: 'auto',
-            right: 'auto',
-            bottom: 'auto',
-            border: 'none',
-            background: 'transparent',
-            borderRadius: '12px',
-            padding: 0,
-            width: '90%',
-            maxWidth: '1000px',
-            maxHeight: '90vh',
-            overflow: 'hidden'
-          }
-        }}
+        className="video-modal"
+        overlayClassName="video-modal-overlay"
       >
         {activeVideo && (
-          <div style={{
-            backgroundColor: 'white',
-            borderRadius: '12px',
-            overflow: 'hidden',
-            boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
-          }}>
+          <div className="modal-content">
             {/* Modal Header */}
-            <div style={{
-              padding: '20px',
-              backgroundColor: '#f8f9fa',
-              borderBottom: '1px solid #dee2e6',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center'
-            }}>
-              <div>
-                <h3 style={{ margin: '0 0 5px 0', color: '#333' }}>
-                  {activeVideo.title}
-                </h3>
-                <div style={{ fontSize: '14px', color: '#666' }}>
-                  <i className="fas fa-chalkboard-teacher" style={{ marginRight: '8px' }}></i>
+            <div className="modal-header">
+              <div className="modal-header-content">
+                <h3 className="modal-title">{activeVideo.title}</h3>
+                <div className="modal-subtitle">
+                  <i className="fas fa-chalkboard-teacher"></i>
                   {activeVideo.lecturer} • 
-                  <i className="fas fa-book" style={{ marginLeft: '15px', marginRight: '8px' }}></i>
+                  <i className="fas fa-book"></i>
                   {activeVideo.courseCode} • 
-                  <span style={{
-                    marginLeft: '15px',
-                    padding: '2px 8px',
-                    borderRadius: '10px',
-                    backgroundColor: getDifficultyColor(activeVideo.difficulty),
-                    color: 'white',
-                    fontSize: '12px'
-                  }}>
+                  <span 
+                    className="modal-difficulty"
+                    style={{ backgroundColor: getDifficultyColor(activeVideo.difficulty) }}
+                  >
                     {activeVideo.difficulty}
                   </span>
                 </div>
               </div>
               <button
                 onClick={closeModal}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  fontSize: '24px',
-                  color: '#6c757d',
-                  cursor: 'pointer',
-                  padding: '5px',
-                  borderRadius: '4px'
-                }}
+                className="close-modal-button"
               >
                 <i className="fas fa-times"></i>
               </button>
             </div>
 
             {/* Video Player */}
-            <div style={{
-              position: 'relative',
-              backgroundColor: '#000'
-            }}>
+            <div className="video-player-wrapper">
               <ReactPlayer
                 ref={playerRef}
                 url={activeVideo.videoSrc}
                 playing={playing}
                 controls={true}
                 width="100%"
-                height="auto"
+                height="100%"
+                className="react-player"
                 onReady={() => {
                   if (videoProgress[activeVideo.id]) {
                     playerRef.current.seekTo(videoProgress[activeVideo.id].playedSeconds, 'seconds');
@@ -804,130 +569,70 @@ const Tutorials = () => {
                   }
                 }}
               />
-              
-              {/* Progress indicator overlay */}
-              <div style={{
-                position: 'absolute',
-                bottom: '60px',
-                left: '20px',
-                right: '20px',
-                backgroundColor: 'rgba(0,0,0,0.7)',
-                padding: '10px',
-                borderRadius: '6px',
-                color: 'white',
-                fontSize: '14px',
-                display: 'none' // Show on hover or based on state
-              }}>
-                Progress: {activeVideo.progress}% • Auto-save enabled
-              </div>
             </div>
 
             {/* Video Controls */}
-            <div style={{
-              padding: '15px 20px',
-              backgroundColor: '#f8f9fa',
-              borderTop: '1px solid #dee2e6'
-            }}>
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '15px',
-                flexWrap: 'wrap'
-              }}>
+            <div className="video-controls">
+              <div className="controls-container">
                 <button
                   onClick={() => setPlaying(!playing)}
-                  style={{
-                    padding: '8px 16px',
-                    backgroundColor: playing ? '#dc3545' : '#28a745',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    fontSize: '14px',
-                    fontWeight: '500'
-                  }}
+                  className="play-pause-button"
+                  style={{ backgroundColor: playing ? '#dc3545' : '#28a745' }}
                 >
                   <i className={`fas fa-${playing ? 'pause' : 'play'}`}></i>
                   {playing ? 'Pause' : 'Play'}
                 </button>
 
-                <div style={{ flex: 1, minWidth: '200px' }}>
-                  <div style={{
-                    height: '6px',
-                    backgroundColor: '#dee2e6',
-                    borderRadius: '3px',
-                    overflow: 'hidden',
-                    cursor: 'pointer'
-                  }} onClick={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const percent = (e.clientX - rect.left) / rect.width;
-                    handleSeek(percent * duration);
-                  }}>
+                <div className="progress-controls">
+                  <div 
+                    className="progress-bar-clickable"
+                    onClick={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const percent = (e.clientX - rect.left) / rect.width;
+                      handleSeek(percent * duration);
+                    }}
+                  >
                     <div 
-                      style={{
-                        height: '100%',
-                        width: `${activeVideo.progress}%`,
-                        backgroundColor: '#007bff',
-                        transition: 'width 0.1s linear'
-                      }}
+                      className="progress-bar-fill"
+                      style={{ width: `${activeVideo.progress}%` }}
                     ></div>
                   </div>
-                  <div style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    fontSize: '12px',
-                    color: '#6c757d',
-                    marginTop: '5px'
-                  }}>
+                  <div className="time-display">
                     <span>{formatTime(videoProgress[activeVideo.id]?.playedSeconds || 0)}</span>
                     <span>{formatTime(duration)}</span>
                   </div>
                 </div>
 
-                <div style={{ fontSize: '14px', color: '#495057' }}>
-                  <i className="fas fa-save" style={{ marginRight: '5px', color: '#28a745' }}></i>
+                <div className="auto-save-indicator">
+                  <i className="fas fa-save"></i>
                   Auto-saving...
                 </div>
               </div>
             </div>
 
             {/* Video Description */}
-            <div style={{ padding: '20px' }}>
-              <h4 style={{ margin: '0 0 10px 0', color: '#333' }}>
-                <i className="fas fa-info-circle" style={{ marginRight: '8px', color: '#007bff' }}></i>
+            <div className="video-description">
+              <h4 className="description-title">
+                <i className="fas fa-info-circle"></i>
                 Description
               </h4>
-              <p style={{ color: '#666', lineHeight: '1.6', marginBottom: '20px' }}>
+              <p className="description-text">
                 {activeVideo.description || 'No description available.'}
               </p>
 
               {/* Additional Materials */}
               {activeVideo.fileUrls && activeVideo.fileUrls.length > 0 && (
-                <div>
-                  <h5 style={{ margin: '0 0 10px 0', color: '#333' }}>
-                    <i className="fas fa-file-download" style={{ marginRight: '8px', color: '#28a745' }}></i>
+                <div className="materials-section">
+                  <h5 className="materials-title">
+                    <i className="fas fa-file-download"></i>
                     Download Materials
                   </h5>
-                  <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                  <div className="materials-buttons">
                     {activeVideo.fileUrls.map((fileUrl, index) => (
                       <button
                         key={index}
                         onClick={() => downloadFile(fileUrl, `material-${index + 1}.zip`)}
-                        style={{
-                          padding: '8px 15px',
-                          backgroundColor: '#e9ecef',
-                          border: '1px solid #dee2e6',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '8px',
-                          fontSize: '14px',
-                          color: '#495057'
-                        }}
+                        className="material-button"
                       >
                         <i className="fas fa-download"></i>
                         Material {index + 1}
@@ -941,14 +646,717 @@ const Tutorials = () => {
         )}
       </Modal>
 
-      <style>{`
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
+      <style jsx>{`
+        /* Base styles */
+        .content {
+          padding: 20px;
+        }
+        
+        .loading-container {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          height: 300px;
+        }
+        
+        .loading-spinner {
+          width: 50px;
+          height: 50px;
+          border: 5px solid #f3f3f3;
+          border-top: 5px solid #3498db;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+        }
+        
+        .error-container {
+          padding: 30px;
+          background-color: #fee;
+          border: 1px solid #f99;
+          border-radius: 8px;
+          margin: 20px 0;
+          text-align: center;
+        }
+        
+        .error-icon {
+          font-size: 48px;
+          color: #dc3545;
+          margin-bottom: 20px;
+        }
+        
+        .error-message {
+          color: #d33;
+          margin-bottom: 20px;
+          font-size: 16px;
+        }
+        
+        .refresh-button {
+          padding: 10px 20px;
+          background-color: #007bff;
+          color: white;
+          border: none;
+          border-radius: 4px;
+          cursor: pointer;
+          font-size: 14px;
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          transition: all 0.2s ease;
+        }
+        
+        .refresh-button:hover {
+          opacity: 0.9;
+          transform: translateY(-1px);
+        }
+        
+        .refresh-button:active {
+          transform: translateY(0);
+        }
+        
+        /* Header styles */
+        .tutorials-header {
+          display: flex;
+          flex-direction: column;
+          gap: 15px;
+          margin-bottom: 20px;
+        }
+        
+        @media (min-width: 768px) {
+          .tutorials-header {
+            flex-direction: row;
+            justify-content: space-between;
+            align-items: center;
+          }
+        }
+        
+        .tutorials-title {
+          margin: 0 0 5px 0;
+        }
+        
+        .header-icon {
+          margin-right: 10px;
+          color: #007bff;
+        }
+        
+        .tutorials-subtitle {
+          color: #666;
+          font-size: 14px;
+        }
+        
+        .header-refresh {
+          align-self: flex-start;
+        }
+        
+        @media (min-width: 768px) {
+          .header-refresh {
+            align-self: center;
+          }
+        }
+        
+        /* Tutorials Grid */
+        .tutorials-grid {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 20px;
+          margin-bottom: 40px;
+        }
+        
+        @media (min-width: 576px) {
+          .tutorials-grid {
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+          }
+        }
+        
+        @media (min-width: 768px) {
+          .tutorials-grid {
+            gap: 25px;
+          }
+        }
+        
+        /* Tutorial Card */
+        .tutorial-card {
+          background-color: white;
+          border-radius: 12px;
+          overflow: hidden;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+          transition: transform 0.3s ease, box-shadow 0.3s ease;
+          border-top: 4px solid;
+        }
+        
+        .tutorial-card:hover {
+          transform: translateY(-8px);
+          box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+        
+        .tutorial-thumbnail {
+          height: 180px;
+          background-color: #f8f9fa;
+          background-size: cover;
+          background-position: center;
+          position: relative;
+          cursor: pointer;
+        }
+        
+        @media (min-width: 768px) {
+          .tutorial-thumbnail {
+            height: 200px;
+          }
+        }
+        
+        .difficulty-badge {
+          position: absolute;
+          top: 10px;
+          right: 10px;
+          color: white;
+          padding: 4px 12px;
+          border-radius: 20px;
+          font-size: 11px;
+          font-weight: bold;
+        }
+        
+        @media (min-width: 768px) {
+          .difficulty-badge {
+            font-size: 12px;
+          }
+        }
+        
+        .course-info-overlay {
+          position: absolute;
+          bottom: 0;
+          left: 0;
+          right: 0;
+          background-color: rgba(0,0,0,0.7);
+          padding: 8px 12px;
+          color: white;
+          font-size: 13px;
+          font-weight: 500;
+        }
+        
+        .play-button-overlay {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          width: 50px;
+          height: 50px;
+          background-color: rgba(255,255,255,0.9);
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 20px;
+          color: #007bff;
+        }
+        
+        @media (min-width: 768px) {
+          .play-button-overlay {
+            width: 60px;
+            height: 60px;
+            font-size: 24px;
+          }
+        }
+        
+        /* Tutorial Info */
+        .tutorial-info {
+          padding: 15px;
+        }
+        
+        @media (min-width: 768px) {
+          .tutorial-info {
+            padding: 20px;
+          }
+        }
+        
+        .tutorial-header {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          margin-bottom: 12px;
+        }
+        
+        @media (min-width: 576px) {
+          .tutorial-header {
+            flex-direction: row;
+            justify-content: space-between;
+            align-items: flex-start;
+          }
+        }
+        
+        .tutorial-title {
+          margin: 0;
+          font-size: 15px;
+          color: #333;
+          line-height: 1.4;
+          flex: 1;
+        }
+        
+        @media (min-width: 768px) {
+          .tutorial-title {
+            font-size: 16px;
+          }
+        }
+        
+        .tutorial-duration {
+          font-size: 12px;
+          color: #6c757d;
+          white-space: nowrap;
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
+        
+        .tutorial-details {
+          margin-bottom: 15px;
+          font-size: 14px;
+          color: #666;
+        }
+        
+        .lecturer-info {
+          margin-bottom: 5px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        
+        .tutorial-description {
+          color: #777;
+          font-size: 13px;
+          line-height: 1.5;
+          margin-top: 8px;
+        }
+        
+        /* Progress Section */
+        .progress-section {
+          margin-bottom: 15px;
+        }
+        
+        .progress-header {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          margin-bottom: 6px;
+        }
+        
+        @media (min-width: 576px) {
+          .progress-header {
+            flex-direction: row;
+            justify-content: space-between;
+            align-items: center;
+          }
+        }
+        
+        .progress-text {
+          font-size: 12px;
+          color: #6c757d;
+        }
+        
+        .status-badge {
+          font-size: 11px;
+          padding: 2px 8px;
+          border-radius: 10px;
+          font-weight: 500;
+        }
+        
+        .progress-bar-container {
+          height: 6px;
+          background-color: #e9ecef;
+          border-radius: 3px;
+          overflow: hidden;
+        }
+        
+        .progress-bar {
+          height: 100%;
+          transition: width 0.3s ease;
+          border-radius: 3px;
+        }
+        
+        /* Action Buttons */
+        .action-buttons {
+          display: flex;
+          gap: 10px;
+          flex-direction: column;
+        }
+        
+        @media (min-width: 576px) {
+          .action-buttons {
+            flex-direction: row;
+          }
+        }
+        
+        .watch-button {
+          flex: 1;
+          padding: 10px;
+          color: white;
+          border: none;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 14px;
+          font-weight: 500;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          transition: all 0.2s ease;
+        }
+        
+        .download-button {
+          padding: 10px 15px;
+          background-color: #28a745;
+          color: white;
+          border: none;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 14px;
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          transition: all 0.2s ease;
+        }
+        
+        /* No Tutorials */
+        .no-tutorials {
+          grid-column: 1 / -1;
+          padding: 40px 20px;
+          text-align: center;
+          background-color: #f8f9fa;
+          border-radius: 8px;
+        }
+        
+        @media (min-width: 768px) {
+          .no-tutorials {
+            padding: 60px 20px;
+          }
+        }
+        
+        .no-tutorials-icon {
+          font-size: 48px;
+          color: #dee2e6;
+          margin-bottom: 20px;
+        }
+        
+        @media (min-width: 768px) {
+          .no-tutorials-icon {
+            font-size: 64px;
+          }
+        }
+        
+        .no-tutorials-title {
+          color: #6c757d;
+          margin-bottom: 15px;
+          font-size: 18px;
+        }
+        
+        @media (min-width: 768px) {
+          .no-tutorials-title {
+            font-size: 20px;
+          }
+        }
+        
+        .no-tutorials-message {
+          color: #999;
+          margin-bottom: 25px;
+          max-width: 500px;
+          margin: 0 auto;
+          font-size: 14px;
+        }
+        
+        @media (min-width: 768px) {
+          .no-tutorials-message {
+            font-size: 16px;
+          }
+        }
+        
+        /* Modal Styles */
+        .video-modal {
+          position: relative;
+          top: auto;
+          left: auto;
+          right: auto;
+          bottom: auto;
+          border: none;
+          background: transparent;
+          border-radius: 12px;
+          padding: 0;
+          width: 95%;
+          max-width: 900px;
+          max-height: 90vh;
+          overflow: hidden;
+          margin: 20px;
+        }
+        
+        @media (min-width: 768px) {
+          .video-modal {
+            width: 90%;
+            max-width: 1000px;
+          }
+        }
+        
+        .video-modal-overlay {
+          background-color: rgba(0, 0, 0, 0.75);
+          z-index: 1000;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 20px;
+        }
+        
+        @media (max-width: 576px) {
+          .video-modal {
+            width: 100%;
+            margin: 0;
+            border-radius: 0;
+            max-height: 100vh;
+            max-width: 100%;
+          }
+          
+          .video-modal-overlay {
+            padding: 0;
+          }
+        }
+        
+        .modal-content {
+          background-color: white;
+          border-radius: 12px;
+          overflow: hidden;
+          box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        
+        @media (max-width: 576px) {
+          .modal-content {
+            border-radius: 0;
+            max-height: 100vh;
+            overflow-y: auto;
+          }
+        }
+        
+        /* Modal Header */
+        .modal-header {
+          padding: 15px;
+          background-color: #f8f9fa;
+          border-bottom: 1px solid #dee2e6;
+          display: flex;
+          flex-direction: column;
+          gap: 15px;
+        }
+        
+        @media (min-width: 768px) {
+          .modal-header {
+            flex-direction: row;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+          }
+        }
+        
+        .modal-header-content {
+          flex: 1;
+        }
+        
+        .modal-title {
+          margin: 0 0 5px 0;
+          color: #333;
+          font-size: 16px;
+        }
+        
+        @media (min-width: 768px) {
+          .modal-title {
+            font-size: 18px;
+          }
+        }
+        
+        .modal-subtitle {
+          font-size: 13px;
+          color: #666;
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 8px;
+        }
+        
+        @media (min-width: 768px) {
+          .modal-subtitle {
+            font-size: 14px;
+          }
+        }
+        
+        .modal-difficulty {
+          padding: 2px 8px;
+          border-radius: 10px;
+          color: white;
+          font-size: 12px;
+        }
+        
+        .close-modal-button {
+          background: none;
+          border: none;
+          font-size: 20px;
+          color: #6c757d;
+          cursor: pointer;
+          padding: 5px;
+          border-radius: 4px;
+          align-self: flex-end;
+        }
+        
+        @media (min-width: 768px) {
+          .close-modal-button {
+            font-size: 24px;
+            align-self: center;
+          }
+        }
+        
+        /* Video Player */
+        .video-player-wrapper {
+          position: relative;
+          background-color: #000;
+          padding-top: 56.25%; /* 16:9 Aspect Ratio */
+        }
+        
+        .react-player {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
         }
         
         .react-player video {
           border-radius: 0 !important;
+        }
+        
+        /* Video Controls */
+        .video-controls {
+          padding: 15px;
+          background-color: #f8f9fa;
+          border-top: 1px solid #dee2e6;
+        }
+        
+        .controls-container {
+          display: flex;
+          flex-direction: column;
+          gap: 15px;
+        }
+        
+        @media (min-width: 768px) {
+          .controls-container {
+            flex-direction: row;
+            align-items: center;
+            flex-wrap: wrap;
+          }
+        }
+        
+        .play-pause-button {
+          padding: 8px 16px;
+          color: white;
+          border: none;
+          border-radius: 6px;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 14px;
+          font-weight: 500;
+          transition: all 0.2s ease;
+        }
+        
+        .progress-controls {
+          flex: 1;
+          min-width: 200px;
+        }
+        
+        .progress-bar-clickable {
+          height: 6px;
+          background-color: #dee2e6;
+          border-radius: 3px;
+          overflow: hidden;
+          cursor: pointer;
+        }
+        
+        .progress-bar-fill {
+          height: 100%;
+          background-color: #007bff;
+          transition: width 0.1s linear;
+        }
+        
+        .time-display {
+          display: flex;
+          justify-content: space-between;
+          font-size: 12px;
+          color: #6c757d;
+          margin-top: 5px;
+        }
+        
+        .auto-save-indicator {
+          font-size: 13px;
+          color: #495057;
+          display: flex;
+          align-items: center;
+          gap: 5px;
+        }
+        
+        /* Video Description */
+        .video-description {
+          padding: 15px;
+        }
+        
+        @media (min-width: 768px) {
+          .video-description {
+            padding: 20px;
+          }
+        }
+        
+        .description-title {
+          margin: 0 0 10px 0;
+          color: #333;
+          font-size: 16px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        
+        .description-text {
+          color: #666;
+          line-height: 1.6;
+          margin-bottom: 20px;
+          font-size: 14px;
+        }
+        
+        /* Materials Section */
+        .materials-section {
+          margin-top: 20px;
+        }
+        
+        .materials-title {
+          margin: 0 0 10px 0;
+          color: #333;
+          font-size: 15px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        
+        .materials-buttons {
+          display: flex;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+        
+        .material-button {
+          padding: 8px 15px;
+          background-color: #e9ecef;
+          border: 1px solid #dee2e6;
+          border-radius: 6px;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 14px;
+          color: #495057;
+          transition: all 0.2s ease;
+        }
+        
+        /* Animations */
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
         }
         
         .ReactModal__Overlay {
@@ -964,14 +1372,21 @@ const Tutorials = () => {
           opacity: 0;
         }
         
-        button:hover {
-          opacity: 0.9;
-          transform: translateY(-1px);
-          transition: all 0.2s ease;
-        }
-        
-        button:active {
-          transform: translateY(0);
+        /* Touch-friendly improvements */
+        @media (hover: none) and (pointer: coarse) {
+          .tutorial-card:hover {
+            transform: none;
+          }
+          
+          button, .tutorial-thumbnail {
+            min-height: 44px;
+            min-width: 44px;
+          }
+          
+          .play-button-overlay {
+            width: 70px;
+            height: 70px;
+          }
         }
       `}</style>
     </div>
