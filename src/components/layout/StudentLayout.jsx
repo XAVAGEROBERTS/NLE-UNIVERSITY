@@ -693,7 +693,7 @@ const StudentLayout = () => {
                 }}
               >
                 <img 
-                  src="/public/badge.png" 
+                  src="https://cbveousvfihjgtnuvnpo.supabase.co/storage/v1/object/sign/UNIVERSITY%20IMAGES/badge.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV84MjgwZTIyMC1kYTBmLTQ2ZDctYTNmNS05YTc1N2IwZTViYWMiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJVTklWRVJTSVRZIElNQUdFUy9iYWRnZS5wbmciLCJpYXQiOjE3NjU4MjQzNTAsImV4cCI6NDkxOTQyNDM1MH0.5ACcLQ7wUW67uJRoqjFxg4nXjgDC_QEg1R_BBZvdmlM" 
                   alt="Logo" 
                   style={{
                     width: '100%',
