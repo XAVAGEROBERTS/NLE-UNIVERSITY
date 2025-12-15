@@ -16,6 +16,7 @@ const Results = React.lazy(() => import('./components/dashboard/Results'));
 const Finance = React.lazy(() => import('./components/dashboard/Finance'));
 const Tutorials = React.lazy(() => import('./components/dashboard/Tutorials'));
 const Settings = React.lazy(() => import('./components/dashboard/Settings'));
+const Chatbot = React.lazy(() => import('./components/dashboard/Chatbot')); // Added Chatbot
 
 const LoadingSpinner = () => (
   <div style={styles.loadingContainer}>
@@ -79,6 +80,7 @@ function App() {
               <Route path="results" element={<Results />} />
               <Route path="finance" element={<Finance />} />
               <Route path="tutorials" element={<Tutorials />} />
+              <Route path="chatbot" element={<Chatbot />} /> {/* Added Chatbot route */}
               <Route path="settings" element={<Settings />} />
             </Route>
             

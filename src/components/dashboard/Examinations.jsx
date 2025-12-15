@@ -12,6 +12,19 @@ const Examinations = () => {
   const [error, setError] = useState(null);
   const [studentInfo, setStudentInfo] = useState(null);
   const { user } = useStudentAuth();
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Check screen size
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   useEffect(() => {
     if (user?.email) {
@@ -384,6 +397,16 @@ const Examinations = () => {
 
   const formatDate = (dateString) => {
     const date = new Date(dateString);
+    if (isMobile) {
+      return date.toLocaleDateString('en-US', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      });
+    }
     return date.toLocaleDateString('en-US', {
       day: 'numeric',
       month: 'short',
@@ -420,29 +443,573 @@ const Examinations = () => {
     fetchExams();
   };
 
-// In the Examinations component, update the viewExamResults function:
-const viewExamResults = (exam) => {
-  if (exam.submission) {
-    // Navigate to the Results page with the exam ID as state
-    navigate('/results', { 
-      state: { 
-        examId: exam.id,
-        courseCode: exam.courseCode,
-        courseName: exam.courseName,
-        examTitle: exam.title
-      } 
-    });
-  } else {
-    alert('No results available for this exam yet.');
-  }
-};
+  // Render mobile exam card
+  const renderMobileExamCard = (exam, index) => {
+    const status = getExamStatus(exam);
+    const statusColor = getStatusColor(status);
+    
+    return (
+      <div 
+        key={exam.id} 
+        style={{
+          border: '1px solid #dee2e6',
+          borderRadius: '12px',
+          overflow: 'hidden',
+          marginBottom: '16px',
+          borderLeft: `5px solid ${statusColor}`,
+          backgroundColor: 'white'
+        }}
+      >
+        {/* Exam Header */}
+        <div style={{
+          padding: '16px',
+          backgroundColor: '#f8f9fa',
+          borderBottom: '1px solid #dee2e6'
+        }}>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            marginBottom: '10px',
+            flexWrap: 'wrap',
+            gap: '8px'
+          }}>
+            <div style={{
+              padding: '4px 12px',
+              backgroundColor: statusColor,
+              color: 'white',
+              borderRadius: '20px',
+              fontSize: '12px',
+              fontWeight: 'bold',
+              flexShrink: '0'
+            }}>
+              {status.toUpperCase()}
+            </div>
+            <div style={{
+              padding: '4px 10px',
+              backgroundColor: '#e9ecef',
+              borderRadius: '20px',
+              fontSize: '11px',
+              fontWeight: '500',
+              color: '#495057',
+              flexShrink: '0'
+            }}>
+              {exam.examType.toUpperCase()}
+            </div>
+          </div>
+          
+          <h4 style={{ 
+            margin: '0 0 6px 0',
+            fontSize: '16px',
+            color: '#333',
+            lineHeight: '1.3'
+          }}>
+            {exam.title}
+          </h4>
+          
+          <div style={{
+            fontSize: '14px',
+            color: '#666',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}>
+            <i className="fas fa-book"></i>
+            <span>{exam.courseCode}: {exam.courseName}</span>
+          </div>
+        </div>
+
+        {/* Exam Details */}
+        <div style={{ padding: '16px' }}>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(2, 1fr)',
+            gap: '12px',
+            marginBottom: '16px'
+          }}>
+            <div>
+              <div style={{ fontSize: '11px', color: '#6c757d', marginBottom: '4px' }}>
+                <i className="far fa-calendar-alt"></i> Start
+              </div>
+              <div style={{ 
+                fontSize: '13px', 
+                fontWeight: '500', 
+                color: '#495057',
+                lineHeight: '1.3'
+              }}>
+                {formatDate(exam.startTime)}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: '11px', color: '#6c757d', marginBottom: '4px' }}>
+                <i className="fas fa-clock"></i> Duration
+              </div>
+              <div style={{ 
+                fontSize: '13px', 
+                fontWeight: '500', 
+                color: '#495057' 
+              }}>
+                {exam.duration} min
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: '11px', color: '#6c757d', marginBottom: '4px' }}>
+                <i className="fas fa-chart-bar"></i> Marks
+              </div>
+              <div style={{ 
+                fontSize: '13px', 
+                fontWeight: '500', 
+                color: '#495057' 
+              }}>
+                {exam.totalMarks} marks
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: '11px', color: '#6c757d', marginBottom: '4px' }}>
+                <i className="fas fa-map-marker-alt"></i> Location
+              </div>
+              <div style={{ 
+                fontSize: '13px', 
+                fontWeight: '500', 
+                color: '#495057',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis'
+              }}>
+                {exam.location || 'TBA'}
+              </div>
+            </div>
+          </div>
+
+          {/* Action Button */}
+          <div>
+            {exam.submitted ? (
+              <button 
+                onClick={() => navigate('/results', { 
+                  state: { 
+                    examId: exam.id,
+                    courseCode: exam.courseCode,
+                    courseName: exam.courseName,
+                    examTitle: exam.title,
+                    submission: exam.submission
+                  } 
+                })}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  backgroundColor: '#007bff',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px'
+                }}
+              >
+                <i className="fas fa-chart-line"></i>
+                View Results
+              </button>
+            ) : exam.canStart ? (
+              <button 
+                onClick={() => handleExamClick(exam)}
+                style={{
+                  width: '100%',
+                  padding: '14px',
+                  backgroundColor: '#dc3545',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '15px',
+                  fontWeight: 'bold',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '10px'
+                }}
+              >
+                <i className="fas fa-play"></i>
+                START EXAM
+              </button>
+            ) : status === 'upcoming' ? (
+              <button 
+                disabled
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  backgroundColor: '#e9ecef',
+                  color: '#6c757d',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  cursor: 'not-allowed'
+                }}
+              >
+                <i className="fas fa-lock"></i>
+                Not Available Yet
+              </button>
+            ) : (
+              <button 
+                disabled
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  backgroundColor: '#e9ecef',
+                  color: '#6c757d',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  cursor: 'not-allowed'
+                }}
+              >
+                <i className="fas fa-times-circle"></i>
+                Exam Closed
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Render desktop exam card
+  const renderDesktopExamCard = (exam, index) => {
+    const status = getExamStatus(exam);
+    const statusColor = getStatusColor(status);
+    
+    return (
+      <div 
+        key={exam.id} 
+        style={{
+          border: '1px solid #dee2e6',
+          borderRadius: '12px',
+          overflow: 'hidden',
+          marginBottom: '20px',
+          borderLeft: `5px solid ${statusColor}`,
+          backgroundColor: 'white',
+          cursor: exam.canStart || exam.submitted ? 'pointer' : 'default',
+          transition: 'transform 0.2s ease, box-shadow 0.2s ease'
+        }}
+        onMouseEnter={(e) => {
+          if (exam.canStart || exam.submitted) {
+            e.currentTarget.style.transform = 'translateY(-4px)';
+            e.currentTarget.style.boxShadow = '0 8px 25px rgba(0,0,0,0.1)';
+          }
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.transform = 'translateY(0)';
+          e.currentTarget.style.boxShadow = 'none';
+        }}
+      >
+        {/* Exam Header */}
+        <div style={{
+          padding: '20px',
+          backgroundColor: '#f8f9fa',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center'
+        }}>
+          <div>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '15px',
+              marginBottom: '10px'
+            }}>
+              <span style={{
+                padding: '4px 12px',
+                backgroundColor: statusColor,
+                color: 'white',
+                borderRadius: '20px',
+                fontSize: '12px',
+                fontWeight: 'bold'
+              }}>
+                {status.toUpperCase()}
+              </span>
+              <span style={{
+                padding: '4px 12px',
+                backgroundColor: '#e9ecef',
+                borderRadius: '20px',
+                fontSize: '12px',
+                fontWeight: '500',
+                color: '#495057'
+              }}>
+                {exam.examType.toUpperCase()}
+              </span>
+            </div>
+            <h4 style={{ 
+              margin: 0,
+              fontSize: '18px',
+              color: '#333'
+            }}>
+              {exam.title}
+            </h4>
+          </div>
+          <div style={{
+            textAlign: 'right'
+          }}>
+            <div style={{
+              fontSize: '14px',
+              color: '#666',
+              marginBottom: '5px'
+            }}>
+              <i className="fas fa-book" style={{ marginRight: '8px' }}></i>
+              {exam.courseCode}: {exam.courseName}
+            </div>
+            <div style={{
+              fontSize: '12px',
+              color: '#6c757d'
+            }}>
+              Exam ID: {exam.id.slice(0, 8).toUpperCase()}
+            </div>
+          </div>
+        </div>
+
+        {/* Exam Details */}
+        <div style={{ padding: '20px' }}>
+          {exam.description && (
+            <p style={{ 
+              color: '#666', 
+              marginBottom: '20px',
+              lineHeight: '1.6'
+            }}>
+              {exam.description}
+            </p>
+          )}
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gap: '15px',
+            marginBottom: '20px'
+          }}>
+            <div>
+              <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '5px' }}>
+                <i className="far fa-calendar-alt" style={{ marginRight: '8px' }}></i>
+                Start Time
+              </div>
+              <div style={{ fontWeight: '500', color: '#495057' }}>
+                {formatDate(exam.startTime)}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '5px' }}>
+                <i className="far fa-calendar-times" style={{ marginRight: '8px' }}></i>
+                End Time
+              </div>
+              <div style={{ fontWeight: '500', color: '#495057' }}>
+                {formatDate(exam.endTime)}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '5px' }}>
+                <i className="fas fa-clock" style={{ marginRight: '8px' }}></i>
+                Duration
+              </div>
+              <div style={{ fontWeight: '500', color: '#495057' }}>
+                {exam.duration} minutes
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '5px' }}>
+                <i className="fas fa-chart-bar" style={{ marginRight: '8px' }}></i>
+                Total Marks
+              </div>
+              <div style={{ fontWeight: '500', color: '#495057' }}>
+                {exam.totalMarks} marks
+                {exam.passingMarks && ` (Pass: ${exam.passingMarks})`}
+              </div>
+            </div>
+            {exam.location && (
+              <div>
+                <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '5px' }}>
+                  <i className="fas fa-map-marker-alt" style={{ marginRight: '8px' }}></i>
+                  Location
+                </div>
+                <div style={{ fontWeight: '500', color: '#495057' }}>
+                  {exam.location}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Action Area */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            paddingTop: '20px',
+            borderTop: '1px solid #dee2e6'
+          }}>
+            {exam.submitted ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  color: '#28a745'
+                }}>
+                  <i className="fas fa-check-circle" style={{ fontSize: '20px' }}></i>
+                  <div>
+                    <div style={{ fontWeight: 'bold' }}>
+                      Submitted on {new Date(exam.submission.submitted_at).toLocaleDateString()}
+                    </div>
+                    {exam.submission.grade && (
+                      <div style={{ fontSize: '14px', color: '#495057' }}>
+                        Grade: {exam.submission.grade} | 
+                        Marks: {exam.submission.total_marks_obtained || 'N/A'}/{exam.totalMarks}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <button 
+                  onClick={() => navigate('/results', { 
+                    state: { 
+                      examId: exam.id,
+                      courseCode: exam.courseCode,
+                      courseName: exam.courseName,
+                      examTitle: exam.title,
+                      submission: exam.submission
+                    } 
+                  })}
+                  style={{
+                    padding: '8px 20px',
+                    backgroundColor: '#007bff',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    fontSize: '14px',
+                    fontWeight: '500'
+                  }}
+                >
+                  <i className="fas fa-chart-line"></i>
+                  View Results
+                </button>
+              </div>
+            ) : exam.canStart ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  color: '#dc3545',
+                  fontWeight: '500'
+                }}>
+                  <i className="fas fa-exclamation-circle"></i>
+                  Exam is now active
+                </div>
+                <button 
+                  onClick={() => handleExamClick(exam)}
+                  style={{
+                    padding: '10px 25px',
+                    backgroundColor: '#dc3545',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                    fontWeight: 'bold',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px'
+                  }}
+                >
+                  <i className="fas fa-play"></i>
+                  START EXAM
+                </button>
+              </div>
+            ) : status === 'upcoming' ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  color: '#007bff'
+                }}>
+                  <i className="fas fa-clock"></i>
+                  Starts in {Math.floor((new Date(exam.startTime) - new Date()) / 1000 / 3600)}h {Math.floor(((new Date(exam.startTime) - new Date()) / 1000 / 60) % 60)}m
+                </div>
+                <button 
+                  disabled
+                  style={{
+                    padding: '10px 25px',
+                    backgroundColor: '#e9ecef',
+                    color: '#6c757d',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    cursor: 'not-allowed'
+                  }}
+                >
+                  <i className="fas fa-lock"></i>
+                  Not Available Yet
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  color: '#6c757d'
+                }}>
+                  <i className="fas fa-ban"></i>
+                  Exam period has ended
+                </div>
+                <button 
+                  disabled
+                  style={{
+                    padding: '10px 25px',
+                    backgroundColor: '#e9ecef',
+                    color: '#6c757d',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    cursor: 'not-allowed'
+                  }}
+                >
+                  <i className="fas fa-times-circle"></i>
+                  Closed
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   if (loading) {
     return (
-      <div className="content">
-        <div className="dashboard-header">
-          <h2><i className="fas fa-clipboard-check"></i> Examinations</h2>
-          <div className="date-display">Loading examinations...</div>
+      <div className="content" style={{ padding: 'clamp(10px, 3vw, 20px)' }}>
+        <div className="dashboard-header" style={{ marginBottom: 'clamp(20px, 4vw, 30px)' }}>
+          <h2 style={{ 
+            margin: '0',
+            fontSize: 'clamp(1.3rem, 3.5vw, 1.8rem)',
+            lineHeight: '1.2'
+          }}>
+            <i className="fas fa-clipboard-check" style={{ marginRight: '10px', color: '#dc3545' }}></i>
+            Examinations
+          </h2>
+          <div className="date-display" style={{ 
+            color: '#666', 
+            fontSize: 'clamp(0.85rem, 2vw, 1rem)',
+            marginTop: '5px'
+          }}>
+            Loading examinations...
+          </div>
         </div>
         <div style={{
           display: 'flex',
@@ -459,28 +1026,35 @@ const viewExamResults = (exam) => {
             animation: 'spin 1s linear infinite'
           }}></div>
         </div>
-        <style>{`
-          @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-          }
-        `}</style>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="content">
-        <div className="dashboard-header">
-          <h2><i className="fas fa-clipboard-check"></i> Examinations</h2>
-          <div className="date-display">Error</div>
+      <div className="content" style={{ padding: 'clamp(10px, 3vw, 20px)' }}>
+        <div className="dashboard-header" style={{ marginBottom: 'clamp(20px, 4vw, 30px)' }}>
+          <h2 style={{ 
+            margin: '0',
+            fontSize: 'clamp(1.3rem, 3.5vw, 1.8rem)',
+            lineHeight: '1.2'
+          }}>
+            <i className="fas fa-clipboard-check" style={{ marginRight: '10px', color: '#dc3545' }}></i>
+            Examinations
+          </h2>
+          <div className="date-display" style={{ 
+            color: '#666', 
+            fontSize: 'clamp(0.85rem, 2vw, 1rem)',
+            marginTop: '5px'
+          }}>
+            Error
+          </div>
         </div>
         <div style={{
           padding: '30px',
           backgroundColor: '#fee',
           border: '1px solid #f99',
-          borderRadius: '8px',
+          borderRadius: '12px',
           margin: '20px 0',
           textAlign: 'center'
         }}>
@@ -489,21 +1063,27 @@ const viewExamResults = (exam) => {
             color: '#dc3545',
             marginBottom: '20px'
           }}></i>
-          <p style={{ color: '#d33', marginBottom: '20px', fontSize: '16px' }}>
+          <p style={{ 
+            color: '#d33', 
+            marginBottom: '20px', 
+            fontSize: 'clamp(14px, 2vw, 16px)',
+            lineHeight: '1.4'
+          }}>
             {error}
           </p>
           <button 
             onClick={refreshExams}
             style={{
-              padding: '10px 20px',
+              padding: '12px 24px',
               backgroundColor: '#007bff',
               color: 'white',
               border: 'none',
-              borderRadius: '4px',
+              borderRadius: '8px',
               cursor: 'pointer',
-              fontSize: '14px',
+              fontSize: 'clamp(14px, 2vw, 16px)',
               display: 'inline-flex',
               alignItems: 'center',
+              justifyContent: 'center',
               gap: '8px'
             }}
           >
@@ -516,70 +1096,103 @@ const viewExamResults = (exam) => {
   }
 
   return (
-    <div className="content">
-      <div className="dashboard-header" style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '20px'
+    <div className="content" style={{ padding: 'clamp(10px, 3vw, 20px)' }}>
+      {/* Header */}
+      <div style={{ 
+        marginBottom: 'clamp(20px, 4vw, 30px)'
       }}>
-        <div>
-          <h2 style={{ margin: '0 0 5px 0' }}>
-            <i className="fas fa-clipboard-check" style={{ marginRight: '10px', color: '#dc3545' }}></i>
-            Examinations
-          </h2>
-          <div className="date-display" style={{ color: '#666', fontSize: '14px' }}>
-            Academic Year: {studentInfo?.academic_year || '2024/2025'} | 
-            Student ID: {studentInfo?.student_id || 'N/A'}
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'clamp(8px, 1.5vw, 12px)'
+        }}>
+          <div style={{
+            display: 'flex',
+            flexDirection: isMobile ? 'column' : 'row',
+            justifyContent: 'space-between',
+            alignItems: isMobile ? 'flex-start' : 'center',
+            gap: '15px'
+          }}>
+            <div>
+              <h2 style={{ 
+                margin: '0 0 5px 0',
+                fontSize: 'clamp(1.3rem, 3.5vw, 1.8rem)',
+                lineHeight: '1.2'
+              }}>
+                <i className="fas fa-clipboard-check" style={{ marginRight: '10px', color: '#dc3545' }}></i>
+                Examinations
+              </h2>
+              <div style={{ 
+                color: '#666', 
+                fontSize: 'clamp(0.85rem, 2vw, 1rem)',
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '10px'
+              }}>
+                <span>Academic Year: {studentInfo?.academic_year || '2024/2025'}</span>
+                <span>Student ID: {studentInfo?.student_id || 'N/A'}</span>
+              </div>
+            </div>
+            <div style={{ 
+              display: 'flex', 
+              gap: 'clamp(8px, 1.5vw, 10px)',
+              flexDirection: isMobile ? 'column' : 'row',
+              width: isMobile ? '100%' : 'auto'
+            }}>
+              <button 
+                onClick={refreshExams}
+                style={{
+                  padding: 'clamp(10px, 1.8vw, 12px) clamp(16px, 2.5vw, 20px)',
+                  backgroundColor: '#28a745',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  fontSize: 'clamp(14px, 1.8vw, 16px)',
+                  width: isMobile ? '100%' : 'auto',
+                  minHeight: '44px'
+                }}
+              >
+                <i className="fas fa-sync-alt"></i>
+                Refresh
+              </button>
+              <button 
+                onClick={downloadExamPermit}
+                style={{
+                  padding: 'clamp(10px, 1.8vw, 12px) clamp(16px, 2.5vw, 20px)',
+                  backgroundColor: '#007bff',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  fontSize: 'clamp(14px, 1.8vw, 16px)',
+                  fontWeight: '500',
+                  width: isMobile ? '100%' : 'auto',
+                  minHeight: '44px'
+                }}
+              >
+                <i className="fas fa-download"></i>
+                Download Permit
+              </button>
+            </div>
           </div>
-        </div>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button 
-            onClick={refreshExams}
-            style={{
-              padding: '8px 16px',
-              backgroundColor: '#28a745',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              fontSize: '14px'
-            }}
-          >
-            <i className="fas fa-sync-alt"></i>
-            Refresh
-          </button>
-          <button 
-            onClick={downloadExamPermit}
-            style={{
-              padding: '8px 16px',
-              backgroundColor: '#007bff',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              fontSize: '14px',
-              fontWeight: '500'
-            }}
-          >
-            <i className="fas fa-download"></i>
-            Download Permit
-          </button>
         </div>
       </div>
 
       {/* Stats Overview */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-        gap: '20px',
-        marginBottom: '30px'
+        gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))',
+        gap: 'clamp(12px, 2.5vw, 15px)',
+        marginBottom: 'clamp(25px, 4vw, 30px)'
       }}>
         {[
           { 
@@ -612,27 +1225,28 @@ const viewExamResults = (exam) => {
             style={{
               backgroundColor: 'white',
               borderRadius: '12px',
-              padding: '20px',
+              padding: 'clamp(15px, 3vw, 20px)',
               boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
               textAlign: 'center',
               borderTop: `4px solid ${stat.color}`
             }}
           >
             <div style={{
-              fontSize: '36px',
+              fontSize: 'clamp(24px, 5vw, 36px)',
               fontWeight: 'bold',
               color: stat.color,
-              marginBottom: '10px'
+              marginBottom: '8px'
             }}>
               {stat.value}
             </div>
             <div style={{
-              fontSize: '14px',
+              fontSize: 'clamp(12px, 2vw, 14px)',
               color: '#666',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '8px'
+              gap: '8px',
+              flexWrap: 'wrap'
             }}>
               <i className={stat.icon} style={{ color: stat.color }}></i>
               {stat.label}
@@ -645,42 +1259,62 @@ const viewExamResults = (exam) => {
       <div style={{
         backgroundColor: 'white',
         borderRadius: '12px',
-        padding: '25px',
+        padding: 'clamp(15px, 3vw, 25px)',
         boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
       }}>
         <div style={{
           display: 'flex',
+          flexDirection: isMobile ? 'column' : 'row',
           justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: '25px',
-          paddingBottom: '15px',
-          borderBottom: '2px solid #dee2e6'
+          alignItems: isMobile ? 'flex-start' : 'center',
+          marginBottom: 'clamp(15px, 3vw, 25px)',
+          paddingBottom: 'clamp(12px, 2.5vw, 15px)',
+          borderBottom: '2px solid #dee2e6',
+          gap: isMobile ? '10px' : '0'
         }}>
-          <h3 style={{ margin: 0, color: '#333' }}>
+          <h3 style={{ 
+            margin: 0, 
+            color: '#333',
+            fontSize: 'clamp(1.1rem, 2.5vw, 1.3rem)'
+          }}>
             <i className="fas fa-list-alt" style={{ marginRight: '10px', color: '#dc3545' }}></i>
             Available Examinations
           </h3>
-          <div style={{ fontSize: '14px', color: '#6c757d' }}>
+          <div style={{ 
+            fontSize: 'clamp(13px, 2vw, 14px)', 
+            color: '#6c757d' 
+          }}>
             Showing {exams.length} exam{exams.length !== 1 ? 's' : ''}
           </div>
         </div>
 
         {exams.length === 0 ? (
           <div style={{
-            padding: '60px 20px',
+            padding: 'clamp(40px, 8vw, 60px) clamp(20px, 4vw, 30px)',
             textAlign: 'center',
             backgroundColor: '#f8f9fa',
-            borderRadius: '8px'
+            borderRadius: '12px'
           }}>
             <i className="fas fa-clipboard-list" style={{
-              fontSize: '64px',
+              fontSize: 'clamp(48px, 10vw, 64px)',
               color: '#dee2e6',
               marginBottom: '20px'
             }}></i>
-            <h3 style={{ color: '#6c757d', marginBottom: '15px' }}>
+            <h3 style={{ 
+              color: '#6c757d', 
+              marginBottom: '15px',
+              fontSize: 'clamp(1.1rem, 2.5vw, 1.3rem)'
+            }}>
               No Examinations Scheduled
             </h3>
-            <p style={{ color: '#999', marginBottom: '25px', maxWidth: '500px', margin: '0 auto' }}>
+            <p style={{ 
+              color: '#999', 
+              marginBottom: '25px', 
+              maxWidth: '500px', 
+              margin: '0 auto',
+              fontSize: 'clamp(14px, 2vw, 16px)',
+              lineHeight: '1.5'
+            }}>
               Examinations will appear here once they are scheduled by your department.
             </p>
           </div>
@@ -688,325 +1322,13 @@ const viewExamResults = (exam) => {
           <div style={{
             display: 'flex',
             flexDirection: 'column',
-            gap: '20px'
+            gap: 'clamp(16px, 3vw, 20px)'
           }}>
-            {exams.map((exam, index) => {
-              const status = getExamStatus(exam);
-              const statusColor = getStatusColor(status);
-              
-              return (
-                <div 
-                  key={exam.id} 
-                  style={{
-                    border: '1px solid #dee2e6',
-                    borderRadius: '10px',
-                    overflow: 'hidden',
-                    transition: 'transform 0.2s ease, box-shadow 0.2s ease',
-                    borderLeft: `5px solid ${statusColor}`,
-                    cursor: exam.canStart || exam.submitted ? 'pointer' : 'default'
-                  }}
-                  onMouseEnter={(e) => {
-                    if (exam.canStart || exam.submitted) {
-                      e.currentTarget.style.transform = 'translateY(-4px)';
-                      e.currentTarget.style.boxShadow = '0 8px 25px rgba(0,0,0,0.1)';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.boxShadow = 'none';
-                  }}
-                // To:
-onClick={() => {
-  if (exam.canStart) handleExamClick(exam);
-  else if (exam.submitted) {
-    // Direct navigation without separate function
-    navigate('/results', { 
-      state: { 
-        examId: exam.id,
-        courseCode: exam.courseCode,
-        courseName: exam.courseName,
-        examTitle: exam.title,
-        submission: exam.submission
-      } 
-    });
-  }
-}}
-                >
-                  {/* Exam Header */}
-                  <div style={{
-                    padding: '20px',
-                    backgroundColor: '#f8f9fa',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center'
-                  }}>
-                    <div>
-                      <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '15px',
-                        marginBottom: '10px'
-                      }}>
-                        <span style={{
-                          padding: '4px 12px',
-                          backgroundColor: statusColor,
-                          color: 'white',
-                          borderRadius: '20px',
-                          fontSize: '12px',
-                          fontWeight: 'bold'
-                        }}>
-                          {status.toUpperCase()}
-                        </span>
-                        <span style={{
-                          padding: '4px 12px',
-                          backgroundColor: '#e9ecef',
-                          borderRadius: '20px',
-                          fontSize: '12px',
-                          fontWeight: '500',
-                          color: '#495057'
-                        }}>
-                          {exam.examType.toUpperCase()}
-                        </span>
-                      </div>
-                      <h4 style={{ 
-                        margin: 0,
-                        fontSize: '18px',
-                        color: '#333'
-                      }}>
-                        {exam.title}
-                      </h4>
-                    </div>
-                    <div style={{
-                      textAlign: 'right'
-                    }}>
-                      <div style={{
-                        fontSize: '14px',
-                        color: '#666',
-                        marginBottom: '5px'
-                      }}>
-                        <i className="fas fa-book" style={{ marginRight: '8px' }}></i>
-                        {exam.courseCode}: {exam.courseName}
-                      </div>
-                      <div style={{
-                        fontSize: '12px',
-                        color: '#6c757d'
-                      }}>
-                        Exam ID: {exam.id.slice(0, 8).toUpperCase()}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Exam Details */}
-                  <div style={{ padding: '20px' }}>
-                    {exam.description && (
-                      <p style={{ 
-                        color: '#666', 
-                        marginBottom: '20px',
-                        lineHeight: '1.6'
-                      }}>
-                        {exam.description}
-                      </p>
-                    )}
-
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-                      gap: '15px',
-                      marginBottom: '20px'
-                    }}>
-                      <div>
-                        <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '5px' }}>
-                          <i className="far fa-calendar-alt" style={{ marginRight: '8px' }}></i>
-                          Start Time
-                        </div>
-                        <div style={{ fontWeight: '500', color: '#495057' }}>
-                          {formatDate(exam.startTime)}
-                        </div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '5px' }}>
-                          <i className="far fa-calendar-times" style={{ marginRight: '8px' }}></i>
-                          End Time
-                        </div>
-                        <div style={{ fontWeight: '500', color: '#495057' }}>
-                          {formatDate(exam.endTime)}
-                        </div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '5px' }}>
-                          <i className="fas fa-clock" style={{ marginRight: '8px' }}></i>
-                          Duration
-                        </div>
-                        <div style={{ fontWeight: '500', color: '#495057' }}>
-                          {exam.duration} minutes
-                        </div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '5px' }}>
-                          <i className="fas fa-chart-bar" style={{ marginRight: '8px' }}></i>
-                          Total Marks
-                        </div>
-                        <div style={{ fontWeight: '500', color: '#495057' }}>
-                          {exam.totalMarks} marks
-                          {exam.passingMarks && ` (Pass: ${exam.passingMarks})`}
-                        </div>
-                      </div>
-                      {exam.location && (
-                        <div>
-                          <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '5px' }}>
-                            <i className="fas fa-map-marker-alt" style={{ marginRight: '8px' }}></i>
-                            Location
-                          </div>
-                          <div style={{ fontWeight: '500', color: '#495057' }}>
-                            {exam.location}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Action Area */}
-                    <div style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      paddingTop: '20px',
-                      borderTop: '1px solid #dee2e6'
-                    }}>
-                      {exam.submitted ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                          <div style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '8px',
-                            color: '#28a745'
-                          }}>
-                            <i className="fas fa-check-circle" style={{ fontSize: '20px' }}></i>
-                            <div>
-                              <div style={{ fontWeight: 'bold' }}>
-                                Submitted on {new Date(exam.submission.submitted_at).toLocaleDateString()}
-                              </div>
-                              {exam.submission.grade && (
-                                <div style={{ fontSize: '14px', color: '#495057' }}>
-                                  Grade: {exam.submission.grade} | 
-                                  Marks: {exam.submission.total_marks_obtained || 'N/A'}/{exam.totalMarks}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                          <button 
-                            onClick={() => viewExamResults(exam)}
-                            style={{
-                              padding: '8px 20px',
-                              backgroundColor: '#007bff',
-                              color: 'white',
-                              border: 'none',
-                              borderRadius: '6px',
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '8px',
-                              fontSize: '14px',
-                              fontWeight: '500'
-                            }}
-                          >
-                            <i className="fas fa-chart-line"></i>
-                            View Results
-                          </button>
-                        </div>
-                      ) : exam.canStart ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                          <div style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '8px',
-                            color: '#dc3545',
-                            fontWeight: '500'
-                          }}>
-                            <i className="fas fa-exclamation-circle"></i>
-                            Exam is now active
-                          </div>
-                          <button 
-                            onClick={() => handleExamClick(exam)}
-                            style={{
-                              padding: '10px 25px',
-                              backgroundColor: '#dc3545',
-                              color: 'white',
-                              border: 'none',
-                              borderRadius: '6px',
-                              cursor: 'pointer',
-                              fontSize: '16px',
-                              fontWeight: 'bold',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '10px'
-                            }}
-                          >
-                            <i className="fas fa-play"></i>
-                            START EXAM
-                          </button>
-                        </div>
-                      ) : status === 'upcoming' ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                          <div style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '8px',
-                            color: '#007bff'
-                          }}>
-                            <i className="fas fa-clock"></i>
-                            Starts in {Math.floor((new Date(exam.startTime) - new Date()) / 1000 / 3600)}h {Math.floor(((new Date(exam.startTime) - new Date()) / 1000 / 60) % 60)}m
-                          </div>
-                          <button 
-                            disabled
-                            style={{
-                              padding: '10px 25px',
-                              backgroundColor: '#e9ecef',
-                              color: '#6c757d',
-                              border: 'none',
-                              borderRadius: '6px',
-                              fontSize: '14px',
-                              fontWeight: '500',
-                              cursor: 'not-allowed'
-                            }}
-                          >
-                            <i className="fas fa-lock"></i>
-                            Not Available Yet
-                          </button>
-                        </div>
-                      ) : (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                          <div style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '8px',
-                            color: '#6c757d'
-                          }}>
-                            <i className="fas fa-ban"></i>
-                            Exam period has ended
-                          </div>
-                          <button 
-                            disabled
-                            style={{
-                              padding: '10px 25px',
-                              backgroundColor: '#e9ecef',
-                              color: '#6c757d',
-                              border: 'none',
-                              borderRadius: '6px',
-                              fontSize: '14px',
-                              fontWeight: '500',
-                              cursor: 'not-allowed'
-                            }}
-                          >
-                            <i className="fas fa-times-circle"></i>
-                            Closed
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+            {exams.map((exam, index) => (
+              isMobile ? 
+                renderMobileExamCard(exam, index) : 
+                renderDesktopExamCard(exam, index)
+            ))}
           </div>
         )}
       </div>
@@ -1019,12 +1341,44 @@ onClick={() => {
         
         button:hover:not(:disabled) {
           opacity: 0.9;
-          transform: translateY(-1px);
+          transform: translateY(-2px);
           transition: all 0.2s ease;
         }
         
         button:active:not(:disabled) {
           transform: translateY(0);
+        }
+        
+        /* Mobile-specific optimizations */
+        @media (max-width: 480px) {
+          .stats-grid {
+            gap: 10px !important;
+          }
+          
+          .stats-grid > div {
+            padding: 12px !important;
+          }
+        }
+        
+        /* Improve touch targets on mobile */
+        @media (max-width: 768px) {
+          button {
+            min-height: 44px;
+            min-width: 44px;
+          }
+          
+          .mobile-exam-card button {
+            width: 100%;
+          }
+        }
+        
+        /* Hover effects only on desktop */
+        @media (hover: hover) {
+          .desktop-exam-card:hover {
+            transform: translateY(-4px);
+            transition: transform 0.2s ease;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+          }
         }
       `}</style>
     </div>

@@ -668,17 +668,22 @@ const Results = () => {
         {/* Specific Exam Header */}
         <div className="dashboard-header" style={{
           display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
+          flexDirection: 'column',
+          gap: '15px',
           marginBottom: '20px'
         }}>
-          <div>
-            <h2 style={{ margin: '0 0 5px 0' }}>Exam Results</h2>
+          <div style={{ width: '100%' }}>
+            <h2 style={{ margin: '0 0 5px 0', fontSize: '1.5rem' }}>Exam Results</h2>
             <div className="date-display" style={{ color: '#666', fontSize: '14px' }}>
               {specificExam.courseCode} - {specificExam.examTitle}
             </div>
           </div>
-          <div style={{ display: 'flex', gap: '10px' }}>
+          <div style={{ 
+            display: 'flex', 
+            gap: '10px',
+            flexWrap: 'wrap',
+            width: '100%'
+          }}>
             <button 
               onClick={() => setSpecificExam(null)}
               style={{
@@ -691,7 +696,9 @@ const Results = () => {
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px',
-                fontSize: '14px'
+                fontSize: '14px',
+                flex: '1',
+                minWidth: '140px'
               }}
             >
               <i className="fas fa-list"></i>
@@ -712,7 +719,9 @@ const Results = () => {
                 alignItems: 'center',
                 gap: '8px',
                 fontSize: '14px',
-                fontWeight: '500'
+                fontWeight: '500',
+                flex: '1',
+                minWidth: '160px'
               }}
             >
               <i className="fas fa-file-pdf"></i>
@@ -725,20 +734,20 @@ const Results = () => {
         <div style={{
           backgroundColor: 'white',
           borderRadius: '12px',
-          padding: '30px',
+          padding: '20px',
           marginBottom: '25px',
           boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
           textAlign: 'center'
         }}>
-          <h3 style={{ marginBottom: '25px', color: '#333' }}>
+          <h3 style={{ marginBottom: '25px', color: '#333', fontSize: '1.2rem' }}>
             <i className="fas fa-chart-line" style={{ marginRight: '10px', color: '#007bff' }}></i>
             Exam Performance Summary
           </h3>
           
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-            gap: '20px',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+            gap: '15px',
             marginBottom: '30px'
           }}>
             <div style={{ textAlign: 'center' }}>
@@ -777,7 +786,8 @@ const Results = () => {
             <div style={{
               display: 'flex',
               justifyContent: 'space-between',
-              marginBottom: '8px'
+              marginBottom: '8px',
+              fontSize: '14px'
             }}>
               <span>Performance</span>
               <span>{specificExam.submission?.percentage || 
@@ -814,56 +824,56 @@ const Results = () => {
         <div style={{
           backgroundColor: 'white',
           borderRadius: '12px',
-          padding: '30px',
+          padding: '20px',
           marginBottom: '25px',
           boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
         }}>
-          <h4 style={{ marginBottom: '20px', color: '#333' }}>Exam Details</h4>
+          <h4 style={{ marginBottom: '20px', color: '#333', fontSize: '1.1rem' }}>Exam Details</h4>
           
           <div style={{
             display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
+            gridTemplateColumns: '1fr',
             gap: '30px'
           }}>
             <div>
-              <h5 style={{ color: '#495057', marginBottom: '15px' }}>
+              <h5 style={{ color: '#495057', marginBottom: '15px', fontSize: '1rem' }}>
                 <i className="fas fa-info-circle" style={{ marginRight: '8px', color: '#007bff' }}></i>
                 Exam Information
               </h5>
-              <p style={{ margin: '10px 0' }}>
+              <p style={{ margin: '10px 0', fontSize: '14px' }}>
                 <strong>Course:</strong> {specificExam.courseCode} - {specificExam.courseName}
               </p>
-              <p style={{ margin: '10px 0' }}>
+              <p style={{ margin: '10px 0', fontSize: '14px' }}>
                 <strong>Exam Type:</strong> {examDetails.exam_type}
               </p>
-              <p style={{ margin: '10px 0' }}>
+              <p style={{ margin: '10px 0', fontSize: '14px' }}>
                 <strong>Duration:</strong> {examDetails.duration_minutes} minutes
               </p>
-              <p style={{ margin: '10px 0' }}>
+              <p style={{ margin: '10px 0', fontSize: '14px' }}>
                 <strong>Date:</strong> {new Date(examDetails.start_time).toLocaleDateString()}
               </p>
-              <p style={{ margin: '10px 0' }}>
+              <p style={{ margin: '10px 0', fontSize: '14px' }}>
                 <strong>Time:</strong> {new Date(examDetails.start_time).toLocaleTimeString()} - {new Date(examDetails.end_time).toLocaleTimeString()}
               </p>
             </div>
             
             <div>
-              <h5 style={{ color: '#495057', marginBottom: '15px' }}>
+              <h5 style={{ color: '#495057', marginBottom: '15px', fontSize: '1rem' }}>
                 <i className="fas fa-user-graduate" style={{ marginRight: '8px', color: '#007bff' }}></i>
                 Submission Details
               </h5>
-              <p style={{ margin: '10px 0' }}>
+              <p style={{ margin: '10px 0', fontSize: '14px' }}>
                 <strong>Student:</strong> {studentInfo?.full_name} ({studentInfo?.student_id})
               </p>
-              <p style={{ margin: '10px 0' }}>
+              <p style={{ margin: '10px 0', fontSize: '14px' }}>
                 <strong>Submitted:</strong> {specificExam.submission?.submitted_at 
                   ? new Date(specificExam.submission.submitted_at).toLocaleString()
                   : 'N/A'}
               </p>
-              <p style={{ margin: '10px 0' }}>
+              <p style={{ margin: '10px 0', fontSize: '14px' }}>
                 <strong>Time Spent:</strong> {specificExam.submission?.time_spent_minutes || 'N/A'} minutes
               </p>
-              <p style={{ margin: '10px 0' }}>
+              <p style={{ margin: '10px 0', fontSize: '14px' }}>
                 <strong>Status:</strong> 
                 <span style={{
                   marginLeft: '8px',
@@ -884,16 +894,16 @@ const Results = () => {
           {specificExam.submission?.feedback && (
             <div style={{
               marginTop: '30px',
-              padding: '25px',
+              padding: '20px',
               backgroundColor: '#e8f4fc',
               borderRadius: '8px',
               borderLeft: '4px solid #17a2b8'
             }}>
-              <h5 style={{ marginBottom: '15px', color: '#495057' }}>
+              <h5 style={{ marginBottom: '15px', color: '#495057', fontSize: '1rem' }}>
                 <i className="fas fa-comment" style={{ marginRight: '8px', color: '#17a2b8' }}></i>
                 Lecturer Feedback
               </h5>
-              <p style={{ color: '#666', lineHeight: '1.6', margin: 0 }}>
+              <p style={{ color: '#666', lineHeight: '1.6', margin: 0, fontSize: '14px' }}>
                 {specificExam.submission.feedback}
               </p>
             </div>
@@ -907,7 +917,7 @@ const Results = () => {
               borderTop: '1px solid #dee2e6',
               textAlign: 'right'
             }}>
-              <p style={{ color: '#6c757d', margin: 0 }}>
+              <p style={{ color: '#6c757d', margin: 0, fontSize: '13px' }}>
                 <small>
                   Graded by: Lecturer | 
                   Date: {specificExam.submission?.graded_at 
@@ -921,6 +931,7 @@ const Results = () => {
           {/* Action Buttons */}
           <div style={{
             display: 'flex',
+            flexDirection: 'column',
             gap: '15px',
             marginTop: '35px',
             paddingTop: '25px',
@@ -929,7 +940,7 @@ const Results = () => {
             <button 
               onClick={() => navigate('/examinations')}
               style={{
-                padding: '10px 20px',
+                padding: '12px 20px',
                 backgroundColor: '#007bff',
                 color: 'white',
                 border: 'none',
@@ -937,8 +948,10 @@ const Results = () => {
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
+                justifyContent: 'center',
                 gap: '8px',
-                fontSize: '14px'
+                fontSize: '14px',
+                width: '100%'
               }}
             >
               <i className="fas fa-arrow-left"></i>
@@ -947,7 +960,7 @@ const Results = () => {
             <button 
               onClick={() => window.print()}
               style={{
-                padding: '10px 20px',
+                padding: '12px 20px',
                 backgroundColor: '#28a745',
                 color: 'white',
                 border: 'none',
@@ -955,8 +968,10 @@ const Results = () => {
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
+                justifyContent: 'center',
                 gap: '8px',
-                fontSize: '14px'
+                fontSize: '14px',
+                width: '100%'
               }}
             >
               <i className="fas fa-print"></i>
@@ -993,7 +1008,7 @@ const Results = () => {
     if (error) {
       return (
         <div style={{
-          padding: '30px',
+          padding: '20px',
           backgroundColor: '#fee',
           border: '1px solid #f99',
           borderRadius: '8px',
@@ -1040,32 +1055,34 @@ const Results = () => {
           marginBottom: '25px',
           boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
           display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center'
+          flexDirection: 'column',
+          gap: '20px'
         }}>
-          <div>
+          <div style={{ width: '100%' }}>
             <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '5px' }}>
               Student Information
             </div>
-            <div style={{ fontWeight: 'bold', fontSize: '16px', marginBottom: '5px' }}>
+            <div style={{ fontWeight: 'bold', fontSize: '18px', marginBottom: '5px' }}>
               {studentInfo?.full_name || 'Student Name'}
             </div>
-            <div style={{ fontSize: '14px', color: '#666' }}>
-              ID: {studentInfo?.student_id || 'N/A'} | {studentInfo?.program || 'N/A'} | Year {studentInfo?.year_of_study || 'N/A'} Semester {studentInfo?.semester || 'N/A'}
+            <div style={{ fontSize: '14px', color: '#666', lineHeight: '1.5' }}>
+              ID: {studentInfo?.student_id || 'N/A'} <br />
+              {studentInfo?.program || 'N/A'} <br />
+              Year {studentInfo?.year_of_study || 'N/A'} Semester {studentInfo?.semester || 'N/A'}
             </div>
           </div>
           
           <div style={{ 
             backgroundColor: '#007bff',
             color: 'white',
-            padding: '15px 25px',
+            padding: '20px',
             borderRadius: '8px',
             textAlign: 'center',
-            minWidth: '150px'
+            width: '100%'
           }}>
-            <div style={{ fontSize: '12px', marginBottom: '5px' }}>CUMULATIVE GPA</div>
+            <div style={{ fontSize: '14px', marginBottom: '5px' }}>CUMULATIVE GPA</div>
             <div style={{ fontSize: '32px', fontWeight: 'bold' }}>{cgpa.toFixed(2)}</div>
-            <div style={{ fontSize: '11px', opacity: 0.9 }}>
+            <div style={{ fontSize: '12px', opacity: 0.9, marginTop: '5px' }}>
               {cgpa >= 4.5 ? 'First Class' : 
                cgpa >= 3.5 ? 'Second Class Upper' : 
                cgpa >= 2.5 ? 'Second Class Lower' : 
@@ -1077,20 +1094,19 @@ const Results = () => {
         {/* Controls */}
         <div className="tabs" style={{
           display: 'flex',
-          gap: '20px',
-          marginBottom: '25px',
-          alignItems: 'center'
+          flexDirection: 'column',
+          gap: '15px',
+          marginBottom: '25px'
         }}>
-          <div style={{ flex: 1 }}>
-            <div className="year-selector" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ width: '100%' }}>
+            <div className="year-selector" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <label htmlFor="academic-year" style={{ 
                 fontWeight: '500',
-                color: '#495057',
-                whiteSpace: 'nowrap'
+                color: '#495057'
               }}>
                 Select Academic Year:
               </label>
-              <div style={{ position: 'relative', flex: 1, maxWidth: '200px' }}>
+              <div style={{ position: 'relative', width: '100%' }}>
                 <select 
                   id="academic-year" 
                   className="form-control"
@@ -1098,7 +1114,7 @@ const Results = () => {
                   onChange={(e) => setActiveYear(e.target.value)}
                   style={{
                     width: '100%',
-                    padding: '10px 40px 10px 15px',
+                    padding: '12px 40px 12px 15px',
                     border: '2px solid #dee2e6',
                     borderRadius: '6px',
                     backgroundColor: 'white',
@@ -1135,7 +1151,7 @@ const Results = () => {
             className="export-button" 
             onClick={exportToPDF}
             style={{
-              padding: '10px 20px',
+              padding: '12px 20px',
               backgroundColor: '#dc3545',
               color: 'white',
               border: 'none',
@@ -1143,9 +1159,11 @@ const Results = () => {
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
+              justifyContent: 'center',
               gap: '8px',
               fontSize: '14px',
-              fontWeight: '500'
+              fontWeight: '500',
+              width: '100%'
             }}
           >
             <i className="fas fa-file-pdf"></i>
@@ -1168,26 +1186,27 @@ const Results = () => {
                 }}>
                   <div style={{ 
                     display: 'flex', 
-                    justifyContent: 'space-between',
-                    alignItems: 'center'
+                    flexDirection: 'column',
+                    gap: '10px'
                   }}>
                     <div>
-                      <h4 style={{ margin: '0 0 5px 0', color: '#0056b3' }}>
+                      <h4 style={{ margin: '0 0 5px 0', color: '#0056b3', fontSize: '1.1rem' }}>
                         Year {resultsData[activeYear].year} Academic Summary
                       </h4>
-                      <div style={{ fontSize: '14px', color: '#666' }}>
-                        Total Credits: {resultsData[activeYear].totalCredits} | 
-                        Year GPA: {resultsData[activeYear].gpa.toFixed(2)} | 
+                      <div style={{ fontSize: '14px', color: '#666', lineHeight: '1.5' }}>
+                        Total Credits: {resultsData[activeYear].totalCredits} <br />
+                        Year GPA: {resultsData[activeYear].gpa.toFixed(2)} <br />
                         Courses: {resultsData[activeYear].semester1.length + resultsData[activeYear].semester2.length}
                       </div>
                     </div>
                     <div style={{
                       backgroundColor: '#28a745',
                       color: 'white',
-                      padding: '8px 16px',
-                      borderRadius: '20px',
+                      padding: '10px 16px',
+                      borderRadius: '6px',
                       fontSize: '14px',
-                      fontWeight: 'bold'
+                      fontWeight: 'bold',
+                      textAlign: 'center'
                     }}>
                       Year GPA: {resultsData[activeYear].gpa.toFixed(2)}
                     </div>
@@ -1201,7 +1220,8 @@ const Results = () => {
                   margin: '0 0 15px 0',
                   color: '#333',
                   paddingBottom: '10px',
-                  borderBottom: '2px solid #007bff'
+                  borderBottom: '2px solid #007bff',
+                  fontSize: '1.2rem'
                 }}>
                   <i className="fas fa-calendar" style={{ marginRight: '10px', color: '#007bff' }}></i>
                   Semester 1 Results
@@ -1211,7 +1231,8 @@ const Results = () => {
                   <div className="table-container" style={{
                     overflowX: 'auto',
                     borderRadius: '8px',
-                    border: '1px solid #dee2e6'
+                    border: '1px solid #dee2e6',
+                    WebkitOverflowScrolling: 'touch'
                   }}>
                     <table style={{
                       width: '100%',
@@ -1224,45 +1245,51 @@ const Results = () => {
                           borderBottom: '2px solid #dee2e6'
                         }}>
                           <th style={{ 
-                            padding: '12px 15px',
+                            padding: '12px 10px',
                             textAlign: 'left',
                             fontWeight: '600',
                             color: '#495057',
-                            borderRight: '1px solid #dee2e6'
+                            borderRight: '1px solid #dee2e6',
+                            fontSize: '13px'
                           }}>Course Code</th>
                           <th style={{ 
-                            padding: '12px 15px',
+                            padding: '12px 10px',
                             textAlign: 'left',
                             fontWeight: '600',
                             color: '#495057',
-                            borderRight: '1px solid #dee2e6'
+                            borderRight: '1px solid #dee2e6',
+                            fontSize: '13px'
                           }}>Course Name</th>
                           <th style={{ 
-                            padding: '12px 15px',
+                            padding: '12px 10px',
                             textAlign: 'left',
                             fontWeight: '600',
                             color: '#495057',
-                            borderRight: '1px solid #dee2e6'
+                            borderRight: '1px solid #dee2e6',
+                            fontSize: '13px'
                           }}>Credits</th>
                           <th style={{ 
-                            padding: '12px 15px',
+                            padding: '12px 10px',
                             textAlign: 'left',
                             fontWeight: '600',
                             color: '#495057',
-                            borderRight: '1px solid #dee2e6'
+                            borderRight: '1px solid #dee2e6',
+                            fontSize: '13px'
                           }}>Score (%)</th>
                           <th style={{ 
-                            padding: '12px 15px',
+                            padding: '12px 10px',
                             textAlign: 'left',
                             fontWeight: '600',
                             color: '#495057',
-                            borderRight: '1px solid #dee2e6'
+                            borderRight: '1px solid #dee2e6',
+                            fontSize: '13px'
                           }}>Grade</th>
                           <th style={{ 
-                            padding: '12px 15px',
+                            padding: '12px 10px',
                             textAlign: 'left',
                             fontWeight: '600',
-                            color: '#495057'
+                            color: '#495057',
+                            fontSize: '13px'
                           }}>Grade Points</th>
                         </tr>
                       </thead>
@@ -1276,10 +1303,11 @@ const Results = () => {
                             }}
                           >
                             <td style={{ 
-                              padding: '12px 15px',
+                              padding: '12px 10px',
                               borderRight: '1px solid #dee2e6',
                               fontWeight: '500',
-                              fontFamily: 'monospace'
+                              fontFamily: 'monospace',
+                              fontSize: '13px'
                             }}>
                               {course.courseCode}
                               {course.isCore && (
@@ -1296,58 +1324,63 @@ const Results = () => {
                               )}
                             </td>
                             <td style={{ 
-                              padding: '12px 15px',
-                              borderRight: '1px solid #dee2e6'
+                              padding: '12px 10px',
+                              borderRight: '1px solid #dee2e6',
+                              fontSize: '13px'
                             }}>
                               {course.courseName}
                             </td>
                             <td style={{ 
-                              padding: '12px 15px',
+                              padding: '12px 10px',
                               borderRight: '1px solid #dee2e6',
                               textAlign: 'center',
-                              fontWeight: '500'
+                              fontWeight: '500',
+                              fontSize: '13px'
                             }}>
                               {course.credits}
                             </td>
                             <td style={{ 
-                              padding: '12px 15px',
+                              padding: '12px 10px',
                               borderRight: '1px solid #dee2e6',
-                              textAlign: 'center'
+                              textAlign: 'center',
+                              fontSize: '13px'
                             }}>
                               <div style={{
                                 display: 'inline-block',
-                                padding: '2px 10px',
+                                padding: '2px 8px',
                                 borderRadius: '20px',
                                 backgroundColor: course.score >= 50 ? '#d4edda' : '#f8d7da',
                                 color: course.score >= 50 ? '#155724' : '#721c24',
                                 fontWeight: '500',
-                                fontSize: '13px'
+                                fontSize: '12px'
                               }}>
                                 {course.score}%
                               </div>
                             </td>
                             <td style={{ 
-                              padding: '12px 15px',
+                              padding: '12px 10px',
                               borderRight: '1px solid #dee2e6',
-                              textAlign: 'center'
+                              textAlign: 'center',
+                              fontSize: '13px'
                             }}>
                               <span style={{
                                 display: 'inline-block',
-                                padding: '4px 12px',
+                                padding: '4px 8px',
                                 borderRadius: '20px',
                                 backgroundColor: getGradeColor(course.grade),
                                 color: 'white',
                                 fontWeight: 'bold',
-                                fontSize: '14px',
-                                minWidth: '40px'
+                                fontSize: '13px',
+                                minWidth: '35px'
                               }}>
                                 {course.grade}
                               </span>
                             </td>
                             <td style={{ 
-                              padding: '12px 15px',
+                              padding: '12px 10px',
                               textAlign: 'center',
-                              fontWeight: '500'
+                              fontWeight: '500',
+                              fontSize: '13px'
                             }}>
                               {course.gpa.toFixed(2)}
                             </td>
@@ -1357,14 +1390,14 @@ const Results = () => {
                           backgroundColor: '#f8f9fa',
                           fontWeight: 'bold'
                         }}>
-                          <td colSpan="3" style={{ padding: '15px', textAlign: 'right' }}>
+                          <td colSpan="3" style={{ padding: '15px 10px', textAlign: 'right', fontSize: '13px' }}>
                             Semester 1 GPA:
                           </td>
-                          <td style={{ padding: '15px', textAlign: 'center' }}>
+                          <td style={{ padding: '15px 10px', textAlign: 'center', fontSize: '13px' }}>
                             {calculateSemesterGPA(resultsData[activeYear]?.semester1).toFixed(2)}
                           </td>
-                          <td colSpan="2" style={{ padding: '15px', textAlign: 'center', color: '#28a745' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
+                          <td colSpan="2" style={{ padding: '15px 10px', textAlign: 'center', color: '#28a745', fontSize: '13px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', flexWrap: 'wrap' }}>
                               <i className="fas fa-chart-line"></i>
                               <span>Semester Credits: {resultsData[activeYear]?.semester1.reduce((sum, course) => sum + (course.credits || 0), 0)}</span>
                             </div>
@@ -1375,18 +1408,18 @@ const Results = () => {
                   </div>
                 ) : (
                   <div style={{
-                    padding: '40px',
+                    padding: '30px',
                     textAlign: 'center',
                     backgroundColor: '#f8f9fa',
                     borderRadius: '8px',
                     border: '2px dashed #dee2e6'
                   }}>
                     <i className="fas fa-clipboard-list" style={{
-                      fontSize: '48px',
+                      fontSize: '40px',
                       color: '#6c757d',
-                      marginBottom: '20px'
+                      marginBottom: '15px'
                     }}></i>
-                    <p style={{ color: '#6c757d', fontSize: '16px', margin: '0' }}>
+                    <p style={{ color: '#6c757d', fontSize: '14px', margin: '0' }}>
                       No results available for Semester 1
                     </p>
                   </div>
@@ -1399,7 +1432,8 @@ const Results = () => {
                   margin: '0 0 15px 0',
                   color: '#333',
                   paddingBottom: '10px',
-                  borderBottom: '2px solid #28a745'
+                  borderBottom: '2px solid #28a745',
+                  fontSize: '1.2rem'
                 }}>
                   <i className="fas fa-calendar-alt" style={{ marginRight: '10px', color: '#28a745' }}></i>
                   Semester 2 Results
@@ -1409,7 +1443,8 @@ const Results = () => {
                   <div className="table-container" style={{
                     overflowX: 'auto',
                     borderRadius: '8px',
-                    border: '1px solid #dee2e6'
+                    border: '1px solid #dee2e6',
+                    WebkitOverflowScrolling: 'touch'
                   }}>
                     <table style={{
                       width: '100%',
@@ -1422,45 +1457,51 @@ const Results = () => {
                           borderBottom: '2px solid #dee2e6'
                         }}>
                           <th style={{ 
-                            padding: '12px 15px',
+                            padding: '12px 10px',
                             textAlign: 'left',
                             fontWeight: '600',
                             color: '#495057',
-                            borderRight: '1px solid #dee2e6'
+                            borderRight: '1px solid #dee2e6',
+                            fontSize: '13px'
                           }}>Course Code</th>
                           <th style={{ 
-                            padding: '12px 15px',
+                            padding: '12px 10px',
                             textAlign: 'left',
                             fontWeight: '600',
                             color: '#495057',
-                            borderRight: '1px solid #dee2e6'
+                            borderRight: '1px solid #dee2e6',
+                            fontSize: '13px'
                           }}>Course Name</th>
                           <th style={{ 
-                            padding: '12px 15px',
+                            padding: '12px 10px',
                             textAlign: 'left',
                             fontWeight: '600',
                             color: '#495057',
-                            borderRight: '1px solid #dee2e6'
+                            borderRight: '1px solid #dee2e6',
+                            fontSize: '13px'
                           }}>Credits</th>
                           <th style={{ 
-                            padding: '12px 15px',
+                            padding: '12px 10px',
                             textAlign: 'left',
                             fontWeight: '600',
                             color: '#495057',
-                            borderRight: '1px solid #dee2e6'
+                            borderRight: '1px solid #dee2e6',
+                            fontSize: '13px'
                           }}>Score (%)</th>
                           <th style={{ 
-                            padding: '12px 15px',
+                            padding: '12px 10px',
                             textAlign: 'left',
                             fontWeight: '600',
                             color: '#495057',
-                            borderRight: '1px solid #dee2e6'
+                            borderRight: '1px solid #dee2e6',
+                            fontSize: '13px'
                           }}>Grade</th>
                           <th style={{ 
-                            padding: '12px 15px',
+                            padding: '12px 10px',
                             textAlign: 'left',
                             fontWeight: '600',
-                            color: '#495057'
+                            color: '#495057',
+                            fontSize: '13px'
                           }}>Grade Points</th>
                         </tr>
                       </thead>
@@ -1474,10 +1515,11 @@ const Results = () => {
                             }}
                           >
                             <td style={{ 
-                              padding: '12px 15px',
+                              padding: '12px 10px',
                               borderRight: '1px solid #dee2e6',
                               fontWeight: '500',
-                              fontFamily: 'monospace'
+                              fontFamily: 'monospace',
+                              fontSize: '13px'
                             }}>
                               {course.courseCode}
                               {course.isCore && (
@@ -1494,58 +1536,63 @@ const Results = () => {
                               )}
                             </td>
                             <td style={{ 
-                              padding: '12px 15px',
-                              borderRight: '1px solid #dee2e6'
+                              padding: '12px 10px',
+                              borderRight: '1px solid #dee2e6',
+                              fontSize: '13px'
                             }}>
                               {course.courseName}
                             </td>
                             <td style={{ 
-                              padding: '12px 15px',
+                              padding: '12px 10px',
                               borderRight: '1px solid #dee2e6',
                               textAlign: 'center',
-                              fontWeight: '500'
+                              fontWeight: '500',
+                              fontSize: '13px'
                             }}>
                               {course.credits}
                             </td>
                             <td style={{ 
-                              padding: '12px 15px',
+                              padding: '12px 10px',
                               borderRight: '1px solid #dee2e6',
-                              textAlign: 'center'
+                              textAlign: 'center',
+                              fontSize: '13px'
                             }}>
                               <div style={{
                                 display: 'inline-block',
-                                padding: '2px 10px',
+                                padding: '2px 8px',
                                 borderRadius: '20px',
                                 backgroundColor: course.score >= 50 ? '#d4edda' : '#f8d7da',
                                 color: course.score >= 50 ? '#155724' : '#721c24',
                                 fontWeight: '500',
-                                fontSize: '13px'
+                                fontSize: '12px'
                               }}>
                                 {course.score}%
                               </div>
                             </td>
                             <td style={{ 
-                              padding: '12px 15px',
+                              padding: '12px 10px',
                               borderRight: '1px solid #dee2e6',
-                              textAlign: 'center'
+                              textAlign: 'center',
+                              fontSize: '13px'
                             }}>
                               <span style={{
                                 display: 'inline-block',
-                                padding: '4px 12px',
+                                padding: '4px 8px',
                                 borderRadius: '20px',
                                 backgroundColor: getGradeColor(course.grade),
                                 color: 'white',
                                 fontWeight: 'bold',
-                                fontSize: '14px',
-                                minWidth: '40px'
+                                fontSize: '13px',
+                                minWidth: '35px'
                               }}>
                                 {course.grade}
                               </span>
                             </td>
                             <td style={{ 
-                              padding: '12px 15px',
+                              padding: '12px 10px',
                               textAlign: 'center',
-                              fontWeight: '500'
+                              fontWeight: '500',
+                              fontSize: '13px'
                             }}>
                               {course.gpa.toFixed(2)}
                             </td>
@@ -1555,14 +1602,14 @@ const Results = () => {
                           backgroundColor: '#f8f9fa',
                           fontWeight: 'bold'
                         }}>
-                          <td colSpan="3" style={{ padding: '15px', textAlign: 'right' }}>
+                          <td colSpan="3" style={{ padding: '15px 10px', textAlign: 'right', fontSize: '13px' }}>
                             Semester 2 GPA:
                           </td>
-                          <td style={{ padding: '15px', textAlign: 'center' }}>
+                          <td style={{ padding: '15px 10px', textAlign: 'center', fontSize: '13px' }}>
                             {calculateSemesterGPA(resultsData[activeYear]?.semester2).toFixed(2)}
                           </td>
-                          <td colSpan="2" style={{ padding: '15px', textAlign: 'center', color: '#28a745' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
+                          <td colSpan="2" style={{ padding: '15px 10px', textAlign: 'center', color: '#28a745', fontSize: '13px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', flexWrap: 'wrap' }}>
                               <i className="fas fa-chart-line"></i>
                               <span>Semester Credits: {resultsData[activeYear]?.semester2.reduce((sum, course) => sum + (course.credits || 0), 0)}</span>
                             </div>
@@ -1573,18 +1620,18 @@ const Results = () => {
                   </div>
                 ) : (
                   <div style={{
-                    padding: '40px',
+                    padding: '30px',
                     textAlign: 'center',
                     backgroundColor: '#f8f9fa',
                     borderRadius: '8px',
                     border: '2px dashed #dee2e6'
                   }}>
                     <i className="fas fa-clipboard-list" style={{
-                      fontSize: '48px',
+                      fontSize: '40px',
                       color: '#6c757d',
-                      marginBottom: '20px'
+                      marginBottom: '15px'
                     }}></i>
-                    <p style={{ color: '#6c757d', fontSize: '16px', margin: '0' }}>
+                    <p style={{ color: '#6c757d', fontSize: '14px', margin: '0' }}>
                       No results available for Semester 2
                     </p>
                   </div>
@@ -1593,27 +1640,27 @@ const Results = () => {
             </div>
           ) : (
             <div className="no-results" style={{
-              padding: '60px 20px',
+              padding: '40px 20px',
               textAlign: 'center',
               backgroundColor: '#f8f9fa',
               borderRadius: '8px'
             }}>
               <i className="fas fa-graduation-cap" style={{
-                fontSize: '64px',
+                fontSize: '48px',
                 color: '#dee2e6',
                 marginBottom: '20px'
               }}></i>
-              <h3 style={{ color: '#6c757d', marginBottom: '15px' }}>
+              <h3 style={{ color: '#6c757d', marginBottom: '15px', fontSize: '1.2rem' }}>
                 No Examination Results Available
               </h3>
-              <p style={{ color: '#999', marginBottom: '25px', maxWidth: '500px', margin: '0 auto 25px' }}>
+              <p style={{ color: '#999', marginBottom: '25px', fontSize: '14px', lineHeight: '1.5' }}>
                 Your examination results will appear here once they have been processed and published by the examination office.
               </p>
-              <div style={{ display: 'flex', gap: '15px', justifyContent: 'center' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', justifyContent: 'center', maxWidth: '300px', margin: '0 auto' }}>
                 <button 
                   onClick={refreshResults}
                   style={{
-                    padding: '10px 20px',
+                    padding: '12px 20px',
                     backgroundColor: '#007bff',
                     color: 'white',
                     border: 'none',
@@ -1621,8 +1668,10 @@ const Results = () => {
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
+                    justifyContent: 'center',
                     gap: '8px',
-                    fontSize: '14px'
+                    fontSize: '14px',
+                    width: '100%'
                   }}
                 >
                   <i className="fas fa-sync-alt"></i>
@@ -1631,7 +1680,7 @@ const Results = () => {
                 <button 
                   onClick={() => navigate('/courses')}
                   style={{
-                    padding: '10px 20px',
+                    padding: '12px 20px',
                     backgroundColor: '#6c757d',
                     color: 'white',
                     border: 'none',
@@ -1639,8 +1688,10 @@ const Results = () => {
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
+                    justifyContent: 'center',
                     gap: '8px',
-                    fontSize: '14px'
+                    fontSize: '14px',
+                    width: '100%'
                   }}
                 >
                   <i className="fas fa-book"></i>
@@ -1655,15 +1706,15 @@ const Results = () => {
   };
 
   return (
-    <div className="content">
+    <div className="content" style={{ padding: '15px' }}>
       <div className="dashboard-header" style={{
         display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
+        flexDirection: 'column',
+        gap: '15px',
         marginBottom: '20px'
       }}>
-        <div>
-          <h2 style={{ margin: '0 0 5px 0' }}>
+        <div style={{ width: '100%' }}>
+          <h2 style={{ margin: '0 0 5px 0', fontSize: '1.5rem' }}>
             <i className="fas fa-chart-line" style={{ marginRight: '10px', color: '#007bff' }}></i>
             {specificExam ? 'Exam Results' : 'Examination Results'}
           </h2>
@@ -1675,16 +1726,18 @@ const Results = () => {
           <button 
             onClick={refreshResults}
             style={{
-              padding: '8px 16px',
+              padding: '10px 20px',
               backgroundColor: '#28a745',
               color: 'white',
               border: 'none',
-              borderRadius: '4px',
+              borderRadius: '6px',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
+              justifyContent: 'center',
               gap: '8px',
-              fontSize: '14px'
+              fontSize: '14px',
+              width: '100%'
             }}
           >
             <i className="fas fa-sync-alt"></i>
@@ -1726,11 +1779,182 @@ const Results = () => {
           cursor: not-allowed;
         }
         
+        /* Responsive styles */
+        @media (min-width: 576px) {
+          .dashboard-header {
+            flex-direction: row !important;
+            justify-content: space-between;
+            align-items: center;
+          }
+          
+          .dashboard-header button {
+            width: auto !important;
+          }
+          
+          .tabs {
+            flex-direction: row !important;
+            align-items: center;
+          }
+          
+          .tabs .year-selector {
+            flex-direction: row !important;
+            align-items: center;
+          }
+          
+          .tabs .export-button {
+            width: auto !important;
+            min-width: 180px;
+          }
+          
+          #specific-exam-results .dashboard-header > div:last-child {
+            flex-direction: row !important;
+            justify-content: flex-end;
+          }
+          
+          #specific-exam-results .dashboard-header button {
+            width: auto !important;
+          }
+          
+          #specific-exam-results .exam-details-section > div {
+            grid-template-columns: 1fr 1fr !important;
+          }
+          
+          #specific-exam-results .action-buttons {
+            flex-direction: row !important;
+          }
+          
+          #specific-exam-results .action-buttons button {
+            width: auto !important;
+          }
+          
+          #results-content .summary-card {
+            flex-direction: row !important;
+            align-items: center;
+          }
+          
+          #results-content .summary-card > div:last-child {
+            width: auto !important;
+            min-width: 180px;
+          }
+          
+          .no-results .action-buttons-container {
+            flex-direction: row !important;
+            max-width: none !important;
+          }
+          
+          .no-results .action-buttons-container button {
+            width: auto !important;
+          }
+        }
+        
+        @media (min-width: 768px) {
+          .content {
+            padding: 25px !important;
+          }
+          
+          .dashboard-header h2 {
+            font-size: 1.75rem !important;
+          }
+          
+          #specific-exam-results .performance-summary-grid {
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)) !important;
+          }
+          
+          #specific-exam-results .exam-details-section {
+            padding: 30px !important;
+          }
+          
+          #results-content .summary-card {
+            padding: 25px !important;
+          }
+          
+          #results-content .summary-card > div:first-child h3 {
+            font-size: 20px !important;
+          }
+          
+          table th, table td {
+            padding: 15px 12px !important;
+          }
+        }
+        
+        @media (min-width: 992px) {
+          .content {
+            padding: 30px !important;
+          }
+          
+          #specific-exam-results .performance-summary-grid {
+            grid-template-columns: repeat(4, 1fr) !important;
+          }
+          
+          #results-content .summary-card > div:last-child {
+            min-width: 200px;
+          }
+        }
+        
+        @media (min-width: 1200px) {
+          .content {
+            max-width: 1400px;
+            margin: 0 auto;
+          }
+          
+          #specific-exam-results .exam-details-section {
+            padding: 40px !important;
+          }
+          
+          #results-content .summary-card {
+            padding: 30px !important;
+          }
+          
+          table th, table td {
+            padding: 15px !important;
+            font-size: 14px !important;
+          }
+        }
+        
+        @media (max-width: 575px) {
+          table {
+            font-size: 12px;
+          }
+          
+          table th, table td {
+            padding: 8px 6px !important;
+          }
+          
+          .year-summary h4 {
+            font-size: 1rem !important;
+          }
+          
+          .semester-header {
+            font-size: 1.1rem !important;
+          }
+          
+          .performance-summary-grid > div div:first-child {
+            font-size: 11px !important;
+          }
+          
+          .performance-summary-grid > div div:last-child {
+            font-size: 20px !important;
+          }
+        }
+        
         @media print {
           .dashboard-header button,
           .tabs select,
-          .export-button {
+          .export-button,
+          .no-print {
             display: none !important;
+          }
+          
+          .content {
+            padding: 0 !important;
+          }
+          
+          table {
+            break-inside: avoid;
+          }
+          
+          h2, h3, h4 {
+            break-after: avoid;
           }
         }
       `}</style>
