@@ -170,7 +170,7 @@ const StudentLogin = () => {
         setCodeSent(false);
       }, 5000);
       
-    } catch (err) {
+    } catch (error) {
       setError('Failed to send verification code. Please try again.');
     } finally {
       setIsSendingCode(false);
