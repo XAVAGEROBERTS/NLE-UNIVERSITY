@@ -4,10 +4,15 @@ import { supabase } from '../../services/supabase';
 import { useNavigate } from 'react-router-dom';
 
 const Settings = () => {
-  const { user: authUser, signOut, loading: authLoading } = useStudentAuth();
+  const { 
+    user: authUser, 
+    signOut, 
+    loading: authLoading,
+    changePassword 
+  } = useStudentAuth();
   const navigate = useNavigate();
   
-  // Main state (unchanged)
+  // Main state
   const [isLoading, setIsLoading] = useState(true);
   const [studentData, setStudentData] = useState(null);
   const [profileData, setProfileData] = useState(null);
@@ -26,17 +31,34 @@ const Settings = () => {
     emergency_contact_name: '',
     emergency_contact_phone: ''
   });
+  
+  // Password change state
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
+  
+  // Show password state
+  const [showPasswords, setShowPasswords] = useState({
+    current: false,
+    new: false,
+    confirm: false
+  });
+  
   const [isSaving, setIsSaving] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
+  const [passwordMessage, setPasswordMessage] = useState({ type: '', text: '' });
 
-  // 1. Check authentication (unchanged)
+  // 1. Check authentication
   useEffect(() => {
     if (!authLoading && !authUser) {
       navigate('/login');
     }
   }, [authLoading, authUser, navigate]);
 
-  // Calculate GPA from completed courses (MATCHING DASHBOARD LOGIC) (unchanged)
+  // Calculate GPA from completed courses
   const calculateGPA = (studentCourses) => {
     if (!studentCourses || studentCourses.length === 0) return 0;
     
@@ -59,7 +81,7 @@ const Settings = () => {
     return totalCredits > 0 ? totalPoints / totalCredits : 0;
   };
 
-  // 2. Fetch student data (unchanged)
+  // 2. Fetch student data
   useEffect(() => {
     const fetchStudentData = async () => {
       if (!authUser?.email) return;
@@ -124,7 +146,7 @@ const Settings = () => {
     }
   }, [authUser]);
 
-  // Fetch academic statistics (MATCHING DASHBOARD LOGIC) (unchanged)
+  // Fetch academic statistics
   const fetchAcademicStats = async (studentId) => {
     try {
       // Get course statistics with proper join for credits
@@ -153,7 +175,7 @@ const Settings = () => {
       
       const currentGPA = calculateGPA(coursesWithGrades);
 
-      // Get pending assignments (MATCHING DASHBOARD)
+      // Get pending assignments
       const { data: pendingAssignments, error: assignmentsError } = await supabase
         .from('assignments')
         .select('id')
@@ -162,7 +184,7 @@ const Settings = () => {
 
       const pendingCount = pendingAssignments?.length || 0;
 
-      // Get upcoming exams (MATCHING DASHBOARD)
+      // Get upcoming exams
       const { data: upcomingExams, error: examsError } = await supabase
         .from('examinations')
         .select('id')
@@ -185,20 +207,38 @@ const Settings = () => {
       setAcademicStats({
         totalCourses: 0,
         completedCourses: 0,
-        currentGPA: 0, // Match your dashboard value
+        currentGPA: 0,
         pendingAssignments: 0,
         upcomingExams: 0
       });
     }
   };
 
-  // Handle form input changes (unchanged)
+  // Handle form input changes
   const handleInputChange = (e) => {
     const { id, value } = e.target;
     setFormData(prev => ({ ...prev, [id]: value }));
   };
 
-  // Save profile changes (unchanged)
+  // Handle password input changes
+  const handlePasswordChange = (e) => {
+    const { id, value } = e.target;
+    setPasswordForm(prev => ({ ...prev, [id]: value }));
+    // Clear messages when user starts typing
+    if (passwordMessage.text) {
+      setPasswordMessage({ type: '', text: '' });
+    }
+  };
+
+  // Toggle show/hide password
+  const toggleShowPassword = (field) => {
+    setShowPasswords(prev => ({
+      ...prev,
+      [field]: !prev[field]
+    }));
+  };
+
+  // Save profile changes
   const handleSaveProfile = async () => {
     if (!authUser?.email || !studentData?.id) {
       setMessage({ type: 'error', text: 'Please login to save changes' });
@@ -261,7 +301,101 @@ const Settings = () => {
     }
   };
 
-  // Reset form to original values (unchanged)
+  // Handle password change with current password verification
+  const handleChangePassword = async () => {
+    // Validation
+    if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
+      setPasswordMessage({ type: 'error', text: 'All password fields are required' });
+      return;
+    }
+
+    if (passwordForm.newPassword.length < 6) {
+      setPasswordMessage({ type: 'error', text: 'New password must be at least 6 characters long' });
+      return;
+    }
+
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setPasswordMessage({ type: 'error', text: 'New passwords do not match' });
+      return;
+    }
+
+    // Check if new password is different from current
+    if (passwordForm.currentPassword === passwordForm.newPassword) {
+      setPasswordMessage({ type: 'error', text: 'New password must be different from current password' });
+      return;
+    }
+
+    setIsChangingPassword(true);
+    setPasswordMessage({ type: '', text: '' });
+
+    try {
+      // Use the changePassword function from context
+      const result = await changePassword(
+        passwordForm.currentPassword,
+        passwordForm.newPassword,
+        passwordForm.confirmPassword
+      );
+
+      if (result.success) {
+        // Clear password form
+        setPasswordForm({
+          currentPassword: '',
+          newPassword: '',
+          confirmPassword: ''
+        });
+
+        // Hide all passwords after successful change
+        setShowPasswords({
+          current: false,
+          new: false,
+          confirm: false
+        });
+
+        setPasswordMessage({ 
+          type: 'success', 
+          text: result.message 
+        });
+
+        // Clear success message after 5 seconds
+        setTimeout(() => {
+          setPasswordMessage({ type: '', text: '' });
+        }, 5000);
+      }
+    } catch (error) {
+      console.error('Error changing password:', error);
+      
+      // More specific error messages
+      let errorMessage = error.message;
+      if (error.message.includes('Current password is incorrect') || 
+          error.message.includes('Test1234')) {
+        errorMessage = 'Current password is incorrect. Try "Test1234" (default password)';
+      }
+      
+      setPasswordMessage({ 
+        type: 'error', 
+        text: errorMessage 
+      });
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
+  // Reset password form
+  const handleResetPasswordForm = () => {
+    setPasswordForm({
+      currentPassword: '',
+      newPassword: '',
+      confirmPassword: ''
+    });
+    setShowPasswords({
+      current: false,
+      new: false,
+      confirm: false
+    });
+    setPasswordMessage({ type: '', text: '' });
+  };
+
+  // Reset profile form to original values
   const handleResetForm = () => {
     if (profileData) {
       setFormData({
@@ -275,7 +409,7 @@ const Settings = () => {
     }
   };
 
-  // Handle logout (unchanged)
+  // Handle logout
   const handleLogout = async () => {
     try {
       await signOut();
@@ -286,7 +420,7 @@ const Settings = () => {
     }
   };
 
-  // Loading state (unchanged)
+  // Loading state
   if (authLoading || isLoading) {
     return (
       <div style={styles.container}>
@@ -301,7 +435,7 @@ const Settings = () => {
     );
   }
 
-  // Not logged in state (unchanged)
+  // Not logged in state
   if (!authUser) {
     return (
       <div style={styles.container}>
@@ -323,7 +457,7 @@ const Settings = () => {
     );
   }
 
-  // No student data state (unchanged)
+  // No student data state
   if (!studentData) {
     return (
       <div style={styles.container}>
@@ -345,7 +479,7 @@ const Settings = () => {
     );
   }
 
-  // Main content (unchanged)
+  // Main content
   return (
     <div style={styles.container}>
       {/* Header */}
@@ -590,308 +724,482 @@ const Settings = () => {
             </div>
           </div>
         </div>
+
+        {/* Change Password Section */}
+        <div style={styles.card}>
+          <h3 style={styles.cardTitle}>
+            <i className="fas fa-key" style={styles.cardIcon}></i>
+            Change Password
+          </h3>
+
+          {/* Password Change Message */}
+          {passwordMessage.text && (
+            <div style={{
+              ...styles.messageBox,
+              backgroundColor: passwordMessage.type === 'success' ? '#d4edda' : 
+                            passwordMessage.type === 'error' ? '#f8d7da' : 
+                            passwordMessage.type === 'warning' ? '#fff3cd' : '#d1ecf1',
+              color: passwordMessage.type === 'success' ? '#155724' : 
+                    passwordMessage.type === 'error' ? '#721c24' : 
+                    passwordMessage.type === 'warning' ? '#856404' : '#0c5460',
+              borderColor: passwordMessage.type === 'success' ? '#c3e6cb' : 
+                          passwordMessage.type === 'error' ? '#f5c6cb' : 
+                          passwordMessage.type === 'warning' ? '#ffeaa7' : '#bee5eb',
+              marginBottom: '20px'
+            }}>
+              <i className={`fas fa-${passwordMessage.type === 'success' ? 'check-circle' : 
+                               passwordMessage.type === 'warning' ? 'exclamation-triangle' : 
+                               'exclamation-circle'}`}></i>
+              <span>{passwordMessage.text}</span>
+            </div>
+          )}
+
+          <div style={styles.form}>
+            {/* Current Password Field */}
+            <div style={styles.formGroup}>
+              <label style={styles.formLabel}>Current Password</label>
+              <div style={styles.passwordInputWrapper}>
+                <input 
+                  type={showPasswords.current ? "text" : "password"}
+                  id="currentPassword"
+                  value={passwordForm.currentPassword}
+                  onChange={handlePasswordChange}
+                  placeholder="Enter your current password"
+                  style={styles.passwordInput}
+                  disabled={isChangingPassword}
+                  autoComplete="current-password"
+                />
+                <button 
+                  type="button"
+                  style={styles.showPasswordButton}
+                  onClick={() => toggleShowPassword('current')}
+                  disabled={isChangingPassword}
+                >
+                  <i className={`fas fa-${showPasswords.current ? 'eye-slash' : 'eye'}`}></i>
+                </button>
+              </div>
+              <div style={styles.passwordHint}>
+                <i className="fas fa-info-circle"></i>
+                <span>Default password for all students is "Test1234"</span>
+              </div>
+            </div>
+            
+            {/* New Password Field */}
+            <div style={styles.formGroup}>
+              <label style={styles.formLabel}>New Password</label>
+              <div style={styles.passwordInputWrapper}>
+                <input 
+                  type={showPasswords.new ? "text" : "password"}
+                  id="newPassword"
+                  value={passwordForm.newPassword}
+                  onChange={handlePasswordChange}
+                  placeholder="Enter new password (min. 6 characters)"
+                  style={styles.passwordInput}
+                  disabled={isChangingPassword}
+                  autoComplete="new-password"
+                />
+                <button 
+                  type="button"
+                  style={styles.showPasswordButton}
+                  onClick={() => toggleShowPassword('new')}
+                  disabled={isChangingPassword}
+                >
+                  <i className={`fas fa-${showPasswords.new ? 'eye-slash' : 'eye'}`}></i>
+                </button>
+              </div>
+              <div style={styles.passwordHint}>
+                <i className="fas fa-info-circle"></i>
+                <span>Password must be at least 6 characters long</span>
+              </div>
+            </div>
+            
+            {/* Confirm Password Field */}
+            <div style={styles.formGroup}>
+              <label style={styles.formLabel}>Confirm New Password</label>
+              <div style={styles.passwordInputWrapper}>
+                <input 
+                  type={showPasswords.confirm ? "text" : "password"}
+                  id="confirmPassword"
+                  value={passwordForm.confirmPassword}
+                  onChange={handlePasswordChange}
+                  placeholder="Confirm your new password"
+                  style={styles.passwordInput}
+                  disabled={isChangingPassword}
+                  autoComplete="new-password"
+                />
+                <button 
+                  type="button"
+                  style={styles.showPasswordButton}
+                  onClick={() => toggleShowPassword('confirm')}
+                  disabled={isChangingPassword}
+                >
+                  <i className={`fas fa-${showPasswords.confirm ? 'eye-slash' : 'eye'}`}></i>
+                </button>
+              </div>
+            </div>
+            
+            <div style={styles.formButtons}>
+              <button 
+                style={styles.dangerButton}
+                onClick={handleChangePassword}
+                disabled={isChangingPassword}
+              >
+                {isChangingPassword ? (
+                  <>
+                    <i className="fas fa-spinner fa-spin"></i> Changing Password...
+                  </>
+                ) : (
+                  <>
+                    <i className="fas fa-key"></i> Change Password
+                  </>
+                )}
+              </button>
+              
+              <button 
+                style={styles.secondaryButton}
+                onClick={handleResetPasswordForm}
+                disabled={isChangingPassword}
+              >
+                <i className="fas fa-times"></i> Clear
+              </button>
+            </div>
+
+            <div style={styles.securityNote}>
+              <i className="fas fa-shield-alt"></i>
+              <div>
+                <strong>Password Change Instructions:</strong>
+                <ul style={{ margin: '5px 0 0 0', paddingLeft: '20px', fontSize: '13px', color: '#666' }}>
+                  <li><strong>Default password:</strong> "Test1234" (for all students)</li>
+                  <li>If you don't remember your current password, try the default</li>
+                  <li>New password must be at least 6 characters long</li>
+                  <li>Passwords are stored as plain text (for development only)</li>
+                  <li>You will need to use your new password on next login</li>
+                  <li>For security reasons, never share your password with anyone</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
 };
 
-// Styles with responsive updates
+// Styles
 const styles = {
   container: {
     backgroundColor: '#f8f9fa',
     minHeight: '100vh',
-    padding: 'clamp(10px, 3vw, 20px)',
+    padding: '20px',
     boxSizing: 'border-box'
   },
   header: {
     display: 'flex',
-    flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 'clamp(20px, 4vw, 30px)',
-    paddingBottom: 'clamp(10px, 2vw, 15px)',
+    marginBottom: '30px',
+    paddingBottom: '15px',
     borderBottom: '2px solid #e9ecef',
     flexWrap: 'wrap',
     gap: '15px'
   },
   title: {
-    margin: '0 0 clamp(5px, 1vw, 10px) 0',
+    margin: '0 0 5px 0',
     color: '#333',
-    fontSize: 'clamp(18px, 4vw, 24px)',
+    fontSize: '24px',
     display: 'flex',
-    alignItems: 'center',
-    flexWrap: 'wrap'
+    alignItems: 'center'
   },
   titleIcon: {
-    marginRight: 'clamp(5px, 1vw, 10px)',
+    marginRight: '10px',
     color: '#6c757d',
-    fontSize: 'clamp(16px, 3vw, 20px)'
+    fontSize: '20px'
   },
   subtitle: {
     margin: '0',
     color: '#666',
-    fontSize: 'clamp(12px, 2vw, 14px)'
+    fontSize: '14px'
   },
   content: {
     display: 'flex',
     flexDirection: 'column',
-    gap: 'clamp(15px, 3vw, 20px)'
+    gap: '20px'
   },
   card: {
     backgroundColor: 'white',
-    borderRadius: 'clamp(8px, 2vw, 10px)',
-    padding: 'clamp(15px, 3vw, 25px)',
+    borderRadius: '10px',
+    padding: '25px',
     boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-    border: '1px solid #e9ecef',
-    width: '100%',
-    boxSizing: 'border-box'
+    border: '1px solid #e9ecef'
   },
   cardTitle: {
-    margin: '0 0 clamp(15px, 3vw, 20px) 0',
+    margin: '0 0 20px 0',
     color: '#333',
-    fontSize: 'clamp(16px, 3vw, 18px)',
+    fontSize: '18px',
     display: 'flex',
     alignItems: 'center'
   },
   cardIcon: {
-    marginRight: 'clamp(5px, 1vw, 10px)',
+    marginRight: '10px',
     color: '#007bff',
-    fontSize: 'clamp(14px, 2.5vw, 16px)'
+    fontSize: '16px'
   },
   statsGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(min(140px, 100%), 1fr))',
-    gap: 'clamp(10px, 2vw, 15px)',
-    width: '100%'
+    gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+    gap: '15px'
   },
   statCard: {
     backgroundColor: '#f8f9fa',
-    padding: 'clamp(15px, 3vw, 20px)',
-    borderRadius: 'clamp(6px, 1.5vw, 8px)',
+    padding: '20px',
+    borderRadius: '8px',
     textAlign: 'center',
-    borderLeft: '4px solid #007bff',
-    minWidth: '0'
+    borderLeft: '4px solid #007bff'
   },
   statValue: {
-    fontSize: 'clamp(20px, 4vw, 28px)',
+    fontSize: '28px',
     fontWeight: 'bold',
     color: '#007bff',
-    marginBottom: 'clamp(3px, 1vw, 5px)',
-    wordBreak: 'break-word'
+    marginBottom: '5px'
   },
   statLabel: {
-    fontSize: 'clamp(12px, 2vw, 14px)',
-    color: '#6c757d',
-    marginBottom: 'clamp(3px, 1vw, 5px)'
-  },
-  statSubtext: {
-    fontSize: '10px',
-    color: '#999',
-    position: 'absolute',
-    bottom: '5px',
-    left: '0',
-    right: '0',
-    textAlign: 'center'
+    fontSize: '14px',
+    color: '#6c757d'
   },
   profileSection: {
     display: 'flex',
-    flexDirection: 'row',
-    gap: 'clamp(15px, 4vw, 30px)',
-    alignItems: 'flex-start',
-    flexWrap: 'wrap'
+    gap: '30px',
+    alignItems: 'flex-start'
   },
   avatarContainer: {
-    flexShrink: 0,
-    display: 'flex',
-    justifyContent: 'center',
-    width: '100%',
-    maxWidth: '120px'
+    flexShrink: 0
   },
   avatar: {
-    width: 'clamp(80px, 15vw, 100px)',
-    height: 'clamp(80px, 15vw, 100px)',
+    width: '100px',
+    height: '100px',
     borderRadius: '50%',
     backgroundColor: '#e9ecef',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    fontSize: 'clamp(30px, 6vw, 40px)',
-    color: '#6c757d',
-    flexShrink: 0
+    fontSize: '40px',
+    color: '#6c757d'
   },
   avatarIcon: {
-    fontSize: 'clamp(30px, 6vw, 40px)'
+    fontSize: '40px'
   },
   profileInfo: {
-    flex: '1 1 300px',
-    minWidth: '0'
+    flex: 1
   },
   profileName: {
-    margin: '0 0 clamp(10px, 2vw, 15px) 0',
+    margin: '0 0 15px 0',
     color: '#333',
-    fontSize: 'clamp(18px, 4vw, 22px)',
-    wordBreak: 'break-word'
+    fontSize: '22px'
   },
   infoGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(min(250px, 100%), 1fr))',
-    gap: 'clamp(10px, 2vw, 15px)',
-    marginBottom: '15px'
+    gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+    gap: '15px'
   },
   infoItem: {
-    marginBottom: 'clamp(8px, 1.5vw, 10px)',
-    minWidth: '0'
+    marginBottom: '10px'
   },
   infoLabel: {
     display: 'block',
-    fontSize: 'clamp(11px, 1.8vw, 12px)',
+    fontSize: '12px',
     color: '#6c757d',
-    marginBottom: 'clamp(3px, 0.8vw, 5px)',
-    wordBreak: 'break-word'
+    marginBottom: '5px'
   },
   infoValue: {
-    fontSize: 'clamp(13px, 2vw, 14px)',
+    fontSize: '14px',
     color: '#495057',
-    fontWeight: '500',
-    wordBreak: 'break-word'
+    fontWeight: '500'
   },
   form: {
     display: 'flex',
     flexDirection: 'column',
-    gap: 'clamp(10px, 2vw, 15px)'
+    gap: '15px'
   },
   formGroup: {
-    marginBottom: 'clamp(8px, 1.5vw, 10px)'
+    marginBottom: '10px'
   },
   formLabel: {
     display: 'block',
-    fontSize: 'clamp(13px, 2vw, 14px)',
+    fontSize: '14px',
     color: '#495057',
-    marginBottom: 'clamp(3px, 1vw, 5px)',
+    marginBottom: '5px',
     fontWeight: '600'
   },
   input: {
     width: '100%',
-    padding: 'clamp(8px, 2vw, 10px) clamp(12px, 2vw, 15px)',
+    padding: '10px 15px',
     border: '1px solid #dee2e6',
-    borderRadius: 'clamp(4px, 1.5vw, 6px)',
-    fontSize: 'clamp(13px, 2vw, 14px)',
+    borderRadius: '6px',
+    fontSize: '14px',
     fontFamily: 'inherit',
     boxSizing: 'border-box'
   },
+  passwordInputWrapper: {
+    position: 'relative',
+    width: '100%'
+  },
+  passwordInput: {
+    width: '100%',
+    padding: '10px 40px 10px 15px',
+    border: '1px solid #dee2e6',
+    borderRadius: '6px',
+    fontSize: '14px',
+    fontFamily: 'inherit',
+    boxSizing: 'border-box'
+  },
+  showPasswordButton: {
+    position: 'absolute',
+    right: '10px',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    background: 'none',
+    border: 'none',
+    color: '#6c757d',
+    cursor: 'pointer',
+    padding: '5px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '16px'
+  },
   formButtons: {
     display: 'flex',
-    flexDirection: 'row',
-    gap: 'clamp(10px, 2vw, 15px)',
-    marginTop: 'clamp(10px, 2vw, 20px)',
-    flexWrap: 'wrap'
+    gap: '15px',
+    marginTop: '20px'
   },
   primaryButton: {
-    padding: 'clamp(10px, 2vw, 12px) clamp(15px, 3vw, 25px)',
+    padding: '12px 25px',
     backgroundColor: '#28a745',
     color: 'white',
     border: 'none',
-    borderRadius: 'clamp(4px, 1.5vw, 6px)',
+    borderRadius: '6px',
     cursor: 'pointer',
-    fontSize: 'clamp(13px, 2vw, 14px)',
+    fontSize: '14px',
     fontWeight: '500',
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 'clamp(5px, 1vw, 8px)',
-    minWidth: 'clamp(120px, 20vw, 140px)',
-    flex: '1 1 auto'
+    gap: '8px',
+    minWidth: '140px'
   },
   secondaryButton: {
-    padding: 'clamp(10px, 2vw, 12px) clamp(15px, 3vw, 25px)',
+    padding: '12px 25px',
     backgroundColor: '#6c757d',
     color: 'white',
     border: 'none',
-    borderRadius: 'clamp(4px, 1.5vw, 6px)',
+    borderRadius: '6px',
     cursor: 'pointer',
-    fontSize: 'clamp(13px, 2vw, 14px)',
+    fontSize: '14px',
     fontWeight: '500',
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 'clamp(5px, 1vw, 8px)',
-    minWidth: 'clamp(90px, 15vw, 100px)',
-    flex: '1 1 auto'
+    gap: '8px',
+    minWidth: '100px'
   },
-  logoutButton: {
-    padding: 'clamp(6px, 1.5vw, 8px) clamp(12px, 2vw, 16px)',
+  dangerButton: {
+    padding: '12px 25px',
     backgroundColor: '#dc3545',
     color: 'white',
     border: 'none',
-    borderRadius: 'clamp(4px, 1.5vw, 6px)',
+    borderRadius: '6px',
     cursor: 'pointer',
-    fontSize: 'clamp(13px, 2vw, 14px)',
+    fontSize: '14px',
     fontWeight: '500',
     display: 'flex',
     alignItems: 'center',
-    gap: 'clamp(5px, 1vw, 8px)',
-    whiteSpace: 'nowrap',
-    alignSelf: 'flex-start'
+    gap: '8px',
+    minWidth: '160px'
   },
-  messageBox: {
-    padding: 'clamp(10px, 2vw, 15px)',
-    borderRadius: 'clamp(6px, 1.5vw, 8px)',
-    marginBottom: 'clamp(15px, 3vw, 20px)',
+  logoutButton: {
+    padding: '8px 16px',
+    backgroundColor: '#dc3545',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '500',
     display: 'flex',
     alignItems: 'center',
-    gap: 'clamp(8px, 1.5vw, 10px)',
-    fontSize: 'clamp(13px, 2vw, 14px)',
-    wordBreak: 'break-word'
+    gap: '8px',
+    whiteSpace: 'nowrap'
+  },
+  messageBox: {
+    padding: '15px',
+    borderRadius: '8px',
+    marginBottom: '20px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    fontSize: '14px'
   },
   loadingContainer: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 'clamp(200px, 50vh, 300px)',
-    width: '100%'
+    height: '300px'
   },
   spinner: {
-    width: 'clamp(40px, 10vw, 50px)',
-    height: 'clamp(40px, 10vw, 50px)',
-    border: 'clamp(3px, 1vw, 5px) solid #f3f3f3',
-    borderTop: 'clamp(3px, 1vw, 5px) solid #3498db',
+    width: '50px',
+    height: '50px',
+    border: '5px solid #f3f3f3',
+    borderTop: '5px solid #3498db',
     borderRadius: '50%',
     animation: 'spin 1s linear infinite',
-    marginBottom: 'clamp(15px, 3vw, 20px)'
+    marginBottom: '20px'
   },
   errorContainer: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 'clamp(20px, 5vw, 40px)',
+    padding: '40px',
     textAlign: 'center',
     backgroundColor: '#f8f9fa',
-    borderRadius: 'clamp(8px, 2vw, 12px)',
-    margin: 'clamp(15px, 3vw, 20px) 0',
-    width: '100%',
-    boxSizing: 'border-box'
+    borderRadius: '12px',
+    margin: '20px 0'
   },
   errorIcon: {
-    fontSize: 'clamp(48px, 10vw, 64px)',
+    fontSize: '64px',
     color: '#dc3545',
-    marginBottom: 'clamp(15px, 3vw, 20px)'
+    marginBottom: '20px'
   },
   button: {
-    padding: 'clamp(8px, 2vw, 10px) clamp(15px, 3vw, 20px)',
+    padding: '10px 20px',
     backgroundColor: '#007bff',
     color: 'white',
     border: 'none',
-    borderRadius: 'clamp(4px, 1.5vw, 6px)',
+    borderRadius: '6px',
     cursor: 'pointer',
-    fontSize: 'clamp(13px, 2vw, 14px)',
+    fontSize: '14px',
     fontWeight: '500',
-    marginTop: 'clamp(10px, 2vw, 15px)'
+    marginTop: '15px'
+  },
+  passwordHint: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    marginTop: '5px',
+    fontSize: '12px',
+    color: '#6c757d'
+  },
+  securityNote: {
+    marginTop: '20px',
+    padding: '15px',
+    backgroundColor: '#f8f9fa',
+    borderRadius: '8px',
+    borderLeft: '4px solid #17a2b8',
+    display: 'flex',
+    gap: '15px'
   }
 };
 
-// Add CSS animation with responsive improvements
+// Add CSS animation
 const styleSheet = document.createElement('style');
 styleSheet.textContent = `
   @keyframes spin {
@@ -922,7 +1230,6 @@ styleSheet.textContent = `
     cursor: not-allowed;
   }
   
-  /* Responsive media queries */
   @media (max-width: 768px) {
     .header {
       flex-direction: column;
@@ -948,14 +1255,23 @@ styleSheet.textContent = `
       flex-direction: column;
     }
     
-    .primary-button, .secondary-button {
+    .primary-button, .secondary-button, .danger-button {
       width: 100%;
+    }
+    
+    .security-note {
+      flex-direction: column;
+      text-align: center;
+    }
+    
+    .stats-grid {
+      grid-template-columns: repeat(2, 1fr);
     }
   }
   
   @media (max-width: 480px) {
     .stats-grid {
-      grid-template-columns: repeat(2, 1fr);
+      grid-template-columns: 1fr;
     }
     
     .info-grid {
@@ -972,20 +1288,6 @@ styleSheet.textContent = `
     
     .title {
       font-size: 20px;
-    }
-  }
-  
-  @media (max-width: 360px) {
-    .stats-grid {
-      grid-template-columns: 1fr;
-    }
-    
-    .logout-button span {
-      display: none;
-    }
-    
-    .logout-button i {
-      margin-right: 0;
     }
   }
 `;

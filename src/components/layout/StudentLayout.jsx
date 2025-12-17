@@ -873,20 +873,19 @@ const StudentLayout = () => {
       )}
 
       {/* Main Layout Container - FIXED for dropdown positioning */}
-      <div 
-        ref={layoutContainerRef}
-        className="layout-container"
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          minHeight: '100vh',
-          position: 'relative', // Added for proper dropdown positioning
-          overflow: 'visible !important', // Ensure dropdown can show outside
-          opacity: isLoggingOut ? '0.5' : '1',
-          pointerEvents: isLoggingOut ? 'none' : 'auto',
-          transition: 'opacity 0.3s ease',
-        }}
-      >
+  <div 
+  ref={layoutContainerRef}
+  className="layout-container"
+  style={{
+    display: 'flex',
+    flexDirection: 'column',
+    minHeight: '100vh',
+    position: 'relative',
+    opacity: isLoggingOut ? '0.5' : '1',
+    pointerEvents: isLoggingOut ? 'none' : 'auto',
+    transition: 'opacity 0.3s ease',
+  }}
+>
         <header 
           className="layout-header"
           style={{
@@ -1154,7 +1153,7 @@ const StudentLayout = () => {
             className="notification-dropdown"
             style={{
               position: 'fixed', // Changed from absolute to fixed
-              top: isMobile ? '70px' : '80px', // Adjusted for better positioning
+             top: isMobile ? '60px' : '70px', // FIXED: Changed 'topa' to 'top'
               right: isMobile ? '1rem' : '2rem',
               width: isMobile ? 'calc(100% - 2rem)' : '350px',
               maxWidth: '350px',
@@ -1454,9 +1453,9 @@ const StudentLayout = () => {
                 paddingRight: '5px',
                 transition: 'all 0.3s',
                 position: 'sticky',
-                top: isMobile ? '60px' : '70px',
+                topa: isMobile ? '60px' : '70px',
                 height: `calc(100vh - ${isMobile ? '60px' : '70px'})`,
-                overflowY: 'auto',
+                 overflowY: 'hidden', 
                 zIndex: 90, // Lower than dropdown
               }}
             >
@@ -1791,7 +1790,7 @@ const StudentLayout = () => {
               padding: isMobile ? '1rem' : '2rem',
               backgroundColor: '#f5f7fb',
               overflowY: 'auto',
-              minHeight: `calc(100vh - ${isMobile ? '60px' : '70px'})`,
+             height: `calc(100vh - ${isMobile ? '60px' : '70px'})`, // Use height instead of minHeight
               position: 'relative',
               zIndex: 1, // Ensure content stays behind dropdown
             }}
