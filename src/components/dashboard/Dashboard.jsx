@@ -1082,7 +1082,9 @@ const Dashboard = () => {
                 alignItems: 'center',
                 gap: '5px',
                 whiteSpace: 'nowrap',
-                flexShrink: '0'
+                flexShrink: '0',
+                display: showAdminControls ? 'flex' : 'none'
+
               }}
             >
               <i className="fas fa-edit"></i> {showAdminControls ? 'Hide Controls' : 'Edit'}

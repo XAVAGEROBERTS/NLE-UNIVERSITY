@@ -1,4 +1,4 @@
-// src/context/StudentAuthContext.jsx - FINAL WORKING VERSION
+// src/context/StudentAuthContext.jsx
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../services/supabase';
 import { useNavigate } from 'react-router-dom';
@@ -9,56 +9,83 @@ export const useStudentAuth = () => useContext(StudentAuthContext);
 
 export const StudentAuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(false);
   const navigate = useNavigate();
 
-  // Check existing session
+  // Initialize auth and listen for state changes
   useEffect(() => {
-    const userStr = localStorage.getItem('student_user');
-    if (userStr) {
+    const initializeAuth = async () => {
+      console.log('🔍 Initializing student authentication...');
       try {
-        const parsedUser = JSON.parse(userStr);
-        setUser(parsedUser);
-      } catch (e) {
-        localStorage.removeItem('student_user');
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) throw error;
+
+        if (session) {
+          console.log('✅ Active session found for:', session.user.email);
+          setUser({ tempSession: session }); // Placeholder to trigger data load
+        } else {
+          console.log('ℹ️ No active session found');
+          setUser(null);
+        }
+      } catch (err) {
+        console.error('Auth initialization error:', err);
+        setUser(null);
+      } finally {
+        setLoading(false); // Ensure loading ends even on error
       }
-    }
+    };
+
+    initializeAuth();
+
+    // Listen for auth state changes (must be synchronous)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log('🔔 Auth state changed:', event);
+
+      if (session) {
+        setUser({ tempSession: session }); // Trigger student data load in separate effect
+      } else {
+        setUser(null);
+        setLoading(false);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  // SIMPLE LOGIN - NOW IT WILL WORK!
-  const signIn = async (email, password) => {
-    console.log('🔐 Login attempt for:', email);
-    console.log('🔑 Using password:', password);
-    
-    setLoading(true);
-    
+  // Separate effect to load student data when session is available
+  useEffect(() => {
+    if (user?.tempSession) {
+      loadStudentData(user.tempSession.user.email);
+    }
+  }, [user?.tempSession]);
+
+  // Load student data
+  const loadStudentData = async (email) => {
     try {
-      // Get student from database
-      const { data: student, error } = await supabase
+      console.log('📋 Loading student data for:', email);
+
+      const { data: student, error: studentError } = await supabase
         .from('students')
         .select('*')
         .eq('email', email)
-        .single();
+        .maybeSingle();
 
-      if (error || !student) {
-        console.log('❌ Student not found');
-        throw new Error('Student not found. Check email.');
+      if (studentError) {
+        console.error('Error fetching student data:', studentError);
+        await supabase.auth.signOut();
+        setUser(null);
+        return;
       }
 
-      console.log('✅ Found student:', student.full_name);
-      console.log('📝 DB password:', student.password_hash);
-      console.log('🔍 Comparing with:', password);
-
-      // PLAIN TEXT COMPARISON - NOW IT WILL MATCH!
-      if (student.password_hash !== password) {
-        console.log('❌ Password mismatch');
-        console.log('💡 Try: Test1234');
-        throw new Error('Wrong password. Try "Test1234"');
+      if (!student) {
+        console.error('❌ Student record not found for:', email);
+        await supabase.auth.signOut();
+        setUser(null);
+        return;
       }
 
-      console.log('✅ Password correct!');
-      
-      // Create user session
+      // Create user object
       const userData = {
         id: student.id,
         email: student.email,
@@ -68,137 +95,192 @@ export const StudentAuthProvider = ({ children }) => {
         yearOfStudy: student.year_of_study,
         semester: student.semester,
         phone: student.phone || '',
+        status: student.status || 'active',
         createdAt: student.created_at,
-        lastLogin: new Date().toISOString()
+        lastLogin: new Date().toISOString(),
       };
 
-      // Save to localStorage
-      localStorage.setItem('student_user', JSON.stringify(userData));
+      console.log('✅ Student data loaded:', userData);
       setUser(userData);
-      
-      console.log('🎉 Login successful!');
-      
-      return { 
-        success: true, 
-        user: userData,
-        message: 'Login successful' 
-      };
-      
+
+      // Update last login time
+      await supabase
+        .from('students')
+        .update({ last_login: new Date().toISOString() })
+        .eq('id', student.id);
     } catch (error) {
-      console.error('Login error:', error.message);
-      return { 
-        success: false, 
-        error: error.message.includes('Test1234') 
-          ? 'Wrong password. Try "Test1234"' 
-          : error.message
-      };
+      console.error('Error loading student data:', error);
+      setUser(null);
     } finally {
       setLoading(false);
     }
   };
 
-  // PASSWORD CHANGE FUNCTION - NOW IT WILL WORK!
-  const changePassword = async (currentPassword, newPassword, confirmPassword) => {
-    console.log('🔄 Changing password for:', user?.email);
-    
-    if (!user || !user.email) {
-      throw new Error('Please login first');
-    }
+  // SIGN IN
+  const signIn = async (email, password) => {
+    console.log('🔐 Attempting sign in for:', email);
+    setAuthLoading(true);
 
-    // Validation
+    try {
+      // Try direct authentication first
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: email.toLowerCase().trim(),
+        password,
+      });
+
+      if (!authError) {
+        console.log('✅ Auth successful, checking student record...');
+        await loadStudentData(email.toLowerCase().trim());
+        return { success: true, message: 'Login successful!' };
+      }
+
+      console.error('Auth failed:', authError.message);
+
+      // Check if student exists
+      const { data: student } = await supabase
+        .from('students')
+        .select('*')
+        .eq('email', email.toLowerCase().trim())
+        .maybeSingle();
+
+      if (!student) {
+        return { success: false, error: 'Student not found. Please check your email.' };
+      }
+
+      // Create auth user if student exists but no auth record
+      const { error: signUpError } = await supabase.auth.signUp({
+        email: email.toLowerCase().trim(),
+        password,
+        options: {
+          data: {
+            full_name: student.full_name,
+            student_id: student.student_id,
+            role: 'student',
+          },
+          emailRedirectTo: `${window.location.origin}/dashboard`,
+        },
+      });
+
+      if (signUpError) {
+        if (signUpError.message.includes('already registered')) {
+          return { success: false, error: 'Incorrect password. Please try again.' };
+        }
+        return { success: false, error: 'Account setup failed. Please contact support.' };
+      }
+
+      // Auto-login after sign up
+      const { error: retryError } = await supabase.auth.signInWithPassword({
+        email: email.toLowerCase().trim(),
+        password,
+      });
+
+      if (retryError) {
+        return { success: false, error: 'Account created. Please try logging in again.' };
+      }
+
+      await loadStudentData(email.toLowerCase().trim());
+      return { success: true, message: 'Login successful!' };
+    } catch (error) {
+      console.error('Unexpected login error:', error);
+      return { success: false, error: 'An unexpected error occurred.' };
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  // SIGN OUT
+  const signOut = async () => {
+    console.log('🚪 Signing out...');
+    setAuthLoading(true);
+
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+
+      setUser(null);
+      navigate('/login', { replace: true });
+      return { success: true };
+    } catch (error) {
+      console.error('Sign out error:', error);
+      return { success: false, error: error.message };
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  // CHANGE PASSWORD
+  const changePassword = async (currentPassword, newPassword, confirmPassword) => {
+    if (!user?.email) throw new Error('Please login first');
+
     if (!currentPassword || !newPassword || !confirmPassword) {
       throw new Error('All password fields are required');
     }
-
-    if (newPassword.length < 6) {
-      throw new Error('New password must be at least 6 characters long');
-    }
-
-    if (newPassword !== confirmPassword) {
-      throw new Error('New passwords do not match');
-    }
-
-    if (currentPassword === newPassword) {
-      throw new Error('New password must be different from current password');
-    }
+    if (newPassword.length < 6) throw new Error('New password must be at least 6 characters');
+    if (newPassword !== confirmPassword) throw new Error('New passwords do not match');
+    if (currentPassword === newPassword) throw new Error('New password must be different');
 
     try {
-      // Get current user data
-      const { data: student, error: fetchError } = await supabase
+      // Verify current password
+      const { error: verifyError } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: currentPassword,
+      });
+      if (verifyError) throw new Error('Current password is incorrect');
+
+      // Update auth password
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+      if (updateError) throw new Error(`Failed to update password: ${updateError.message}`);
+
+      // Update students table (optional)
+      await supabase
         .from('students')
-        .select('password_hash')
-        .eq('email', user.email)
-        .single();
-
-      if (fetchError || !student) {
-        throw new Error('Failed to fetch user data');
-      }
-
-      console.log('🔐 Verifying current password...');
-      console.log('  Stored in DB:', student.password_hash);
-      console.log('  User entered:', currentPassword);
-
-      // Verify current password (plain text comparison)
-      if (student.password_hash !== currentPassword) {
-        console.log('❌ Current password incorrect');
-        throw new Error('Current password is incorrect. Try "Test1234"');
-      }
-
-      // Update to new password (plain text)
-      const { error: updateError } = await supabase
-        .from('students')
-        .update({ 
+        .update({
           password_hash: newPassword,
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
         })
         .eq('email', user.email);
 
-      if (updateError) {
-        console.error('❌ Update error:', updateError);
-        throw new Error('Failed to update password. Please try again.');
-      }
-
-      console.log('✅ Password updated successfully!');
-      
-      return {
-        success: true,
-        message: 'Password changed successfully! Use your new password next time.'
-      };
-      
+      return { success: true, message: 'Password changed successfully!' };
     } catch (error) {
-      console.error('❌ Password change error:', error);
+      console.error('Password change error:', error);
       throw error;
     }
   };
 
-  // Sign out
-  const signOut = () => {
-    console.log('🚪 Signing out...');
-    localStorage.removeItem('student_user');
-    setUser(null);
-    navigate('/login');
-    return { success: true };
-  };
+  // RESET PASSWORD
+  const resetPassword = async (email) => {
+    try {
+      const { data: student } = await supabase
+        .from('students')
+        .select('email')
+        .eq('email', email.toLowerCase().trim())
+        .maybeSingle();
 
-  // Check auth status
-  const checkAuth = () => {
-    return !!user;
-  };
+      if (!student) throw new Error('No student found with this email');
 
-  // Get user data
-  const getUserData = () => {
-    return user;
+      const { error } = await supabase.auth.resetPasswordForEmail(email.toLowerCase().trim(), {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (error) throw error;
+
+      return { success: true, message: 'Password reset email sent.' };
+    } catch (error) {
+      console.error('Password reset error:', error);
+      throw error;
+    }
   };
 
   const value = {
     user,
     loading,
-    isAuthenticated: checkAuth(),
+    authLoading,
+    isAuthenticated: !!user && !user.tempSession,
     signIn,
     signOut,
     changePassword,
-    getUserData,
-    checkAuth
+    resetPassword,
   };
 
   return (
