@@ -1499,7 +1499,8 @@ const StudentLayout = () => {
                     key={item.id}
                     className="menu-item"
                     style={{
-                      marginBottom: '0.25rem',
+                      marginBottom: '0.6rem',
+                      marginTop: '0.5rem',
                     }}
                   >
                     <button
