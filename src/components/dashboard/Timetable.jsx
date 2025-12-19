@@ -32,163 +32,170 @@ const Timetable = () => {
     }
   }, [user]);
 
-  const fetchTimetable = async () => {
-    try {
-      setLoading(true);
+const fetchTimetable = async () => {
+  try {
+    setLoading(true);
 
-      // Get student data
-      const { data: student, error: studentError } = await supabase
-        .from('students')
-        .select('id, academic_year, semester')
-        .eq('email', user.email)
-        .single();
+    // Get current logged-in student's details
+    const { data: student, error: studentError } = await supabase
+      .from('students')
+      .select('id, program_id, academic_year, semester, year_of_study, department_code')
+      .eq('email', user.email)
+      .single();
 
-      if (studentError) throw studentError;
-
-      // Fetch student's enrolled courses
-      const { data: studentCourses, error: coursesError } = await supabase
-        .from('student_courses')
-        .select('course_id')
-        .eq('student_id', student.id)
-        .in('status', ['enrolled', 'in_progress']);
-
-      if (coursesError) throw coursesError;
-
-      const courseIds = studentCourses.map(sc => sc.course_id);
-
-      if (courseIds.length === 0) {
-        setTimetableData([]);
-        setUpcomingLectures([]);
-        setLoading(false);
-        return;
-      }
-
-      // Fetch timetable slots for these courses
-      const { data: timetableSlots, error: timetableError } = await supabase
-        .from('timetable_slots')
-        .select(`
-          *,
-          courses (course_code, course_name),
-          lecturers (full_name)
-        `)
-        .in('course_id', courseIds)
-        .eq('academic_year', student.academic_year)
-        .eq('semester', student.semester)
-        .eq('is_active', true)
-        .order('day_of_week', { ascending: true })
-        .order('start_time', { ascending: true });
-
-      if (timetableError) throw timetableError;
-
-      // Process timetable data
-      const timeSlots = [
-        "8:00 - 9:00",
-        "9:00 - 10:00",
-        "10:00 - 11:00",
-        "11:00 - 12:00",
-        "12:00 - 13:00",
-        "13:00 - 14:00",
-        "14:00 - 15:00",
-        "15:00 - 16:00",
-        "16:00 - 17:00",
-        "17:00 - 18:00"
-      ];
-
-      const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-      const timetable = timeSlots.map(timeSlot => {
-        const row = { time: timeSlot };
-        dayNames.forEach((day) => {
-          row[day.toLowerCase()] = [];
-        });
-        return row;
-      });
-
-      // Array to store upcoming lectures for the week
-      const upcomingLecs = [];
-
-      // Get current date and next 7 days
-      const today = new Date();
-      const nextWeek = new Date();
-      nextWeek.setDate(today.getDate() + 7);
-
-      timetableSlots.forEach(slot => {
-        const dayName = dayNames[slot.day_of_week]?.toLowerCase();
-        if (!dayName) return;
-
-        const startHour = parseInt(slot.start_time.split(':')[0]);
-        const endHour = parseInt(slot.end_time.split(':')[0]);
-        
-        // Find matching time slots
-        for (let hour = startHour; hour < endHour; hour++) {
-          const timeSlot = `${hour}:00 - ${hour + 1}:00`;
-          const rowIndex = timeSlots.findIndex(ts => ts === timeSlot);
-          
-          if (rowIndex !== -1) {
-            const courseCode = slot.courses?.course_code || 'N/A';
-            const courseName = slot.courses?.course_name || 'Unknown Course';
-            const room = slot.room_number || 'TBA';
-            const lecturer = slot.lecturers?.full_name || 'Unknown Lecturer';
-            const slotType = slot.slot_type === 'lab' ? 'LAB' : '';
-            
-            const lectureInfo = {
-              courseCode,
-              courseName,
-              room,
-              lecturer,
-              slotType,
-              startTime: slot.start_time,
-              endTime: slot.end_time,
-              dayOfWeek: slot.day_of_week,
-              dayName: dayNames[slot.day_of_week]
-            };
-
-            // Add to timetable
-            if (!timetable[rowIndex][dayName].some(item => 
-              item.courseCode === courseCode && 
-              item.startTime === slot.start_time
-            )) {
-              timetable[rowIndex][dayName].push(lectureInfo);
-            }
-
-            // Add to upcoming lectures (for next 7 days)
-            const todayDayIndex = today.getDay() === 0 ? 6 : today.getDay() - 1; // Convert Sunday=0 to Sunday=6
-            let daysToAdd = slot.day_of_week - todayDayIndex;
-            if (daysToAdd < 0) daysToAdd += 7;
-            
-            const lectureDate = new Date(today);
-            lectureDate.setDate(today.getDate() + daysToAdd);
-            
-            if (lectureDate <= nextWeek) {
-              upcomingLecs.push({
-                ...lectureInfo,
-                date: lectureDate.toISOString().split('T')[0],
-                formattedDate: formatDate(lectureDate),
-                isToday: daysToAdd === 0,
-                isTomorrow: daysToAdd === 1
-              });
-            }
-          }
-        }
-      });
-
-      // Sort upcoming lectures by date and time
-      upcomingLecs.sort((a, b) => {
-        if (a.date === b.date) {
-          return a.startTime.localeCompare(b.startTime);
-        }
-        return a.date.localeCompare(b.date);
-      });
-
-      setTimetableData(timetable);
-      setUpcomingLectures(upcomingLecs);
-    } catch (error) {
-      console.error('Error fetching timetable:', error);
+    if (studentError || !student) {
+      console.error('Student not found:', studentError);
       setTimetableData([]);
       setUpcomingLectures([]);
-    } finally {
       setLoading(false);
+      return;
     }
-  };
+
+    // Fetch the active program timetable for this student
+    const { data: programTimetable, error: ptError } = await supabase
+      .from('program_timetables')
+      .select('id')
+      .eq('program_id', student.program_id)
+      .eq('academic_year', student.academic_year)
+      .eq('semester', student.semester)
+      .eq('year_of_study', student.year_of_study)
+      .eq('is_active', true)
+      .single();
+
+    if (ptError || !programTimetable) {
+      console.log('No program timetable found for this student yet.');
+      setTimetableData([]);
+      setUpcomingLectures([]);
+      setLoading(false);
+      return;
+    }
+
+    // Fetch all slots for this program timetable
+    const { data: timetableSlots, error: slotsError } = await supabase
+      .from('program_timetable_slots')
+      .select(`
+        course_code,
+        course_name,
+        lecturer_id,
+        day_of_week,
+        start_time,
+        end_time,
+        room_number,
+        building,
+        slot_type,
+        lecturers (full_name)
+      `)
+      .eq('program_timetable_id', programTimetable.id)
+      .eq('is_active', true)
+      .order('day_of_week', { ascending: true })
+      .order('start_time', { ascending: true });
+
+    if (slotsError) throw slotsError;
+
+    if (!timetableSlots || timetableSlots.length === 0) {
+      setTimetableData([]);
+      setUpcomingLectures([]);
+      setLoading(false);
+      return;
+    }
+
+    // === Processing remains mostly the same from here ===
+    const timeSlots = [
+      "8:00 - 9:00",
+      "9:00 - 10:00",
+      "10:00 - 11:00",
+      "11:00 - 12:00",
+      "12:00 - 13:00",
+      "13:00 - 14:00",
+      "14:00 - 15:00",
+      "15:00 - 16:00",
+      "16:00 - 17:00",
+      "17:00 - 18:00"
+    ];
+
+    const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const timetable = timeSlots.map(timeSlot => {
+      const row = { time: timeSlot };
+      dayNames.forEach((day) => {
+        row[day.toLowerCase()] = [];
+      });
+      return row;
+    });
+
+    const upcomingLecs = [];
+    const today = new Date();
+    const nextWeek = new Date(today);
+    nextWeek.setDate(today.getDate() + 7);
+
+    timetableSlots.forEach(slot => {
+      const dayName = dayNames[slot.day_of_week]?.toLowerCase();
+      if (!dayName) return;
+
+      const startHour = parseInt(slot.start_time.split(':')[0]);
+      const endHour = parseInt(slot.end_time.split(':')[0]);
+
+      for (let hour = startHour; hour < endHour; hour++) {
+        const timeSlot = `${hour.toString().padStart(2, '0')}:00 - ${(hour + 1).toString().padStart(2, '0')}:00`;
+        const rowIndex = timeSlots.findIndex(ts => ts === timeSlot);
+
+        if (rowIndex !== -1) {
+          const lectureInfo = {
+            courseCode: slot.course_code || 'N/A',
+            courseName: slot.course_name || 'Unknown Course',
+            room: slot.room_number ? `${slot.room_number}, ${slot.building || ''}`.trim() : 'TBA',
+            lecturer: slot.lecturers?.full_name || 'Not Assigned',
+            slotType: slot.slot_type === 'lab' ? 'LAB' : '',
+            startTime: slot.start_time,
+            endTime: slot.end_time,
+            dayOfWeek: slot.day_of_week,
+            dayName: dayNames[slot.day_of_week]
+          };
+
+          // Avoid duplicates
+          if (!timetable[rowIndex][dayName].some(item => 
+            item.courseCode === lectureInfo.courseCode && 
+            item.startTime === slot.start_time
+          )) {
+            timetable[rowIndex][dayName].push(lectureInfo);
+          }
+
+          // Upcoming lectures logic
+          const todayDayIndex = today.getDay() === 0 ? 6 : today.getDay() - 1;
+          let daysToAdd = slot.day_of_week - todayDayIndex;
+          if (daysToAdd < 0) daysToAdd += 7;
+
+          const lectureDate = new Date(today);
+          lectureDate.setDate(today.getDate() + daysToAdd);
+
+          if (lectureDate <= nextWeek) {
+            upcomingLecs.push({
+              ...lectureInfo,
+              date: lectureDate.toISOString().split('T')[0],
+              formattedDate: formatDate(lectureDate),
+              isToday: daysToAdd === 0,
+              isTomorrow: daysToAdd === 1
+            });
+          }
+        }
+      }
+    });
+
+    upcomingLecs.sort((a, b) => {
+      if (a.date === b.date) return a.startTime.localeCompare(b.startTime);
+      return a.date.localeCompare(b.date);
+    });
+
+    setTimetableData(timetable);
+    setUpcomingLectures(upcomingLecs);
+
+  } catch (error) {
+    console.error('Error fetching program timetable:', error);
+    setTimetableData([]);
+    setUpcomingLectures([]);
+  } finally {
+    setLoading(false);
+  }
+};
 
   // Helper functions
   const formatTime = (timeString) => {

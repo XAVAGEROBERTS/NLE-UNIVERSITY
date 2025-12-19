@@ -29,208 +29,180 @@ const CourseUnits = () => {
       fetchStudentData();
     }
   }, [user]);
+const fetchStudentData = async () => {
+  try {
+    setLoading(true);
+    setError(null);
 
-  // Helper function to normalize program names
-  const normalizeProgramName = (programName) => {
-    if (!programName) return '';
-    
-    const normalized = programName.toLowerCase();
-    
-    if (normalized.includes('computer science') || normalized.includes('bsc computer science')) {
-      return 'Computer Science';
-    } else if (normalized.includes('computer engineering') || normalized.includes('bsc computer engineering')) {
-      return 'Computer Engineering';
-    } else if (normalized.includes('software engineering') || normalized.includes('bsc software engineering')) {
-      return 'Software Engineering';
-    } else if (normalized.includes('information technology') || normalized.includes('bit')) {
-      return 'Information Technology';
-    } else if (normalized.includes('it')) {
-      return 'Information Technology';
+    console.log('Fetching data for user:', user.email);
+
+    // Get student with year of study, semester, program_code, and program_duration_years
+    const { data: student, error: studentError } = await supabase
+      .from('students')
+      .select('id, year_of_study, semester, academic_year, program, program_code, program_duration_years, program_total_semesters')
+      .eq('email', user.email)
+      .single();
+
+    if (studentError) {
+      console.error('Student error:', studentError);
+      throw new Error(`Student data error: ${studentError.message}`);
     }
+
+    if (!student) {
+      throw new Error('Student not found');
+    }
+
+    console.log('Student found:', student);
+    setStudentInfo(student);
+
+    // Calculate total semesters based on program duration
+    // Engineering (BSCE): 4 years × 2 semesters = 8 semesters
+    // Others (BSCS, BSSE, BIT): 3 years × 2 semesters = 6 semesters
+    const isEngineering = student.program_code === 'BSCE';
+    const totalYears = student.program_duration_years || (isEngineering ? 4 : 3);
+    const totalSemesters = student.program_total_semesters || totalYears * 2;
     
-    // Try to extract just the main program name
-    const match = programName.match(/Bachelor of (?:Science in )?(.+)/i);
-    return match ? match[1].trim() : programName;
-  };
+    console.log('Program:', student.program_code, 'Total years:', totalYears, 'Total semesters:', totalSemesters);
 
-  const fetchStudentData = async () => {
-    try {
-      setLoading(true);
-      setError(null);
+    // NEW: Fetch ALL courses for the student's program, not just current semester
+    const { data: courses, error: coursesError } = await supabase
+      .from('courses')
+      .select('*')
+      .eq('program_code', student.program_code)
+      .eq('is_active', true)
+      .order('year', { ascending: true })
+      .order('semester', { ascending: true })
+      .order('course_code', { ascending: true });
 
-      console.log('Fetching data for user:', user.email);
+    if (coursesError) {
+      console.error('Courses error:', coursesError);
+      throw new Error(`Courses error: ${coursesError.message}`);
+    }
 
-      // Get student with year of study and program
-      const { data: student, error: studentError } = await supabase
-        .from('students')
-        .select('id, year_of_study, semester, academic_year, program')
-        .eq('email', user.email)
-        .single();
+    console.log('Courses fetched:', courses?.length || 0, 'for program:', student.program_code);
 
-      if (studentError) {
-        console.error('Student error:', studentError);
-        throw new Error(`Student data error: ${studentError.message}`);
-      }
-
-      if (!student) {
-        throw new Error('Student not found');
-      }
-
-      console.log('Student found:', student);
-      setStudentInfo(student);
-
-      // Normalize the program name for course lookup
-      const normalizedProgram = normalizeProgramName(student.program);
-      console.log('Original program:', student.program, 'Normalized to:', normalizedProgram);
-
-      // Try different program name variations to find courses
-      const { data: courses, error: coursesError } = await supabase
+    // If no courses found with exact match, try fallback
+    let finalCourses = courses;
+    if (!finalCourses || finalCourses.length === 0) {
+      console.log('No courses found with exact match, trying broader search...');
+      
+      // Fallback: Try to find courses by department
+      const departmentCode = isEngineering ? 'ENG' : 'SCT';
+      const { data: deptCourses } = await supabase
         .from('courses')
         .select('*')
-        .or(`program.eq.${normalizedProgram},program.eq.${student.program}`)
-        .order('year', { ascending: true })
-        .order('semester', { ascending: true });
-
-      if (coursesError) {
-        console.error('Courses error:', coursesError);
-        throw new Error(`Courses error: ${coursesError.message}`);
-      }
-
-      console.log('Courses fetched:', courses?.length || 0, 'for normalized program:', normalizedProgram);
-
-      // If no courses found, try a more flexible search
-      let finalCourses = courses;
-      if (!finalCourses || finalCourses.length === 0) {
-        console.log('No courses found with exact program match, trying broader search...');
-        
-        // Try to find courses that match the program name partially
-        const { data: partialCourses } = await supabase
-          .from('courses')
-          .select('*')
-          .ilike('program', `%${normalizedProgram}%`)
-          .order('year', { ascending: true })
-          .order('semester', { ascending: true });
-        
-        if (partialCourses && partialCourses.length > 0) {
-          finalCourses = partialCourses;
-          console.log('Found', finalCourses.length, 'courses with partial match');
-        }
-      }
-
-      // If still no courses, try to get any Computer Science courses
-      if (!finalCourses || finalCourses.length === 0) {
-        console.log('Trying default Computer Science courses...');
-        const { data: defaultCourses } = await supabase
-          .from('courses')
-          .select('*')
-          .or('program.eq.Computer Science,program.eq.Computer Engineering,program.eq.Software Engineering,program.eq.Information Technology')
-          .order('year', { ascending: true })
-          .order('semester', { ascending: true })
-          .limit(20);
-        
-        if (defaultCourses && defaultCourses.length > 0) {
-          finalCourses = defaultCourses;
-          console.log('Using', finalCourses.length, 'default courses');
-        }
-      }
-
-      if (!finalCourses || finalCourses.length === 0) {
-        console.warn('No courses found at all');
-        setCourseData({});
-        setLoading(false);
-        return;
-      }
-
-      // Fetch student's course enrollments and grades
-      const { data: studentCourses, error: scError } = await supabase
-        .from('student_courses')
-        .select('course_id, status, grade, marks')
-        .eq('student_id', student.id);
-
-      if (scError) {
-        console.error('Student courses error:', scError);
-        throw new Error(`Student courses error: ${scError.message}`);
-      }
-
-      console.log('Student courses:', studentCourses?.length || 0);
-
-      // Create completed courses map
-      const completedMap = {};
-      if (studentCourses) {
-        studentCourses.forEach(sc => {
-          if (sc.status === 'completed') {
-            completedMap[sc.course_id] = {
-              completed: true,
-              grade: sc.grade,
-              marks: sc.marks
-            };
-          }
-        });
-      }
-
-      // Merge with localStorage
-      const saved = localStorage.getItem('completedCourses');
-      const savedMap = saved ? JSON.parse(saved) : {};
-      const mergedCompleted = { ...savedMap, ...completedMap };
-      setCompletedCourses(mergedCompleted);
-
-      // Get current year from student data
-      const currentYear = student.year_of_study || 1;
-      console.log('Current year of study:', currentYear);
-
-      // Organize courses by year - dynamic approach
-      const organizedData = {};
+        .eq('department_code', departmentCode)
+        .eq('is_active', true)
+        .limit(30)
+        .order('course_code', { ascending: true });
       
-      // First, find all unique years in the courses
-      const allYears = [];
-      if (finalCourses && finalCourses.length > 0) {
-        const uniqueCourseYears = [...new Set(finalCourses.map(course => course.year))];
-        uniqueCourseYears.sort((a, b) => b - a);
-        
-        console.log('Unique years in courses:', uniqueCourseYears);
-        
-        // Create tab keys and titles based on actual data
-        uniqueCourseYears.forEach((year, index) => {
-          let tabKey = '';
-          let title = '';
-          
-          if (year === currentYear) {
-            tabKey = 'current';
-            title = `Year ${year} (Current)`;
-          } else if (index === 0 && year !== currentYear) {
-            tabKey = 'previous1';
-            title = `Year ${year}`;
-          } else if (index === 1) {
-            tabKey = 'previous2';
-            title = `Year ${year}`;
-          } else if (index === 2) {
-            tabKey = 'previous3';
-            title = `Year ${year}`;
-          } else {
-            tabKey = `year${year}`;
-            title = `Year ${year}`;
-          }
-          
-          organizedData[tabKey] = {
-            title: title,
-            yearNumber: year,
-            semesters: [],
-            academicYear: year === currentYear ? student.academic_year : null
-          };
-          
-          allYears.push({ key: tabKey, year: year, title: title });
-        });
-        
-        // Set active tab to current year if it exists
-        const currentYearKey = allYears.find(y => y.year === currentYear)?.key || allYears[0]?.key;
-        if (currentYearKey && !activeTab) {
-          setActiveTab(currentYearKey);
-        }
+      if (deptCourses && deptCourses.length > 0) {
+        finalCourses = deptCourses;
+        console.log('Using', finalCourses.length, 'department courses as fallback');
       }
+    }
 
-      // Group courses by year and semester
-      if (finalCourses && finalCourses.length > 0) {
-        finalCourses.forEach(course => {
+    if (!finalCourses || finalCourses.length === 0) {
+      console.warn('No courses found at all');
+      setCourseData({});
+      setLoading(false);
+      return;
+    }
+
+    // Fetch student's course enrollments and grades
+    const { data: studentCourses, error: scError } = await supabase
+      .from('student_courses')
+      .select('course_id, status, grade, marks')
+      .eq('student_id', student.id);
+
+    if (scError) {
+      console.error('Student courses error:', scError);
+      throw new Error(`Student courses error: ${scError.message}`);
+    }
+
+    console.log('Student courses:', studentCourses?.length || 0);
+
+    // Create completed courses map
+    const completedMap = {};
+    if (studentCourses) {
+      studentCourses.forEach(sc => {
+        if (sc.status === 'completed') {
+          completedMap[sc.course_id] = {
+            completed: true,
+            grade: sc.grade,
+            marks: sc.marks
+          };
+        }
+      });
+    }
+
+    // Merge with localStorage
+    const saved = localStorage.getItem('completedCourses');
+    const savedMap = saved ? JSON.parse(saved) : {};
+    const mergedCompleted = { ...savedMap, ...completedMap };
+    setCompletedCourses(mergedCompleted);
+
+    // Get current year from student data
+    const currentYear = student.year_of_study || 1;
+    const currentSemester = student.semester || 1;
+    console.log('Current year of study:', currentYear, 'Semester:', currentSemester);
+
+    // NEW: Create tabs for ALL years in the program (1 to totalYears)
+    const organizedData = {};
+    
+    // Create tabs for each year (1 to totalYears)
+    for (let year = 1; year <= totalYears; year++) {
+      let tabKey = '';
+      let title = '';
+      
+      if (year === currentYear) {
+        tabKey = 'current';
+        title = `Year ${year} (Current)`;
+      } else if (year === currentYear - 1) {
+        tabKey = 'previous1';
+        title = `Year ${year}`;
+      } else if (year === currentYear - 2) {
+        tabKey = 'previous2';
+        title = `Year ${year}`;
+      } else if (year === currentYear - 3) {
+        tabKey = 'previous3';
+        title = `Year ${year}`;
+      } else if (year < currentYear) {
+        tabKey = `past${year}`;
+        title = `Year ${year}`;
+      } else if (year > currentYear) {
+        tabKey = `future${year}`;
+        title = `Year ${year}`;
+      } else {
+        tabKey = `year${year}`;
+        title = `Year ${year}`;
+      }
+      
+      organizedData[tabKey] = {
+        title: title,
+        yearNumber: year,
+        semesters: [],
+        academicYear: year === currentYear ? student.academic_year : null,
+        isCurrent: year === currentYear,
+        isPast: year < currentYear,
+        isFuture: year > currentYear
+      };
+    }
+    
+    // Set active tab to current year if it exists
+    const currentYearKey = Object.keys(organizedData).find(key => 
+      organizedData[key].yearNumber === currentYear
+    ) || Object.keys(organizedData)[0];
+    
+    if (currentYearKey && !activeTab) {
+      setActiveTab(currentYearKey);
+    }
+
+    // NEW: Group finalCourses by year and semester (all years)
+    if (finalCourses && finalCourses.length > 0) {
+      finalCourses.forEach(course => {
+        // Only include courses for years within the program duration
+        if (course.year >= 1 && course.year <= totalYears) {
           // Find the tab key for this course's year
           const tabEntry = Object.entries(organizedData).find(([key, data]) => 
             data.yearNumber === course.year
@@ -264,7 +236,9 @@ const CourseUnits = () => {
                 isCore: course.is_core,
                 year: course.year,
                 semester: course.semester,
-                program: course.program
+                program: course.program,
+                program_code: course.program_code,
+                department: course.department
               };
 
               // Add grade if completed
@@ -279,37 +253,57 @@ const CourseUnits = () => {
               semesterGroup.courses.push(courseInfo);
             }
           }
-        });
-      }
-
-      // Sort semesters by semester number and remove empty semesters
-      Object.keys(organizedData).forEach(key => {
-        // Sort semesters
-        organizedData[key].semesters.sort((a, b) => a.semesterNumber - b.semesterNumber);
-        
-        // Sort courses within each semester
-        organizedData[key].semesters.forEach(semester => {
-          semester.courses.sort((a, b) => {
-            return a.code.localeCompare(b.code);
-          });
-        });
-        
-        // Filter out semesters with no courses
-        organizedData[key].semesters = organizedData[key].semesters.filter(
-          semester => semester.courses.length > 0
-        );
+        }
       });
-
-      console.log('Organized data:', organizedData);
-      setCourseData(organizedData);
-    } catch (err) {
-      console.error('Error fetching student data:', err);
-      setError(`Failed to load course data: ${err.message}`);
-    } finally {
-      setLoading(false);
     }
-  };
 
+    // NEW: Add empty semesters for years that have no courses (for UI completeness)
+    Object.keys(organizedData).forEach(key => {
+      const yearData = organizedData[key];
+      const yearNumber = yearData.yearNumber;
+      
+      // Create both semesters (1 and 2) for each year
+      for (let semester = 1; semester <= 2; semester++) {
+        const hasSemester = yearData.semesters.some(s => s.semesterNumber === semester);
+        
+        if (!hasSemester) {
+          // Add empty semester placeholder
+          yearData.semesters.push({
+            semesterNumber: semester,
+            semester: `Semester ${semester}`,
+            courses: [],
+            isEmpty: true
+          });
+        }
+      }
+      
+      // Sort semesters by semester number
+      yearData.semesters.sort((a, b) => a.semesterNumber - b.semesterNumber);
+      
+      // Sort courses within each semester
+      yearData.semesters.forEach(semester => {
+        semester.courses.sort((a, b) => {
+          return a.code.localeCompare(b.code);
+        });
+      });
+      
+      // Filter out empty semesters if the year has no courses at all
+      const hasCourses = yearData.semesters.some(semester => semester.courses.length > 0);
+      if (!hasCourses) {
+        // Remove the year completely if it has no courses
+        delete organizedData[key];
+      }
+    });
+
+    console.log('Organized data:', organizedData);
+    setCourseData(organizedData);
+  } catch (err) {
+    console.error('Error fetching student data:', err);
+    setError(`Failed to load course data: ${err.message}`);
+  } finally {
+    setLoading(false);
+  }
+};
   const toggleCourse = async (courseId) => {
     try {
       if (!user?.email) return;
@@ -477,6 +471,32 @@ const CourseUnits = () => {
           </div>
         </div>
         
+        {/* DEBUG INFO - Show program_code and department */}
+        <div style={{ 
+          display: 'flex', 
+          flexWrap: 'wrap', 
+          gap: '6px',
+          marginBottom: '8px',
+          fontSize: '11px'
+        }}>
+          <span style={{
+            backgroundColor: '#e9ecef',
+            padding: '2px 6px',
+            borderRadius: '4px',
+            color: '#666'
+          }}>
+            Prog: {course.program_code}
+          </span>
+          <span style={{
+            backgroundColor: '#e9ecef',
+            padding: '2px 6px',
+            borderRadius: '4px',
+            color: '#666'
+          }}>
+            Dept: {course.department}
+          </span>
+        </div>
+        
         <div style={{ 
           display: 'flex', 
           flexWrap: 'wrap', 
@@ -565,7 +585,15 @@ const CourseUnits = () => {
               padding: '4px 10px',
               borderRadius: '12px'
             }}>
-              {course.program}
+              {course.program_code} {/* Changed from program to program_code */}
+            </span>
+            <span className="course-dept" style={{
+              backgroundColor: '#e9ecef',
+              padding: '4px 10px',
+              borderRadius: '12px',
+              color: '#666'
+            }}>
+              {course.department}
             </span>
             {course.isCore && <span className="course-core" style={{
               backgroundColor: '#ffc107',
@@ -741,6 +769,16 @@ const CourseUnits = () => {
               }}>
                 <strong>Program:</strong> {studentInfo.program}
               </div>
+              <div style={{ 
+                fontSize: 'clamp(0.85rem, 2vw, 1rem)',
+                color: '#666',
+                backgroundColor: '#e9ecef',
+                padding: 'clamp(6px, 1.2vw, 8px) clamp(10px, 2vw, 12px)',
+                borderRadius: '6px',
+                flex: isMobile ? '1' : '0 1 auto'
+              }}>
+                <strong>Code:</strong> {studentInfo.program_code}
+              </div>
             </div>
           )}
         </div>
@@ -778,7 +816,10 @@ const CourseUnits = () => {
               marginRight: 'auto'
             }}>
               <p style={{ margin: '0 0 8px 0', color: '#856404' }}>
-                <strong>Program:</strong> {studentInfo.program}
+                <strong>Student Info:</strong> {studentInfo.program} ({studentInfo.program_code})
+              </p>
+              <p style={{ margin: '0 0 8px 0', color: '#856404' }}>
+                <strong>Year:</strong> {studentInfo.year_of_study}, <strong>Semester:</strong> {studentInfo.semester}
               </p>
               <p style={{ 
                 margin: '0', 
@@ -786,8 +827,9 @@ const CourseUnits = () => {
                 color: '#856404',
                 lineHeight: '1.4'
               }}>
-                The system couldn't find courses matching your exact program name.
-                This might be due to a mismatch between how your program is named in the database.
+                The system couldn't find courses for your program code: <strong>{studentInfo.program_code}</strong>
+                in Year {studentInfo.year_of_study}, Semester {studentInfo.semester}.
+                Please contact your department if this seems incorrect.
               </p>
             </div>
           )}
