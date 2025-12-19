@@ -1,4 +1,4 @@
-// src/components/layout/StudentLayout.jsx
+// src/components/layout/StudentLayout.jsx - COMPLETE FILE
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useStudentAuth } from '../../context/StudentAuthContext';
@@ -7,7 +7,7 @@ import { supabase } from '../../services/supabase';
 const StudentLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, signOut, loading: authLoading } = useStudentAuth();
+  const { user, signOut, logoutLoading } = useStudentAuth();
   
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -16,8 +16,6 @@ const StudentLayout = () => {
   const [studentData, setStudentData] = useState(null);
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const [logoutProgress, setLogoutProgress] = useState(0);
   const [isLoadingUser, setIsLoadingUser] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
   const [isLoadingNotifications, setIsLoadingNotifications] = useState(false);
@@ -25,9 +23,7 @@ const StudentLayout = () => {
   const notificationRef = useRef(null);
   const bellIconRef = useRef(null);
   const logoutModalRef = useRef(null);
-  const logoutProgressRef = useRef(null);
   const mobileMenuRef = useRef(null);
-  const layoutContainerRef = useRef(null);
 
   const menuItems = [
     { id: 'dashboard', label: 'Home', icon: 'fas fa-home', path: '/dashboard' },
@@ -281,18 +277,11 @@ const StudentLayout = () => {
 
   // Initialize user data and notifications
   useEffect(() => {
-    if (!authLoading && user) {
+    if (user) {
       setIsLoadingUser(true);
       fetchStudentData();
-    } else if (!authLoading && !user) {
-      setIsLoadingUser(false);
-      // Check if we're already on login page
-      if (location.pathname !== '/login' && !location.pathname.includes('/auth')) {
-        console.log('🚫 No user found, redirecting to login');
-        navigate('/login', { replace: true });
-      }
     }
-  }, [user, authLoading, fetchStudentData, navigate, location]);
+  }, [user, fetchStudentData]);
 
   // Fetch notifications when student data is loaded
   useEffect(() => {
@@ -338,49 +327,10 @@ const StudentLayout = () => {
           if (Notification.permission === 'granted') {
             new Notification(newNotification.title, {
               body: newNotification.message,
-              icon: '/images/badge.png',
+              icon: '/badge.png',
               tag: 'student-notification'
             });
           }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'notifications',
-          filter: `student_id=eq.${studentId}`
-        },
-        (payload) => {
-          console.log('🔔 Notification updated:', payload.new);
-          
-          setNotifications(prev =>
-            prev.map(notif =>
-              notif.id === payload.new.id
-                ? {
-                    ...notif,
-                    read: payload.new.is_read,
-                    title: payload.new.title,
-                    message: payload.new.message
-                  }
-                : notif
-            )
-          );
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'DELETE',
-          schema: 'public',
-          table: 'notifications',
-          filter: `student_id=eq.${studentId}`
-        },
-        (payload) => {
-          console.log('🔔 Notification deleted:', payload.old.id);
-          
-          setNotifications(prev => prev.filter(notif => notif.id !== payload.old.id));
         }
       )
       .subscribe();
@@ -418,7 +368,7 @@ const StudentLayout = () => {
       if (showLogoutModal && 
           logoutModalRef.current && 
           !logoutModalRef.current.contains(event.target)) {
-        if (!isLoggingOut) {
+        if (!logoutLoading) {
           setShowLogoutModal(false);
         }
       }
@@ -435,24 +385,7 @@ const StudentLayout = () => {
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [showNotifications, showLogoutModal, isLoggingOut, mobileMenuOpen]);
-
-  // Animate logout progress
-  useEffect(() => {
-    if (isLoggingOut && logoutProgressRef.current) {
-      const interval = setInterval(() => {
-        setLogoutProgress(prev => {
-          if (prev >= 100) {
-            clearInterval(interval);
-            return 100;
-          }
-          return prev + 2;
-        });
-      }, 100);
-
-      return () => clearInterval(interval);
-    }
-  }, [isLoggingOut]);
+  }, [showNotifications, showLogoutModal, logoutLoading, mobileMenuOpen]);
 
   // Close mobile menu on route change
   useEffect(() => {
@@ -476,54 +409,24 @@ const StudentLayout = () => {
     setMobileMenuOpen(!mobileMenuOpen);
   };
 
-  // FIXED LOGOUT FUNCTION
+  // SIMPLIFIED LOGOUT FUNCTION - auth context handles loading
   const confirmLogout = async () => {
     console.log('Starting logout process');
-    setIsLoggingOut(true);
-    setLogoutProgress(0);
     
     try {
-      // Start progress animation
-      const progressInterval = setInterval(() => {
-        setLogoutProgress(prev => {
-          if (prev >= 90) {
-            clearInterval(progressInterval);
-            return 90;
-          }
-          return prev + 10;
-        });
-      }, 300);
-
-      // Call signOut from context
-      const result = await signOut();
-      
-      clearInterval(progressInterval);
-      setLogoutProgress(100);
-      
-      console.log('Logout result:', result);
-      
-      // Wait for animation to complete
-      setTimeout(() => {
-        setIsLoggingOut(false);
-        setShowLogoutModal(false);
-      }, 500);
-      
+      // Call signOut from context - it will handle the loading animation
+      await signOut();
+      // Hide modal - logout loader will be shown by auth context
+      setShowLogoutModal(false);
     } catch (error) {
       console.error('Logout error:', error);
-      setLogoutProgress(100);
-      
-      // Fallback redirect
-      setTimeout(() => {
-        setIsLoggingOut(false);
-        setShowLogoutModal(false);
-        localStorage.removeItem('student_user');
-        window.location.href = '/login';
-      }, 800);
+      // Hide logout modal on error
+      setShowLogoutModal(false);
     }
   };
 
   const cancelLogout = () => {
-    if (!isLoggingOut) {
+    if (!logoutLoading) {
       setShowLogoutModal(false);
     }
   };
@@ -588,213 +491,80 @@ const StudentLayout = () => {
     }
   };
 
-  // Show loading while auth is initializing
-  if (authLoading) {
-    return (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '100vh',
-        backgroundColor: '#f5f7fb',
-        flexDirection: 'column',
-        gap: '20px'
-      }}>
-        <img 
-          src="/images/badge.png" 
-          alt="Logo" 
-          style={{
-            width: '100px',
-            height: '100px',
-            objectFit: 'contain',
-          }}
-        />
-        <div style={{
-          width: '50px',
-          height: '50px',
-          border: '5px solid #f3f3f3',
-          borderTop: '5px solid #3498db',
-          borderRadius: '50%',
-          animation: 'spin 1s linear infinite'
-        }}></div>
-        <p style={{ color: '#666', fontSize: '16px' }}>Loading application...</p>
-        <style>{`
-          @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-          }
-        `}</style>
-      </div>
-    );
-  }
-
-  // If no user and auth is done loading, don't render layout
-  if (!user && !authLoading) {
-    return null; // Will redirect in useEffect
+  // If logout is loading, auth context will show the loader globally
+  if (logoutLoading) {
+    return null; // Return nothing - LogoutLoader will be shown by App.jsx
   }
 
   return (
     <>
-      {/* Logout Modal - Mobile Responsive */}
+      {/* Logout Modal */}
       {showLogoutModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          width: '100%',
-          height: '100%',
-          backgroundColor: 'rgba(0, 0, 0, 0.5)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 2000,
-          animation: 'fadeIn 0.3s ease-out',
-          padding: '1rem',
-        }}>
+        <div className="logout-modal-overlay">
           <div 
             ref={logoutModalRef}
-            style={{
-              backgroundColor: 'white',
-              borderRadius: '12px',
-              width: '100%',
-              maxWidth: '400px',
-              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.2)',
-              overflow: 'hidden',
-              animation: 'slideUp 0.3s ease-out',
-            }}
+            className="logout-modal"
           >
-            <div style={{
-              padding: '20px',
-              backgroundColor: '#f8f9fa',
-              borderBottom: '1px solid #e9ecef',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '15px',
-            }}>
-              <div style={{
-                width: '50px',
-                height: '50px',
-                borderRadius: '50%',
-                backgroundColor: '#e74c3c',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'white',
-                fontSize: '24px',
-                flexShrink: 0,
-              }}>
-                <i className="fas fa-sign-out-alt"></i>
+            <div className="logout-modal-header">
+              <div className="university-badge">
+                <img 
+                  src="/badge.png" 
+                  alt="University Badge" 
+                  onError={(e) => {
+                    e.target.style.display = 'none';
+                    e.target.parentElement.innerHTML = `
+                      <div class="badge-fallback">
+                        🎓
+                      </div>
+                    `;
+                  }}
+                />
               </div>
-              <div>
-                <h3 style={{
-                  margin: 0,
-                  color: '#2c3e50',
-                  fontSize: '18px',
-                  fontWeight: '600',
-                }}>
-                  Confirm Logout
-                </h3>
-                <p style={{
-                  margin: '5px 0 0 0',
-                  color: '#7f8c8d',
-                  fontSize: '14px',
-                }}>
-                  Are you sure you want to logout?
-                </p>
+              <div className="university-info">
+                <h3>NLE University</h3>
+                <p>Student Portal</p>
               </div>
             </div>
 
-            <div style={{ padding: '20px' }}>
-              <p style={{
-                margin: 0,
-                color: '#666',
-                fontSize: '15px',
-                lineHeight: '1.5',
-              }}>
-                You will be signed out of your student account and redirected to the login page.
-              </p>
+            <div className="logout-modal-body">
+              <div className="logout-warning">
+                <div className="warning-icon">
+                  <i className="fas fa-sign-out-alt"></i>
+                </div>
+                <div className="warning-content">
+                  <h4>Confirm Logout</h4>
+                  <p>Are you sure you want to logout from your student account?</p>
+                </div>
+              </div>
+
+              <div className="user-info-card">
+                <div className="user-info-item">
+                  <i className="fas fa-user"></i>
+                  <span>{studentData?.full_name || user?.name || 'Student'}</span>
+                </div>
+                <div className="user-info-item">
+                  <i className="fas fa-id-card"></i>
+                  <span>{studentData?.student_id || user?.studentId || 'N/A'}</span>
+                </div>
+              </div>
             </div>
 
-            <div style={{
-              padding: '15px 20px',
-              borderTop: '1px solid #e9ecef',
-              display: 'flex',
-              justifyContent: 'flex-end',
-              gap: '10px',
-              flexWrap: 'wrap',
-            }}>
+            <div className="logout-modal-footer">
               <button
                 onClick={cancelLogout}
-                disabled={isLoggingOut}
-                style={{
-                  padding: '10px 20px',
-                  backgroundColor: '#f8f9fa',
-                  color: '#495057',
-                  border: '1px solid #dee2e6',
-                  borderRadius: '6px',
-                  cursor: isLoggingOut ? 'not-allowed' : 'pointer',
-                  fontSize: '14px',
-                  fontWeight: '500',
-                  transition: 'all 0.2s',
-                  flex: '1',
-                  minWidth: '120px',
-                  minHeight: 'auto !important',
-                }}
-                onMouseEnter={(e) => {
-                  if (!isLoggingOut) {
-                    e.currentTarget.style.backgroundColor = '#e9ecef';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!isLoggingOut) {
-                    e.currentTarget.style.backgroundColor = '#f8f9fa';
-                  }
-                }}
+                disabled={logoutLoading}
+                className="logout-cancel-btn"
               >
                 Cancel
               </button>
               <button
                 onClick={confirmLogout}
-                disabled={isLoggingOut}
-                style={{
-                  padding: '10px 20px',
-                  backgroundColor: isLoggingOut ? '#95a5a6' : '#e74c3c',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '6px',
-                  cursor: isLoggingOut ? 'not-allowed' : 'pointer',
-                  fontSize: '14px',
-                  fontWeight: '500',
-                  transition: 'all 0.2s',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '8px',
-                  flex: '1',
-                  minWidth: '120px',
-                  minHeight: 'auto !important',
-                }}
-                onMouseEnter={(e) => {
-                  if (!isLoggingOut) {
-                    e.currentTarget.style.backgroundColor = '#c0392b';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!isLoggingOut) {
-                    e.currentTarget.style.backgroundColor = '#e74c3c';
-                  }
-                }}
+                disabled={logoutLoading}
+                className="logout-confirm-btn"
               >
-                {isLoggingOut ? (
+                {logoutLoading ? (
                   <>
-                    <div style={{
-                      width: '16px',
-                      height: '16px',
-                      border: '2px solid rgba(255,255,255,0.3)',
-                      borderTopColor: 'white',
-                      borderRadius: '50%',
-                      animation: 'spin 1s linear infinite',
-                    }}></div>
+                    <div className="logout-spinner"></div>
                     Logging out...
                   </>
                 ) : (
@@ -809,247 +579,50 @@ const StudentLayout = () => {
         </div>
       )}
 
-      {/* Logout Loading Screen */}
-      {isLoggingOut && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          width: '100%',
-          height: '100%',
-          backgroundColor: 'white',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 3000,
-        }}>
-          <div style={{
-            position: 'relative',
-            width: '200px',
-            height: '200px',
-            marginBottom: '20px',
-          }}>
-            <img 
-              src="/images/badge.png" 
-              alt="Logo" 
-              style={{
-                width: '100%',
-                height: '100%',
-                objectFit: 'contain',
-              }}
-            />
-          </div>
-          
-          <p style={{
-            fontSize: '1.2rem',
-            fontWeight: 'bold',
-            color: '#3498db',
-            marginBottom: '10px',
-          }}>
-            Logging out...
-          </p>
-          
-          <div style={{
-            width: '200px',
-            height: '4px',
-            backgroundColor: '#e9ecef',
-            borderRadius: '2px',
-            overflow: 'hidden',
-            marginTop: '20px',
-          }}>
-            <div 
-              ref={logoutProgressRef}
-              style={{
-                width: `${logoutProgress}%`,
-                height: '100%',
-                backgroundColor: '#3498db',
-                borderRadius: '2px',
-                transition: 'width 0.3s ease',
-              }}
-            ></div>
-          </div>
-        </div>
-      )}
-
-      {/* Main Layout Container - FIXED for dropdown positioning */}
-  <div 
-  ref={layoutContainerRef}
-  className="layout-container"
-  style={{
-    display: 'flex',
-    flexDirection: 'column',
-    minHeight: '100vh',
-    position: 'relative',
-    opacity: isLoggingOut ? '0.5' : '1',
-    pointerEvents: isLoggingOut ? 'none' : 'auto',
-    transition: 'opacity 0.3s ease',
-  }}
->
-        <header 
-          className="layout-header"
-          style={{
-            height: isMobile ? '60px' : '70px',
-            backgroundColor: 'white',
-            boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
-            display: 'flex',
-            alignItems: 'center',
-            padding: isMobile ? '0 1rem' : '0 2rem',
-            position: 'sticky',
-            top: 0,
-            zIndex: 100,
-            borderBottom: '1px solid #e9ecef',
-          }}
-        >
-          <div 
-            className="header-content"
-            style={{
-              width: '100%',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}
-          >
-            <div 
-              className="header-logo"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: isMobile ? '0.75rem' : '1rem',
-              }}
-            >
-              {/* Mobile Menu Toggle */}
+      {/* Main Layout Container */}
+      <div className={`layout-container ${logoutLoading ? 'logging-out' : ''}`}>
+        <header className="layout-header">
+          <div className="header-content">
+            <div className="header-logo">
               {isMobile && (
                 <button
                   className="mobile-menu-toggle"
                   onClick={toggleMobileMenu}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    fontSize: '1.5rem',
-                    color: '#4361ee',
-                    cursor: 'pointer',
-                    padding: '5px',
-                    borderRadius: '4px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    minHeight: 'auto !important',
-                    minWidth: 'auto !important',
-                    width: '40px',
-                    height: '40px',
-                  }}
                 >
                   <i className={mobileMenuOpen ? 'fas fa-times' : 'fas fa-bars'}></i>
                 </button>
               )}
               
-              <div 
-                className="logo"
-                style={{
-                  width: isMobile ? '32px' : '40px',
-                  height: isMobile ? '32px' : '40px',
-                  position: 'relative',
-                }}
-              >
+              <div className="logo">
                 <img 
-                  src="https://cbveousvfihjgtnuvnpo.supabase.co/storage/v1/object/sign/UNIVERSITY%20IMAGES/badge.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV84MjgwZTIyMC1kYTBmLTQ2ZDctYTNmNS05YTc1N2IwZTViYWMiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJVTklWRVJTSVRZIElNQUdFUy9iYWRnZS5wbmciLCJpYXQiOjE3NjU4MjQzNTAsImV4cCI6NDkxOTQyNDM1MH0.5ACcLQ7wUW67uJRoqjFxg4nXjgDC_QEg1R_BBZvdmlM" 
+                  src="/badge.png" 
                   alt="Logo" 
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    objectFit: 'contain',
+                  onError={(e) => {
+                    e.target.style.display = 'none';
+                    e.target.parentElement.innerHTML = `
+                      <div class="logo-fallback-small">
+                        🎓
+                      </div>
+                    `;
                   }}
                 />
-                <span 
-                  style={{
-                    position: 'absolute',
-                    bottom: '-5px',
-                    right: '-5px',
-                    backgroundColor: '#f72585',
-                    color: 'white',
-                    fontSize: '0.6rem',
-                    fontWeight: 'bold',
-                    padding: '2px 6px',
-                    borderRadius: '10px',
-                    display: isMobile ? 'none' : 'block',
-                  }}
-                >
-                  ERP
-                </span>
+                <span className="logo-badge">ERP</span>
               </div>
               <div>
-                <h1 
-                  style={{
-                    fontSize: isMobile ? '1rem' : '1.3rem',
-                    fontWeight: '700',
-                    margin: 0,
-                    background: 'linear-gradient(90deg, #4361ee, #3f37c9)',
-                    WebkitBackgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent',
-                  }}
-                >
-                  NLE UNIVERSITY
-                </h1>
-                <p 
-                  style={{
-                    fontSize: isMobile ? '0.65rem' : '0.75rem',
-                    color: '#6c757d',
-                    margin: 0,
-                  }}
-                >
-                  Student Portal
-                </p>
+                <h1>NLE UNIVERSITY</h1>
+                <p>Student Portal</p>
               </div>
             </div>
 
-            <div style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: isMobile ? '1rem' : '1.5rem',
-              position: 'relative', // Added for dropdown positioning
-            }}>
+            <div className="header-actions">
               <div 
                 ref={bellIconRef}
-                className="notification-icon"
+                className={`notification-icon ${showNotifications ? 'active' : ''}`}
                 onClick={handleNotificationClick}
-                style={{
-                  position: 'relative',
-                  fontSize: isMobile ? '1.1rem' : '1.2rem',
-                  color: '#adb5bd',
-                  cursor: 'pointer',
-                  padding: '8px',
-                  borderRadius: '50%',
-                  transition: 'all 0.2s',
-                  backgroundColor: showNotifications ? 'rgba(0, 0, 0, 0.05)' : 'transparent',
-                  minHeight: 'auto !important',
-                  minWidth: 'auto !important',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: '40px',
-                  height: '40px',
-                }}
               >
                 <i className="fas fa-bell"></i>
                 {unreadCount > 0 && (
-                  <span 
-                    style={{
-                      position: 'absolute',
-                      top: '-5px',
-                      right: '-5px',
-                      backgroundColor: '#f72585',
-                      color: 'white',
-                      borderRadius: '50%',
-                      width: '18px',
-                      height: '18px',
-                      fontSize: '0.7rem',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontWeight: 'bold',
-                    }}
-                  >
+                  <span className="notification-badge">
                     {unreadCount > 9 ? '9+' : unreadCount}
                   </span>
                 )}
@@ -1059,84 +632,24 @@ const StudentLayout = () => {
                 <div 
                   className="user-info"
                   onClick={() => navigate('/settings')}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.8rem',
-                    padding: '0.5rem 0.8rem',
-                    borderRadius: '30px',
-                    cursor: 'pointer',
-                    position: 'relative',
-                    minHeight: 'auto !important',
-                  }}
                 >
                   {isLoadingUser && (
-                    <div style={{
-                      position: 'absolute',
-                      top: '-5px',
-                      right: '-5px',
-                      width: '20px',
-                      height: '20px',
-                      borderRadius: '50%',
-                      backgroundColor: '#3498db',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: 'white',
-                      fontSize: '10px',
-                      border: '2px solid white',
-                    }}>
-                      <div style={{
-                        width: '12px',
-                        height: '12px',
-                        border: '2px solid rgba(255,255,255,0.3)',
-                        borderTopColor: 'white',
-                        borderRadius: '50%',
-                        animation: 'spin 1s linear infinite',
-                      }}></div>
+                    <div className="user-loading-indicator">
+                      <div className="user-loading-spinner"></div>
                     </div>
                   )}
                   <img 
                     src={`https://ui-avatars.com/api/?name=${encodeURIComponent(studentData?.full_name || user?.name || 'Student')}&background=3498db&color=fff&size=128`} 
                     alt="User"
-                    style={{
-                      width: '36px',
-                      height: '36px',
-                      borderRadius: '50%',
-                      objectFit: 'cover',
-                      border: '2px solid #e9ecef',
-                    }}
                   />
                   <div>
-                    <div 
-                      style={{
-                        fontSize: '0.85rem',
-                        fontWeight: '600',
-                        color: '#212529',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                      }}
-                    >
+                    <div className="user-name">
                       {studentData?.full_name || user?.name || 'Loading...'}
                       {isLoadingUser && (
-                        <div style={{
-                          width: '12px',
-                          height: '12px',
-                          border: '2px solid #e9ecef',
-                          borderTopColor: '#3498db',
-                          borderRadius: '50%',
-                          animation: 'spin 1s linear infinite',
-                        }}></div>
+                        <div className="name-loading-spinner"></div>
                       )}
                     </div>
-                    <div 
-                      style={{
-                        fontSize: '0.7rem',
-                        color: '#adb5bd',
-                        textTransform: 'uppercase',
-                      }}
-                    >
+                    <div className="user-role">
                       Student
                     </div>
                   </div>
@@ -1146,65 +659,22 @@ const StudentLayout = () => {
           </div>
         </header>
 
-        {/* Notifications Dropdown - FIXED POSITIONING */}
+        {/* Notifications Dropdown */}
         {showNotifications && (
           <div 
             ref={notificationRef}
             className="notification-dropdown"
-            style={{
-              position: 'fixed', // Changed from absolute to fixed
-             top: isMobile ? '60px' : '70px', // FIXED: Changed 'topa' to 'top'
-              right: isMobile ? '1rem' : '2rem',
-              width: isMobile ? 'calc(100% - 2rem)' : '350px',
-              maxWidth: '350px',
-              backgroundColor: 'white',
-              borderRadius: '8px',
-              boxShadow: '0 10px 30px rgba(0,0,0,0.15)',
-              zIndex: 9999, // Very high z-index to ensure it's on top
-              border: '1px solid #e9ecef',
-              overflow: 'hidden',
-              maxHeight: isMobile ? '60vh' : '400px',
-              animation: 'slideDown 0.2s ease-out',
-            }}
           >
-            <div style={{
-              padding: '15px',
-              borderBottom: '1px solid #eee',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              backgroundColor: '#f8f9fa',
-            }}>
+            <div className="notification-header">
               <div>
-                <h4 style={{ 
-                  margin: 0, 
-                  fontSize: isMobile ? '15px' : '16px', 
-                  color: '#212529' 
-                }}>
-                  Notifications
-                </h4>
-                <p style={{ 
-                  margin: '5px 0 0 0', 
-                  fontSize: isMobile ? '11px' : '12px', 
-                  color: '#6c757d' 
-                }}>
-                  {unreadCount} unread {unreadCount === 1 ? 'message' : 'messages'}
-                </p>
+                <h4>Notifications</h4>
+                <p>{unreadCount} unread {unreadCount === 1 ? 'message' : 'messages'}</p>
               </div>
-              <div style={{ display: 'flex', gap: '10px' }}>
+              <div className="notification-actions">
                 {unreadCount > 0 && (
                   <button
                     onClick={markAllNotificationsAsRead}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: '#3498db',
-                      cursor: 'pointer',
-                      fontSize: isMobile ? '11px' : '12px',
-                      padding: '4px 8px',
-                      borderRadius: '4px',
-                      minHeight: 'auto !important',
-                    }}
+                    className="notification-action-btn mark-read"
                   >
                     Mark all as read
                   </button>
@@ -1212,16 +682,7 @@ const StudentLayout = () => {
                 {notifications.length > 0 && (
                   <button
                     onClick={deleteAllNotifications}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: '#e74c3c',
-                      cursor: 'pointer',
-                      fontSize: isMobile ? '11px' : '12px',
-                      padding: '4px 8px',
-                      borderRadius: '4px',
-                      minHeight: 'auto !important',
-                    }}
+                    className="notification-action-btn clear-all"
                   >
                     Clear all
                   </button>
@@ -1229,164 +690,50 @@ const StudentLayout = () => {
               </div>
             </div>
 
-            <div style={{ 
-              maxHeight: isMobile ? 'calc(60vh - 80px)' : '320px', 
-              overflowY: 'auto',
-              overscrollBehavior: 'contain', // Prevent scroll chaining
-            }}>
+            <div className="notification-list">
               {isLoadingNotifications ? (
-                <div style={{
-                  padding: '30px 20px',
-                  textAlign: 'center',
-                  color: '#6c757d',
-                }}>
-                  <div style={{
-                    width: '30px',
-                    height: '30px',
-                    border: '3px solid #f3f3f3',
-                    borderTopColor: '#3498db',
-                    borderRadius: '50%',
-                    animation: 'spin 1s linear infinite',
-                    margin: '0 auto 15px auto',
-                  }}></div>
-                  <p style={{ margin: 0 }}>Loading notifications...</p>
+                <div className="notification-loading">
+                  <div className="notification-spinner"></div>
+                  <p>Loading notifications...</p>
                 </div>
               ) : notifications.length === 0 ? (
-                <div style={{
-                  padding: '30px 20px',
-                  textAlign: 'center',
-                  color: '#6c757d',
-                }}>
-                  <i className="fas fa-bell-slash" style={{ 
-                    fontSize: isMobile ? '1.5rem' : '2rem', 
-                    marginBottom: '10px', 
-                    opacity: 0.5 
-                  }}></i>
-                  <p style={{ margin: 0 }}>No notifications yet</p>
-                  <p style={{ 
-                    margin: '5px 0 0 0', 
-                    fontSize: '12px',
-                    opacity: 0.7
-                  }}>
-                    New notifications will appear here
-                  </p>
+                <div className="notification-empty">
+                  <i className="fas fa-bell-slash"></i>
+                  <p>No notifications yet</p>
+                  <p className="empty-subtext">New notifications will appear here</p>
                 </div>
               ) : (
                 notifications.map((notification) => (
                   <div
                     key={notification.id}
+                    className={`notification-item ${notification.read ? '' : 'unread'}`}
                     onClick={() => handleNotificationItemClick(notification.id)}
-                    style={{
-                      padding: isMobile ? '12px' : '15px',
-                      display: 'flex',
-                      borderBottom: '1px solid #f5f5f5',
-                      backgroundColor: notification.read ? 'white' : '#f8f9fa',
-                      cursor: 'pointer',
-                      position: 'relative',
-                      transition: 'background-color 0.2s',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = notification.read ? '#f8f9fa' : '#edf2f7';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = notification.read ? 'white' : '#f8f9fa';
-                    }}
                   >
-                    <div style={{
-                      width: isMobile ? '32px' : '40px',
-                      height: isMobile ? '32px' : '40px',
-                      borderRadius: '50%',
-                      backgroundColor: getNotificationColor(notification.type) + '20',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      marginRight: isMobile ? '10px' : '15px',
-                      flexShrink: 0,
-                    }}>
+                    <div 
+                      className="notification-icon-wrapper"
+                      style={{ backgroundColor: `${getNotificationColor(notification.type)}20` }}
+                    >
                       <i 
                         className={getNotificationIcon(notification.type)} 
-                        style={{ 
-                          color: getNotificationColor(notification.type), 
-                          fontSize: isMobile ? '16px' : '18px' 
-                        }}
+                        style={{ color: getNotificationColor(notification.type) }}
                       ></i>
                     </div>
-                    <div style={{ flex: 1, minWidth: 0 }}> {/* Added minWidth: 0 for text truncation */}
-                      <div style={{ 
-                        display: 'flex', 
-                        justifyContent: 'space-between', 
-                        alignItems: 'flex-start',
-                        gap: '8px',
-                      }}>
-                        <p style={{ 
-                          margin: '0 0 5px 0', 
-                          fontSize: isMobile ? '13px' : '14px', 
-                          fontWeight: notification.read ? '400' : '600',
-                          color: notification.read ? '#6c757d' : '#212529',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}>
-                          {notification.title}
-                        </p>
+                    <div className="notification-content">
+                      <div className="notification-header-row">
+                        <p className="notification-title">{notification.title}</p>
                         {!notification.read && (
-                          <span style={{
-                            width: '8px',
-                            height: '8px',
-                            borderRadius: '50%',
-                            backgroundColor: '#f72585',
-                            flexShrink: 0,
-                            marginTop: '5px',
-                          }}></span>
+                          <span className="unread-indicator"></span>
                         )}
                       </div>
-                      <p style={{ 
-                        margin: '0 0 5px 0', 
-                        fontSize: isMobile ? '12px' : '13px', 
-                        color: '#6c757d',
-                        lineHeight: '1.4',
-                        overflow: 'hidden',
-                        display: '-webkit-box',
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: 'vertical',
-                      }}>
-                        {notification.message}
-                      </p>
-                      <small style={{ 
-                        color: '#95a5a6', 
-                        fontSize: isMobile ? '10px' : '11px' 
-                      }}>
-                        {notification.time}
-                      </small>
+                      <p className="notification-message">{notification.message}</p>
+                      <small className="notification-time">{notification.time}</small>
                     </div>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         deleteNotification(notification.id);
                       }}
-                      style={{
-                        position: 'absolute',
-                        top: '5px',
-                        right: '5px',
-                        background: 'none',
-                        border: 'none',
-                        color: '#adb5bd',
-                        cursor: 'pointer',
-                        fontSize: '12px',
-                        padding: '5px',
-                        minHeight: 'auto !important',
-                        minWidth: 'auto !important',
-                        borderRadius: '4px',
-                        transition: 'all 0.2s',
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.backgroundColor = '#f8f9fa';
-                        e.currentTarget.style.color = '#e74c3c';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.backgroundColor = 'transparent';
-                        e.currentTarget.style.color = '#adb5bd';
-                      }}
+                      className="notification-delete-btn"
                     >
                       <i className="fas fa-times"></i>
                     </button>
@@ -1396,35 +743,13 @@ const StudentLayout = () => {
             </div>
 
             {notifications.length > 0 && (
-              <div style={{
-                padding: '10px 15px',
-                borderTop: '1px solid #eee',
-                textAlign: 'center',
-                backgroundColor: '#f8f9fa',
-              }}>
+              <div className="notification-footer">
                 <button
                   onClick={() => {
                     setShowNotifications(false);
                     navigate('/notifications');
                   }}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#4361ee',
-                    cursor: 'pointer',
-                    fontSize: isMobile ? '11px' : '12px',
-                    fontWeight: '500',
-                    padding: '5px 10px',
-                    minHeight: 'auto !important',
-                    borderRadius: '4px',
-                    transition: 'all 0.2s',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = '#edf2f7';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                  }}
+                  className="view-all-btn"
                 >
                   View all notifications
                 </button>
@@ -1433,177 +758,47 @@ const StudentLayout = () => {
           </div>
         )}
 
-        <div 
-          className="main-content"
-          style={{
-            display: 'flex',
-            flex: 1,
-            position: 'relative', // Ensure proper stacking context
-          }}
-        >
+        <div className="main-content">
           {/* Desktop Sidebar */}
           {!isMobile && (
-            <aside 
-              className="sidebar"
-              style={{
-                width: sidebarCollapsed ? '70px' : '260px',
-                backgroundColor: 'white',
-                borderRight: '1px solid #e9ecef',
-                padding: '1.5rem 0',
-                paddingRight: '5px',
-                transition: 'all 0.3s',
-                position: 'sticky',
-                topa: isMobile ? '60px' : '70px',
-                height: `calc(100vh - ${isMobile ? '60px' : '70px'})`,
-                 overflowY: 'hidden', 
-                zIndex: 90, // Lower than dropdown
-              }}
-            >
+            <aside className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
               <button 
                 className="sidebar-toggle"
                 onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-                style={{
-                  position: 'absolute',
-                  top: '6px',
-                  right: '22px',
-                  background: 'white',
-                  border: '1px solid #dee2e6',
-                  borderRadius: '50%',
-                  width: '24px',
-                  height: '24px',
-                  cursor: 'pointer',
-                  zIndex: 95,
-                  fontSize: '0.8rem',
-                  color: '#6c757d',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  minHeight: 'auto !important',
-                  minWidth: 'auto !important',
-                  boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-                }}
               >
                 <i className={`fas fa-chevron-${sidebarCollapsed ? 'right' : 'left'}`}></i>
               </button>
 
-              <nav 
-                className="sidebar-nav"
-                style={{
-                  listStyle: 'none',
-                  padding: 0,
-                  margin: 0,
-                }}
-              >
+              <nav className="sidebar-nav">
                 {menuItems.map((item) => (
                   <div 
                     key={item.id}
                     className="menu-item"
-                    style={{
-                      marginBottom: '0.6rem',
-                      marginTop: '0.5rem',
-                    }}
                   >
                     <button
                       onClick={() => handleNavigation(item.path)}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.8rem',
-                        padding: '0.5rem 1.5rem',
-                        color: isActive(item.path) ? '#4361ee' : '#6c757d',
-                        backgroundColor: isActive(item.path) ? 'rgba(67, 97, 238, 0.1)' : 'transparent',
-                        border: 'none',
-                        width: '100%',
-                        textAlign: 'left',
-                        cursor: 'pointer',
-                        fontSize: '0.9rem',
-                        fontWeight: isActive(item.path) ? '600' : '500',
-                        position: 'relative',
-                        justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-                        minHeight: 'auto !important',
-                        borderRadius: '0 30px 30px 0',
-                        transition: 'all 0.2s',
-                        marginRight: '10px',
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!isActive(item.path)) {
-                          e.currentTarget.style.backgroundColor = '#f1f3f5';
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!isActive(item.path)) {
-                          e.currentTarget.style.backgroundColor = 'transparent';
-                        }
-                      }}
+                      className={`nav-button ${isActive(item.path) ? 'active' : ''}`}
+                      style={{ justifyContent: sidebarCollapsed ? 'center' : 'flex-start' }}
                     >
                       {isActive(item.path) && !sidebarCollapsed && (
-                        <div 
-                          style={{
-                            position: 'absolute',
-                            left: 0,
-                            top: 0,
-                            bottom: 0,
-                            width: '3px',
-                            backgroundColor: '#4361ee',
-                            borderRadius: '0 3px 3px 0',
-                          }}
-                        />
+                        <div className="active-indicator" />
                       )}
-                      <i className={item.icon} style={{ 
-                        fontSize: '1rem', 
-                        width: '20px' 
-                      }}></i>
+                      <i className={item.icon}></i>
                       {!sidebarCollapsed && <span>{item.label}</span>}
                       {sidebarCollapsed && isActive(item.path) && (
-                        <div style={{
-                          position: 'absolute',
-                          right: '5px',
-                          width: '6px',
-                          height: '6px',
-                          borderRadius: '50%',
-                          backgroundColor: '#4361ee',
-                        }}></div>
+                        <div className="collapsed-active-indicator"></div>
                       )}
                     </button>
                   </div>
                 ))}
 
-                <div 
-                  className="menu-item"
-                  style={{ marginBottom: '0.25rem' }}
-                >
+                <div className="menu-item">
                   <button
                     onClick={handleLogout}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.8rem',
-                      padding: '0.7rem 1.5rem',
-                      color: '#f72585',
-                      backgroundColor: 'transparent',
-                      border: 'none',
-                      width: '100%',
-                      textAlign: 'left',
-                      cursor: 'pointer',
-                      fontSize: '0.9rem',
-                      fontWeight: '500',
-                      justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-                      minHeight: 'auto !important',
-                      borderRadius: '0 30px 30px 0',
-                      transition: 'all 0.2s',
-                      marginRight: '10px',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = '#f8f9fa';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = 'transparent';
-                    }}
+                    className="logout-button"
+                    style={{ justifyContent: sidebarCollapsed ? 'center' : 'flex-start' }}
                   >
-                    <i className="fas fa-sign-out-alt" style={{ 
-                      fontSize: '1rem', 
-                      width: '20px' 
-                    }}></i>
+                    <i className="fas fa-sign-out-alt"></i>
                     {!sidebarCollapsed && <span>Log Out</span>}
                   </button>
                 </div>
@@ -1614,167 +809,51 @@ const StudentLayout = () => {
           {/* Mobile Menu Overlay */}
           {isMobile && mobileMenuOpen && (
             <>
-              {/* Backdrop */}
               <div 
-                style={{
-                  position: 'fixed',
-                  top: '60px',
-                  left: 0,
-                  width: '100%',
-                  height: 'calc(100vh - 60px)',
-                  backgroundColor: 'rgba(0, 0, 0, 0.5)',
-                  zIndex: 98,
-                  animation: 'fadeIn 0.3s ease-out',
-                }}
+                className="mobile-menu-backdrop"
                 onClick={() => setMobileMenuOpen(false)}
               />
               
-              {/* Mobile Menu Sidebar */}
               <div 
                 ref={mobileMenuRef}
-                style={{
-                  position: 'fixed',
-                  top: '60px',
-                  left: 0,
-                  width: '80%',
-                  maxWidth: '300px',
-                  height: 'calc(100vh - 60px)',
-                  backgroundColor: 'white',
-                  zIndex: 99,
-                  overflowY: 'auto',
-                  animation: 'slideInLeft 0.3s ease-out',
-                  boxShadow: '2px 0 10px rgba(0, 0, 0, 0.1)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                }}
+                className="mobile-menu"
               >
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '1rem',
-                  padding: '1.5rem 1rem',
-                  backgroundColor: '#f8f9fa',
-                  borderBottom: '1px solid #e9ecef',
-                }}>
+                <div className="mobile-user-info">
                   <img 
                     src={`https://ui-avatars.com/api/?name=${encodeURIComponent(studentData?.full_name || user?.name || 'Student')}&background=3498db&color=fff&size=128`} 
                     alt="User"
-                    style={{
-                      width: '48px',
-                      height: '48px',
-                      borderRadius: '50%',
-                      objectFit: 'cover',
-                      border: '2px solid #e9ecef',
-                    }}
                   />
                   <div>
-                    <div style={{
-                      fontSize: '1rem',
-                      fontWeight: '600',
-                      color: '#212529',
-                      marginBottom: '4px',
-                    }}>
+                    <div className="mobile-user-name">
                       {studentData?.full_name || user?.name || 'Loading...'}
                     </div>
-                    <div style={{
-                      fontSize: '0.8rem',
-                      color: '#adb5bd',
-                      textTransform: 'uppercase',
-                    }}>
+                    <div className="mobile-user-role">
                       Student
                     </div>
                   </div>
                 </div>
 
-                <nav style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.25rem',
-                  padding: '1rem 0',
-                  flex: 1,
-                }}>
+                <nav className="mobile-nav">
                   {menuItems.map((item) => (
                     <button
                       key={item.id}
                       onClick={() => handleNavigation(item.path)}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '1rem',
-                        padding: '0.9rem 1rem',
-                        color: isActive(item.path) ? '#4361ee' : '#6c757d',
-                        backgroundColor: isActive(item.path) ? 'rgba(67, 97, 238, 0.1)' : 'transparent',
-                        border: 'none',
-                        width: '100%',
-                        textAlign: 'left',
-                        cursor: 'pointer',
-                        fontSize: '0.9rem',
-                        fontWeight: isActive(item.path) ? '600' : '500',
-                        borderLeft: isActive(item.path) ? '3px solid #4361ee' : '3px solid transparent',
-                        minHeight: 'auto !important',
-                        transition: 'all 0.2s',
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!isActive(item.path)) {
-                          e.currentTarget.style.backgroundColor = '#f1f3f5';
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!isActive(item.path)) {
-                          e.currentTarget.style.backgroundColor = 'transparent';
-                        }
-                      }}
+                      className={`mobile-nav-button ${isActive(item.path) ? 'active' : ''}`}
                     >
-                      <i className={item.icon} style={{ 
-                        fontSize: '1rem', 
-                        width: '24px',
-                        textAlign: 'center',
-                      }}></i>
+                      <i className={item.icon}></i>
                       <span>{item.label}</span>
                       {isActive(item.path) && (
-                        <i className="fas fa-circle" style={{
-                          fontSize: '8px',
-                          color: '#4361ee',
-                          marginLeft: 'auto',
-                          marginRight: '10px',
-                        }}></i>
+                        <i className="fas fa-circle active-dot"></i>
                       )}
                     </button>
                   ))}
 
-                  <div style={{ marginTop: 'auto', paddingTop: '1rem', borderTop: '1px solid #eee' }}>
+                  <div className="mobile-logout-section">
                     <button
                       onClick={handleLogout}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '1rem',
-                        padding: '0.9rem 1rem',
-                        color: '#f72585',
-                        backgroundColor: 'transparent',
-                        border: 'none',
-                        width: '100%',
-                        textAlign: 'left',
-                        cursor: 'pointer',
-                        fontSize: '0.9rem',
-                        fontWeight: '600',
-                        marginTop: '0.5rem',
-                        borderLeft: '3px solid transparent',
-                        minHeight: 'auto !important',
-                        transition: 'all 0.2s',
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.backgroundColor = '#f8f9fa';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.backgroundColor = 'transparent';
-                      }}
+                      className="mobile-logout-button"
                     >
-                      <i className="fas fa-sign-out-alt" style={{ 
-                        fontSize: '1rem', 
-                        width: '24px',
-                        textAlign: 'center',
-                      }}></i>
+                      <i className="fas fa-sign-out-alt"></i>
                       <span>Log Out</span>
                     </button>
                   </div>
@@ -1784,254 +863,1275 @@ const StudentLayout = () => {
           )}
 
           {/* Main Content Area */}
-          <main 
-            className="content-area"
-            style={{
-              flex: 1,
-              padding: isMobile ? '1rem' : '2rem',
-              backgroundColor: '#f5f7fb',
-              overflowY: 'auto',
-             height: `calc(100vh - ${isMobile ? '60px' : '70px'})`, // Use height instead of minHeight
-              position: 'relative',
-              zIndex: 1, // Ensure content stays behind dropdown
-            }}
-          >
+          <main className="content-area">
             <Outlet />
           </main>
         </div>
-
-        <style>{`
-          * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-          }
-          
-          body {
-            font-family: 'Inter', sans-serif;
-            overflow-x: hidden;
-          }
-          
-          button {
-            font-family: inherit;
-            transition: all 0.2s;
-            outline: none;
-          }
-          
-          button:hover {
-            opacity: 0.9;
-          }
-          
-          button:focus {
-            outline: 2px solid #4361ee;
-            outline-offset: 2px;
-          }
-          
-          .menu-item button:hover {
-            background-color: #f1f3f5 !important;
-          }
-          
-          @keyframes fadeIn {
-            from {
-              opacity: 0;
-            }
-            to {
-              opacity: 1;
-            }
-          }
-          
-          @keyframes slideUp {
-            from {
-              opacity: 0;
-              transform: translateY(20px);
-            }
-            to {
-              opacity: 1;
-              transform: translateY(0);
-            }
-          }
-          
-          @keyframes slideInLeft {
-            from {
-              opacity: 0;
-              transform: translateX(-100%);
-            }
-            to {
-              opacity: 1;
-              transform: translateX(0);
-            }
-          }
-          
-          @keyframes slideDown {
-            from {
-              opacity: 0;
-              transform: translateY(-10px);
-            }
-            to {
-              opacity: 1;
-              transform: translateY(0);
-            }
-          }
-          
-          @keyframes spin {
-            0% {
-              transform: rotate(0deg);
-            }
-            100% {
-              transform: rotate(360deg);
-            }
-          }
-          
-          /* PROTECTED ELEMENTS - Override Chatbot CSS */
-          .sidebar-toggle,
-          .mobile-menu-toggle,
-          .notification-icon,
-          .menu-item button,
-          .notification-dropdown button,
-          .logout-modal button {
-            min-height: auto !important;
-            min-width: auto !important;
-          }
-          
-          /* Fix dropdown positioning */
-          .notification-dropdown {
-            position: fixed !important;
-            z-index: 9999 !important;
-          }
-          
-          .layout-container {
-            overflow: visible !important;
-            position: relative !important;
-          }
-          
-          /* Desktop */
-          @media (min-width: 1024px) {
-            .mobile-menu-toggle {
-              display: none !important;
-            }
-            
-            .notification-dropdown {
-              right: 2rem !important;
-              top: 80px !important;
-            }
-          }
-          
-          /* Tablet */
-          @media (max-width: 1024px) and (min-width: 768px) {
-            .sidebar {
-              width: 70px !important;
-            }
-            
-            .sidebar-toggle {
-              display: block !important;
-            }
-            
-            .notification-dropdown {
-              width: 300px !important;
-              right: 1.5rem !important;
-              top: 80px !important;
-            }
-            
-            .header-logo h1 {
-              font-size: 1.1rem !important;
-            }
-            
-            .user-info div:first-child {
-              font-size: 0.8rem !important;
-            }
-          }
-          
-          /* Mobile */
-          @media (max-width: 767px) {
-            .notification-dropdown {
-              width: calc(100% - 2rem) !important;
-              right: 1rem !important;
-              top: 70px !important;
-              max-height: 60vh !important;
-            }
-            
-            .header-logo h1 {
-              font-size: 1rem !important;
-            }
-            
-            .header-logo p {
-              display: none !important;
-            }
-            
-            .user-info {
-              padding: 0.3rem !important;
-            }
-            
-            .content-area {
-              padding: 1rem !important;
-            }
-            
-            /* Mobile menu takes half of the screen */
-            .mobile-menu {
-              width: 80% !important;
-              max-width: 300px !important;
-            }
-          }
-          
-          /* Small Mobile */
-          @media (max-width: 480px) {
-            .layout-header {
-              padding: 0 0.75rem !important;
-            }
-            
-            .header-logo {
-              gap: 0.5rem !important;
-            }
-            
-            .header-logo h1 {
-              font-size: 0.9rem !important;
-            }
-            
-            .notification-dropdown {
-              width: calc(100% - 1.5rem) !important;
-              right: 0.75rem !important;
-              top: 65px !important;
-            }
-            
-            /* Mobile menu even smaller on very small screens */
-            .mobile-menu {
-              width: 85% !important;
-              max-width: 280px !important;
-            }
-          }
-          
-          /* Medium Mobile */
-          @media (max-width: 767px) and (min-width: 481px) {
-            .mobile-menu {
-              width: 75% !important;
-              max-width: 320px !important;
-            }
-          }
-          
-          /* Prevent scrolling when mobile menu is open */
-          body.mobile-menu-open {
-            overflow: hidden;
-          }
-          
-          /* Custom scrollbar for dropdown */
-          .notification-dropdown div::-webkit-scrollbar {
-            width: 6px;
-          }
-          
-          .notification-dropdown div::-webkit-scrollbar-track {
-            background: #f1f1f1;
-          }
-          
-          .notification-dropdown div::-webkit-scrollbar-thumb {
-            background: #c1c1c1;
-            border-radius: 3px;
-          }
-          
-          .notification-dropdown div::-webkit-scrollbar-thumb:hover {
-            background: #a8a8a8;
-          }
-        `}</style>
       </div>
+
+      {/* CSS Styles */}
+      <style jsx="true">{`
+        /* Global Styles */
+        * {
+          margin: 0;
+          padding: 0;
+          box-sizing: border-box;
+        }
+        
+        body {
+          font-family: 'Inter', sans-serif;
+          overflow-x: hidden;
+          background-color: #f5f7fb;
+        }
+        
+        button {
+          font-family: inherit;
+          transition: all 0.2s;
+          outline: none;
+          cursor: pointer;
+        }
+        
+        img {
+          max-width: 100%;
+          height: auto;
+        }
+        
+        /* Animations */
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+          }
+          to {
+            opacity: 1;
+          }
+        }
+        
+        @keyframes slideUp {
+          from {
+            opacity: 0;
+            transform: translateY(20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        
+        @keyframes slideInLeft {
+          from {
+            opacity: 0;
+            transform: translateX(-100%);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(0);
+          }
+        }
+        
+        @keyframes slideDown {
+          from {
+            opacity: 0;
+            transform: translateY(-10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        
+        @keyframes spin {
+          0% {
+            transform: rotate(0deg);
+          }
+          100% {
+            transform: rotate(360deg);
+          }
+        }
+        
+        /* Logout Modal */
+        .logout-modal-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background-color: rgba(0, 0, 0, 0.5);
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          z-index: 2000;
+          animation: fadeIn 0.3s ease-out;
+          padding: 1rem;
+        }
+        
+        .logout-modal {
+          background-color: white;
+          border-radius: 12px;
+          width: 100%;
+          max-width: 400px;
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+          overflow: hidden;
+          animation: slideUp 0.3s ease-out;
+        }
+        
+        .logout-modal-header {
+          padding: 25px 20px;
+          background-color: #f8f9fa;
+          border-bottom: 1px solid #e9ecef;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 15px;
+        }
+        
+        .university-badge {
+          width: 80px;
+          height: 80px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          overflow: hidden;
+          border: 3px solid #4361ee;
+          padding: 5px;
+          background-color: white;
+        }
+        
+        .university-badge img {
+          width: 100%;
+          height: 100%;
+          object-fit: contain;
+          border-radius: 50%;
+        }
+        
+        .badge-fallback {
+          width: 100%;
+          height: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: linear-gradient(135deg, #4361ee, #3f37c9);
+          color: white;
+          font-size: 32px;
+          border-radius: 50%;
+        }
+        
+        .university-info {
+          text-align: center;
+        }
+        
+        .university-info h3 {
+          margin: 0;
+          color: #2c3e50;
+          font-size: 18px;
+          font-weight: 600;
+        }
+        
+        .university-info p {
+          margin: 5px 0 0 0;
+          color: #7f8c8d;
+          font-size: 14px;
+          font-weight: 500;
+        }
+        
+        .logout-modal-body {
+          padding: 25px 20px;
+        }
+        
+        .logout-warning {
+          display: flex;
+          align-items: center;
+          gap: 15px;
+          margin-bottom: 15px;
+        }
+        
+        .warning-icon {
+          width: 44px;
+          height: 44px;
+          border-radius: 50%;
+          background-color: #e74c3c20;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #e74c3c;
+          font-size: 20px;
+          flex-shrink: 0;
+        }
+        
+        .warning-content h4 {
+          margin: 0;
+          color: #2c3e50;
+          font-size: 16px;
+          font-weight: 600;
+        }
+        
+        .warning-content p {
+          margin: 5px 0 0 0;
+          color: #666;
+          font-size: 14px;
+          line-height: 1.4;
+        }
+        
+        .user-info-card {
+          background-color: #f8f9fa;
+          padding: 15px;
+          border-radius: 8px;
+          margin-top: 20px;
+          border: 1px solid #e9ecef;
+        }
+        
+        .user-info-item {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin-bottom: 8px;
+        }
+        
+        .user-info-item:last-child {
+          margin-bottom: 0;
+        }
+        
+        .user-info-item i {
+          color: #4361ee;
+          font-size: 14px;
+        }
+        
+        .user-info-item span {
+          font-size: 14px;
+          color: #2c3e50;
+        }
+        
+        .user-info-item:last-child span {
+          color: #7f8c8d;
+        }
+        
+        .logout-modal-footer {
+          padding: 15px 20px;
+          border-top: 1px solid #e9ecef;
+          display: flex;
+          justify-content: flex-end;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+        
+        .logout-cancel-btn {
+          padding: 12px 24px;
+          background-color: #f8f9fa;
+          color: #495057;
+          border: 1px solid #dee2e6;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 14px;
+          font-weight: 500;
+          transition: all 0.2s;
+          flex: 1;
+          min-width: 120px;
+        }
+        
+        .logout-cancel-btn:hover:not(:disabled) {
+          background-color: #e9ecef;
+        }
+        
+        .logout-cancel-btn:disabled {
+          cursor: not-allowed;
+          opacity: 0.7;
+        }
+        
+        .logout-confirm-btn {
+          padding: 12px 24px;
+          background-color: #e74c3c;
+          color: white;
+          border: none;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 14px;
+          font-weight: 500;
+          transition: all 0.2s;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          flex: 1;
+          min-width: 120px;
+        }
+        
+        .logout-confirm-btn:hover:not(:disabled) {
+          background-color: #c0392b;
+        }
+        
+        .logout-confirm-btn:disabled {
+          background-color: #95a5a6;
+          cursor: not-allowed;
+        }
+        
+        .logout-spinner {
+          width: 16px;
+          height: 16px;
+          border: 2px solid rgba(255,255,255,0.3);
+          border-top-color: white;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+        }
+        
+        /* Layout Container */
+        .layout-container {
+          display: flex;
+          flex-direction: column;
+          min-height: 100vh;
+          position: relative;
+          opacity: 1;
+          transition: opacity 0.3s ease;
+        }
+        
+        .layout-container.logging-out {
+          opacity: 0.5;
+          pointer-events: none;
+        }
+        
+        /* Header */
+        .layout-header {
+          height: 70px;
+          background-color: white;
+          box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+          display: flex;
+          align-items: center;
+          padding: 0 2rem;
+          position: sticky;
+          top: 0;
+          z-index: 100;
+          border-bottom: 1px solid #e9ecef;
+        }
+        
+        @media (max-width: 1024px) {
+          .layout-header {
+            height: 60px;
+            padding: 0 1rem;
+          }
+        }
+        
+        .header-content {
+          width: 100%;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+        
+        .header-logo {
+          display: flex;
+          align-items: center;
+          gap: 1rem;
+        }
+        
+        @media (max-width: 1024px) {
+          .header-logo {
+            gap: 0.75rem;
+          }
+        }
+        
+        .mobile-menu-toggle {
+          background: none;
+          border: none;
+          font-size: 1.5rem;
+          color: #4361ee;
+          cursor: pointer;
+          padding: 5px;
+          border-radius: 4px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 40px;
+          height: 40px;
+        }
+        
+        .mobile-menu-toggle:hover {
+          background-color: #f1f3f5;
+        }
+        
+        .logo {
+          width: 40px;
+          height: 40px;
+          position: relative;
+        }
+        
+        @media (max-width: 1024px) {
+          .logo {
+            width: 32px;
+            height: 32px;
+          }
+        }
+        
+        .logo img {
+          width: 100%;
+          height: 100%;
+          object-fit: contain;
+        }
+        
+        .logo-fallback-small {
+          width: 100%;
+          height: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: linear-gradient(135deg, #4361ee, #3f37c9);
+          color: white;
+          font-size: 20px;
+          border-radius: 50%;
+        }
+        
+        .logo-badge {
+          position: absolute;
+          bottom: -5px;
+          right: -5px;
+          background-color: #f72585;
+          color: white;
+          font-size: 0.6rem;
+          font-weight: bold;
+          padding: 2px 6px;
+          border-radius: 10px;
+        }
+        
+        @media (max-width: 1024px) {
+          .logo-badge {
+            display: none;
+          }
+        }
+        
+        .header-logo h1 {
+          font-size: 1.3rem;
+          font-weight: 700;
+          margin: 0;
+          background: linear-gradient(90deg, #4361ee, #3f37c9);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+        }
+        
+        @media (max-width: 1024px) {
+          .header-logo h1 {
+            font-size: 1rem;
+          }
+        }
+        
+        @media (max-width: 480px) {
+          .header-logo h1 {
+            font-size: 0.9rem;
+          }
+        }
+        
+        .header-logo p {
+          font-size: 0.75rem;
+          color: #6c757d;
+          margin: 0;
+        }
+        
+        @media (max-width: 1024px) {
+          .header-logo p {
+            display: none;
+          }
+        }
+        
+        .header-actions {
+          display: flex;
+          align-items: center;
+          gap: 1.5rem;
+          position: relative;
+        }
+        
+        @media (max-width: 1024px) {
+          .header-actions {
+            gap: 1rem;
+          }
+        }
+        
+        /* Notifications */
+        .notification-icon {
+          position: relative;
+          font-size: 1.2rem;
+          color: #adb5bd;
+          cursor: pointer;
+          padding: 8px;
+          border-radius: 50%;
+          transition: all 0.2s;
+          background-color: transparent;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 40px;
+          height: 40px;
+        }
+        
+        @media (max-width: 1024px) {
+          .notification-icon {
+            font-size: 1.1rem;
+          }
+        }
+        
+        .notification-icon:hover {
+          background-color: rgba(0, 0, 0, 0.05);
+        }
+        
+        .notification-icon.active {
+          background-color: rgba(0, 0, 0, 0.05);
+        }
+        
+        .notification-badge {
+          position: absolute;
+          top: -5px;
+          right: -5px;
+          background-color: #f72585;
+          color: white;
+          border-radius: 50%;
+          width: 18px;
+          height: 18px;
+          font-size: 0.7rem;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-weight: bold;
+        }
+        
+        .notification-dropdown {
+          position: fixed;
+          top: 70px;
+          right: 2rem;
+          width: 350px;
+          max-width: 350px;
+          background-color: white;
+          border-radius: 8px;
+          box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+          z-index: 9999;
+          border: 1px solid #e9ecef;
+          overflow: hidden;
+          max-height: 400px;
+          animation: slideDown 0.2s ease-out;
+        }
+        
+        @media (max-width: 1024px) {
+          .notification-dropdown {
+            top: 60px;
+            right: 1rem;
+            width: calc(100% - 2rem);
+            max-height: 60vh;
+          }
+        }
+        
+        @media (max-width: 767px) {
+          .notification-dropdown {
+            top: 70px;
+            right: 1rem;
+            width: calc(100% - 2rem);
+          }
+        }
+        
+        @media (max-width: 480px) {
+          .notification-dropdown {
+            right: 0.75rem;
+            width: calc(100% - 1.5rem);
+            top: 65px;
+          }
+        }
+        
+        .notification-header {
+          padding: 15px;
+          border-bottom: 1px solid #eee;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          background-color: #f8f9fa;
+        }
+        
+        .notification-header h4 {
+          margin: 0;
+          font-size: 16px;
+          color: #212529;
+        }
+        
+        @media (max-width: 1024px) {
+          .notification-header h4 {
+            font-size: 15px;
+          }
+        }
+        
+        .notification-header p {
+          margin: 5px 0 0 0;
+          font-size: 12px;
+          color: #6c757d;
+        }
+        
+        @media (max-width: 1024px) {
+          .notification-header p {
+            font-size: 11px;
+          }
+        }
+        
+        .notification-actions {
+          display: flex;
+          gap: 10px;
+        }
+        
+        .notification-action-btn {
+          background: none;
+          border: none;
+          cursor: pointer;
+          font-size: 12px;
+          padding: 4px 8px;
+          border-radius: 4px;
+        }
+        
+        @media (max-width: 1024px) {
+          .notification-action-btn {
+            font-size: 11px;
+          }
+        }
+        
+        .notification-action-btn.mark-read {
+          color: #3498db;
+        }
+        
+        .notification-action-btn.clear-all {
+          color: #e74c3c;
+        }
+        
+        .notification-action-btn:hover {
+          background-color: #edf2f7;
+        }
+        
+        .notification-list {
+          max-height: 320px;
+          overflow-y: auto;
+          overscroll-behavior: contain;
+        }
+        
+        @media (max-width: 1024px) {
+          .notification-list {
+            max-height: calc(60vh - 80px);
+          }
+        }
+        
+        .notification-loading {
+          padding: 30px 20px;
+          text-align: center;
+          color: #6c757d;
+        }
+        
+        .notification-spinner {
+          width: 30px;
+          height: 30px;
+          border: 3px solid #f3f3f3;
+          border-top-color: #3498db;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+          margin: 0 auto 15px auto;
+        }
+        
+        .notification-empty {
+          padding: 30px 20px;
+          text-align: center;
+          color: #6c757d;
+        }
+        
+        .notification-empty i {
+          font-size: 2rem;
+          margin-bottom: 10px;
+          opacity: 0.5;
+        }
+        
+        @media (max-width: 1024px) {
+          .notification-empty i {
+            font-size: 1.5rem;
+          }
+        }
+        
+        .notification-empty p {
+          margin: 0;
+        }
+        
+        .empty-subtext {
+          margin: 5px 0 0 0;
+          font-size: 12px;
+          opacity: 0.7;
+        }
+        
+        .notification-item {
+          padding: 15px;
+          display: flex;
+          border-bottom: 1px solid #f5f5f5;
+          background-color: white;
+          cursor: pointer;
+          position: relative;
+          transition: background-color 0.2s;
+        }
+        
+        @media (max-width: 1024px) {
+          .notification-item {
+            padding: 12px;
+          }
+        }
+        
+        .notification-item:hover {
+          background-color: #f8f9fa;
+        }
+        
+        .notification-item.unread {
+          background-color: #f8f9fa;
+        }
+        
+        .notification-item.unread:hover {
+          background-color: #edf2f7;
+        }
+        
+        .notification-icon-wrapper {
+          width: 40px;
+          height: 40px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin-right: 15px;
+          flex-shrink: 0;
+        }
+        
+        @media (max-width: 1024px) {
+          .notification-icon-wrapper {
+            width: 32px;
+            height: 32px;
+            margin-right: 10px;
+          }
+        }
+        
+        .notification-content {
+          flex: 1;
+          min-width: 0;
+        }
+        
+        .notification-header-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 8px;
+        }
+        
+        .notification-title {
+          margin: 0 0 5px 0;
+          font-size: 14px;
+          font-weight: 400;
+          color: #6c757d;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        
+        @media (max-width: 1024px) {
+          .notification-title {
+            font-size: 13px;
+          }
+        }
+        
+        .notification-item.unread .notification-title {
+          font-weight: 600;
+          color: #212529;
+        }
+        
+        .unread-indicator {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background-color: #f72585;
+          flex-shrink: 0;
+          margin-top: 5px;
+        }
+        
+        .notification-message {
+          margin: 0 0 5px 0;
+          font-size: 13px;
+          color: #6c757d;
+          line-height: 1.4;
+          overflow: hidden;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+        }
+        
+        @media (max-width: 1024px) {
+          .notification-message {
+            font-size: 12px;
+          }
+        }
+        
+        .notification-time {
+          color: #95a5a6;
+          font-size: 11px;
+        }
+        
+        @media (max-width: 1024px) {
+          .notification-time {
+            font-size: 10px;
+          }
+        }
+        
+        .notification-delete-btn {
+          position: absolute;
+          top: 5px;
+          right: 5px;
+          background: none;
+          border: none;
+          color: #adb5bd;
+          cursor: pointer;
+          font-size: 12px;
+          padding: 5px;
+          border-radius: 4px;
+          transition: all 0.2s;
+        }
+        
+        .notification-delete-btn:hover {
+          background-color: #f8f9fa;
+          color: #e74c3c;
+        }
+        
+        .notification-footer {
+          padding: 10px 15px;
+          border-top: 1px solid #eee;
+          text-align: center;
+          background-color: #f8f9fa;
+        }
+        
+        .view-all-btn {
+          background: none;
+          border: none;
+          color: #4361ee;
+          cursor: pointer;
+          font-size: 12px;
+          font-weight: 500;
+          padding: 5px 10px;
+          border-radius: 4px;
+          transition: all 0.2s;
+        }
+        
+        @media (max-width: 1024px) {
+          .view-all-btn {
+            font-size: 11px;
+          }
+        }
+        
+        .view-all-btn:hover {
+          background-color: #edf2f7;
+        }
+        
+        /* User Info */
+        .user-info {
+          display: flex;
+          align-items: center;
+          gap: 0.8rem;
+          padding: 0.5rem 0.8rem;
+          border-radius: 30px;
+          cursor: pointer;
+          position: relative;
+        }
+        
+        .user-info:hover {
+          background-color: #f1f3f5;
+        }
+        
+        .user-loading-indicator {
+          position: absolute;
+          top: -5px;
+          right: -5px;
+          width: 20px;
+          height: 20px;
+          border-radius: 50%;
+          background-color: #3498db;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          font-size: 10px;
+          border: 2px solid white;
+        }
+        
+        .user-loading-spinner {
+          width: 12px;
+          height: 12px;
+          border: 2px solid rgba(255,255,255,0.3);
+          border-top-color: white;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+        }
+        
+        .user-info img {
+          width: 36px;
+          height: 36px;
+          border-radius: 50%;
+          object-fit: cover;
+          border: 2px solid #e9ecef;
+        }
+        
+        .user-name {
+          font-size: 0.85rem;
+          font-weight: 600;
+          color: #212529;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        
+        .name-loading-spinner {
+          width: 12px;
+          height: 12px;
+          border: 2px solid #e9ecef;
+          border-top-color: #3498db;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+        }
+        
+        .user-role {
+          font-size: 0.7rem;
+          color: #adb5bd;
+          text-transform: uppercase;
+        }
+        
+        /* Main Content */
+        .main-content {
+          display: flex;
+          flex: 1;
+          position: relative;
+        }
+        
+        /* Sidebar */
+        .sidebar {
+          width: 260px;
+          background-color: white;
+          border-right: 1px solid #e9ecef;
+          padding: 1.5rem 0;
+          padding-right: 5px;
+          transition: all 0.3s;
+          position: sticky;
+          top: 70px;
+          height: calc(100vh - 70px);
+          overflow-y: auto;
+          z-index: 90;
+        }
+        
+        @media (max-width: 1024px) {
+          .sidebar {
+            display: none;
+          }
+        }
+        
+        .sidebar.collapsed {
+          width: 70px;
+        }
+        
+        .sidebar-toggle {
+          position: absolute;
+          top: 6px;
+          right: 22px;
+          background: white;
+          border: 1px solid #dee2e6;
+          border-radius: 50%;
+          width: 24px;
+          height: 24px;
+          cursor: pointer;
+          z-index: 95;
+          font-size: 0.8rem;
+          color: #6c757d;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .sidebar-toggle:hover {
+          background-color: #f8f9fa;
+        }
+        
+        .sidebar-nav {
+          list-style: none;
+          padding: 0;
+          margin: 0;
+        }
+        
+        .menu-item {
+          margin-bottom: 0.6rem;
+          margin-top: 0.5rem;
+        }
+        
+        .nav-button {
+          display: flex;
+          align-items: center;
+          gap: 0.8rem;
+          padding: 0.5rem 1.5rem;
+          color: #6c757d;
+          background-color: transparent;
+          border: none;
+          width: 100%;
+          text-align: left;
+          cursor: pointer;
+          font-size: 0.9rem;
+          font-weight: 500;
+          position: relative;
+          border-radius: 0 30px 30px 0;
+          transition: all 0.2s;
+          margin-right: 10px;
+        }
+        
+        .nav-button:hover {
+          background-color: #f1f3f5;
+        }
+        
+        .nav-button.active {
+          color: #4361ee;
+          background-color: rgba(67, 97, 238, 0.1);
+          font-weight: 600;
+        }
+        
+        .active-indicator {
+          position: absolute;
+          left: 0;
+          top: 0;
+          bottom: 0;
+          width: 3px;
+          background-color: #4361ee;
+          border-radius: 0 3px 3px 0;
+        }
+        
+        .collapsed-active-indicator {
+          position: absolute;
+          right: 5px;
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background-color: #4361ee;
+        }
+        
+        .nav-button i {
+          font-size: 1rem;
+          width: 20px;
+        }
+        
+        .logout-button {
+          display: flex;
+          align-items: center;
+          gap: 0.8rem;
+          padding: 0.7rem 1.5rem;
+          color: #f72585;
+          background-color: transparent;
+          border: none;
+          width: 100%;
+          text-align: left;
+          cursor: pointer;
+          font-size: 0.9rem;
+          font-weight: 500;
+          border-radius: 0 30px 30px 0;
+          transition: all 0.2s;
+          margin-right: 10px;
+        }
+        
+        .logout-button:hover {
+          background-color: #f8f9fa;
+        }
+        
+        /* Mobile Menu */
+        .mobile-menu-backdrop {
+          position: fixed;
+          top: 60px;
+          left: 0;
+          width: 100%;
+          height: calc(100vh - 60px);
+          background-color: rgba(0, 0, 0, 0.5);
+          z-index: 98;
+          animation: fadeIn 0.3s ease-out;
+        }
+        
+        .mobile-menu {
+          position: fixed;
+          top: 60px;
+          left: 0;
+          width: 80%;
+          max-width: 300px;
+          height: calc(100vh - 60px);
+          background-color: white;
+          z-index: 99;
+          overflow-y: auto;
+          animation: slideInLeft 0.3s ease-out;
+          box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+          display: flex;
+          flex-direction: column;
+        }
+        
+        @media (max-width: 767px) and (min-width: 481px) {
+          .mobile-menu {
+            width: 75%;
+            max-width: 320px;
+          }
+        }
+        
+        @media (max-width: 480px) {
+          .mobile-menu {
+            width: 85%;
+            max-width: 280px;
+          }
+        }
+        
+        .mobile-user-info {
+          display: flex;
+          align-items: center;
+          gap: 1rem;
+          padding: 1.5rem 1rem;
+          background-color: #f8f9fa;
+          border-bottom: 1px solid #e9ecef;
+        }
+        
+        .mobile-user-info img {
+          width: 48px;
+          height: 48px;
+          border-radius: 50%;
+          object-fit: cover;
+          border: 2px solid #e9ecef;
+        }
+        
+        .mobile-user-name {
+          font-size: 1rem;
+          font-weight: 600;
+          color: #212529;
+          margin-bottom: 4px;
+        }
+        
+        .mobile-user-role {
+          font-size: 0.8rem;
+          color: #adb5bd;
+          text-transform: uppercase;
+        }
+        
+        .mobile-nav {
+          display: flex;
+          flexDirection: column;
+          gap: 0.25rem;
+          padding: 1rem 0;
+          flex: 1;
+        }
+        
+        .mobile-nav-button {
+          display: flex;
+          align-items: center;
+          gap: 1rem;
+          padding: 0.9rem 1rem;
+          color: #6c757d;
+          background-color: transparent;
+          border: none;
+          width: 100%;
+          text-align: left;
+          cursor: pointer;
+          font-size: 0.9rem;
+          font-weight: 500;
+          border-left: 3px solid transparent;
+          transition: all 0.2s;
+        }
+        
+        .mobile-nav-button:hover {
+          background-color: #f1f3f5;
+        }
+        
+        .mobile-nav-button.active {
+          color: #4361ee;
+          background-color: rgba(67, 97, 238, 0.1);
+          border-left: 3px solid #4361ee;
+          font-weight: 600;
+        }
+        
+        .mobile-nav-button i {
+          font-size: 1rem;
+          width: 24px;
+          text-align: center;
+        }
+        
+        .active-dot {
+          font-size: 8px;
+          color: #4361ee;
+          margin-left: auto;
+          margin-right: 10px;
+        }
+        
+        .mobile-logout-section {
+          margin-top: auto;
+          padding-top: 1rem;
+          border-top: 1px solid #eee;
+        }
+        
+        .mobile-logout-button {
+          display: flex;
+          align-items: center;
+          gap: 1rem;
+          padding: 0.9rem 1rem;
+          color: #f72585;
+          background-color: transparent;
+          border: none;
+          width: 100%;
+          text-align: left;
+          cursor: pointer;
+          font-size: 0.9rem;
+          font-weight: 600;
+          margin-top: 0.5rem;
+          border-left: 3px solid transparent;
+          transition: all 0.2s;
+        }
+        
+        .mobile-logout-button:hover {
+          background-color: #f8f9fa;
+        }
+        
+        /* Content Area */
+        .content-area {
+          flex: 1;
+          padding: 2rem;
+          background-color: #f5f7fb;
+          overflow-y: auto;
+          height: calc(100vh - 70px);
+          position: relative;
+          z-index: 1;
+        }
+        
+        @media (max-width: 1024px) {
+          .content-area {
+            padding: 1rem;
+            height: calc(100vh - 60px);
+          }
+        }
+        
+        /* Scrollbar Styling */
+        .notification-list::-webkit-scrollbar {
+          width: 6px;
+        }
+        
+        .notification-list::-webkit-scrollbar-track {
+          background: #f1f1f1;
+        }
+        
+        .notification-list::-webkit-scrollbar-thumb {
+          background: #c1c1c1;
+          border-radius: 3px;
+        }
+        
+        .notification-list::-webkit-scrollbar-thumb:hover {
+          background: #a8a8a8;
+        }
+        
+        .sidebar::-webkit-scrollbar {
+          width: 4px;
+        }
+        
+        .sidebar::-webkit-scrollbar-track {
+          background: #f1f1f1;
+        }
+        
+        .sidebar::-webkit-scrollbar-thumb {
+          background: #c1c1c1;
+          border-radius: 2px;
+        }
+        
+        /* Body class for mobile menu open */
+        body.mobile-menu-open {
+          overflow: hidden;
+        }
+      `}</style>
     </>
   );
 };

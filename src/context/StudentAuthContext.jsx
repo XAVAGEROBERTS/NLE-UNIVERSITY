@@ -1,5 +1,5 @@
-// src/context/StudentAuthContext.jsx
-import React, { createContext, useContext, useState, useEffect } from 'react';
+// src/context/StudentAuthContext.jsx - UPDATED FOR PERSISTENT SESSIONS
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { supabase } from '../services/supabase';
 import { useNavigate } from 'react-router-dom';
 
@@ -13,176 +13,246 @@ export const StudentAuthProvider = ({ children }) => {
   const [authLoading, setAuthLoading] = useState(false);
   const navigate = useNavigate();
 
-  // Initialize auth and listen for state changes
-  useEffect(() => {
-    const initializeAuth = async () => {
-      console.log('🔍 Initializing student authentication...');
-      try {
-        const { data: { session }, error } = await supabase.auth.getSession();
-        if (error) throw error;
+  // Session timeout (24 hours)
+  const SESSION_DURATION = 24 * 60 * 60 * 1000;
 
-        if (session) {
-          console.log('✅ Active session found for:', session.user.email);
-          setUser({ tempSession: session }); // Placeholder to trigger data load
-        } else {
-          console.log('ℹ️ No active session found');
-          setUser(null);
-        }
-      } catch (err) {
-        console.error('Auth initialization error:', err);
-        setUser(null);
-      } finally {
-        setLoading(false); // Ensure loading ends even on error
-      }
+  // Create user object from database student data
+  const createUserObject = useCallback((student) => {
+    return {
+      id: student.id,
+      studentId: student.student_id,
+      email: student.email,
+      name: student.full_name,
+      phone: student.phone || '',
+      dateOfBirth: student.date_of_birth || '',
+      program: student.program,
+      yearOfStudy: student.year_of_study,
+      semester: student.semester,
+      intake: student.intake || '',
+      academicYear: student.academic_year || '',
+      programCode: student.program_code || '',
+      department: student.department || '',
+      departmentCode: student.department_code || '',
+      status: student.status,
+      createdAt: student.created_at,
+      lastLogin: new Date().toISOString(),
     };
-
-    initializeAuth();
-
-    // Listen for auth state changes (must be synchronous)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log('🔔 Auth state changed:', event);
-
-      if (session) {
-        setUser({ tempSession: session }); // Trigger student data load in separate effect
-      } else {
-        setUser(null);
-        setLoading(false);
-      }
-    });
-
-    return () => subscription.unsubscribe();
   }, []);
 
-  // Separate effect to load student data when session is available
-  useEffect(() => {
-    if (user?.tempSession) {
-      loadStudentData(user.tempSession.user.email);
-    }
-  }, [user?.tempSession]);
+  // Store session in localStorage
+  const storeSession = useCallback((userData) => {
+    const session = {
+      user: userData,
+      expiresAt: new Date(Date.now() + SESSION_DURATION).toISOString(),
+      createdAt: new Date().toISOString()
+    };
+    localStorage.setItem('student_session', JSON.stringify(session));
+  }, [SESSION_DURATION]);
 
-  // Load student data
-  const loadStudentData = async (email) => {
+  // Clear session from localStorage
+  const clearSession = useCallback(() => {
+    localStorage.removeItem('student_session');
+  }, []);
+
+  // Get session from localStorage
+  const getSession = useCallback(() => {
     try {
-      console.log('📋 Loading student data for:', email);
+      const session = localStorage.getItem('student_session');
+      return session ? JSON.parse(session) : null;
+    } catch (error) {
+      console.error('Error parsing session:', error);
+      return null;
+    }
+  }, []);
 
-      const { data: student, error: studentError } = await supabase
+  // Check if session is valid
+  const isSessionValid = useCallback((session) => {
+    if (!session || !session.user) return false;
+    
+    // Check if session has expired
+    if (session.expiresAt && new Date(session.expiresAt) < new Date()) {
+      clearSession();
+      return false;
+    }
+    
+    return true;
+  }, [clearSession]);
+
+  // Restore session from localStorage on page load/refresh
+  const restoreSession = useCallback(async () => {
+    console.log('🔄 Restoring session from localStorage...');
+    const session = getSession();
+    
+    if (!isSessionValid(session)) {
+      console.log('❌ No valid session found in localStorage');
+      setUser(null);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      console.log('✅ Valid session found, verifying with database...');
+      
+      // Verify user still exists in database
+      const { data: student, error } = await supabase
         .from('students')
         .select('*')
-        .eq('email', email)
-        .maybeSingle();
+        .eq('id', session.user.id)
+        .eq('status', 'active')
+        .single();
 
-      if (studentError) {
-        console.error('Error fetching student data:', studentError);
-        await supabase.auth.signOut();
+      if (error || !student) {
+        console.log('❌ Student no longer exists or is inactive');
+        clearSession();
         setUser(null);
+        setLoading(false);
         return;
       }
 
-      if (!student) {
-        console.error('❌ Student record not found for:', email);
-        await supabase.auth.signOut();
-        setUser(null);
-        return;
-      }
-
-      // Create user object
-      const userData = {
-        id: student.id,
-        email: student.email,
-        name: student.full_name,
-        studentId: student.student_id,
-        program: student.program,
-        yearOfStudy: student.year_of_study,
-        semester: student.semester,
-        phone: student.phone || '',
-        status: student.status || 'active',
-        createdAt: student.created_at,
-        lastLogin: new Date().toISOString(),
+      // Update user data with latest from database
+      const updatedUser = {
+        ...session.user,
+        ...createUserObject(student)
       };
-
-      console.log('✅ Student data loaded:', userData);
-      setUser(userData);
-
-      // Update last login time
-      await supabase
-        .from('students')
-        .update({ last_login: new Date().toISOString() })
-        .eq('id', student.id);
+      
+      setUser(updatedUser);
+      storeSession(updatedUser); // Refresh the session
+      console.log('✅ Session restored successfully for:', updatedUser.email);
+      
     } catch (error) {
-      console.error('Error loading student data:', error);
+      console.error('Error restoring session:', error);
+      clearSession();
       setUser(null);
     } finally {
       setLoading(false);
     }
+  }, [getSession, isSessionValid, clearSession, createUserObject, storeSession]);
+
+  // Initialize auth on mount
+  useEffect(() => {
+    console.log('🔍 Initializing student authentication...');
+    restoreSession();
+    
+    // Set up auto-logout on window close/tab close
+    const handleBeforeUnload = () => {
+      // Don't clear session on refresh - only on actual close
+      console.log('Window closing...');
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [restoreSession]);
+
+  // Verify password (handles plain text and bcrypt)
+  const verifyPassword = async (inputPassword, storedHash) => {
+    try {
+      // Check if password is hashed with bcrypt (starts with $2a$, $2b$, or $2y$)
+      if (storedHash && storedHash.match(/^\$2[aby]\$/)) {
+        // For bcrypt, we need to import it dynamically
+        const bcrypt = await import('bcryptjs');
+        return await bcrypt.compare(inputPassword, storedHash);
+      } else {
+        // Password is plain text (legacy) - compare directly
+        return inputPassword === storedHash;
+      }
+    } catch (error) {
+      console.error('Password verification error:', error);
+      return false;
+    }
   };
 
-  // SIGN IN
+  // Hash password with bcrypt
+  const hashPassword = async (password) => {
+    const bcrypt = await import('bcryptjs');
+    const salt = await bcrypt.genSalt(10);
+    return await bcrypt.hash(password, salt);
+  };
+
+  // SIGN IN - Direct authentication against students table
   const signIn = async (email, password) => {
     console.log('🔐 Attempting sign in for:', email);
     setAuthLoading(true);
 
     try {
-      // Try direct authentication first
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email: email.toLowerCase().trim(),
-        password,
-      });
-
-      if (!authError) {
-        console.log('✅ Auth successful, checking student record...');
-        await loadStudentData(email.toLowerCase().trim());
-        return { success: true, message: 'Login successful!' };
-      }
-
-      console.error('Auth failed:', authError.message);
-
-      // Check if student exists
-      const { data: student } = await supabase
+      // Query the students table directly
+      const { data: student, error } = await supabase
         .from('students')
         .select('*')
         .eq('email', email.toLowerCase().trim())
-        .maybeSingle();
+        .eq('status', 'active')
+        .single();
+
+      if (error) {
+        console.error('Database error:', error);
+        return { 
+          success: false, 
+          error: 'Invalid email or password'
+        };
+      }
 
       if (!student) {
-        return { success: false, error: 'Student not found. Please check your email.' };
+        return { success: false, error: 'Invalid email or password' };
       }
 
-      // Create auth user if student exists but no auth record
-      const { error: signUpError } = await supabase.auth.signUp({
-        email: email.toLowerCase().trim(),
-        password,
-        options: {
-          data: {
-            full_name: student.full_name,
-            student_id: student.student_id,
-            role: 'student',
-          },
-          emailRedirectTo: `${window.location.origin}/dashboard`,
-        },
-      });
-
-      if (signUpError) {
-        if (signUpError.message.includes('already registered')) {
-          return { success: false, error: 'Incorrect password. Please try again.' };
-        }
-        return { success: false, error: 'Account setup failed. Please contact support.' };
+      // Check if student has password_hash
+      if (!student.password_hash) {
+        return { 
+          success: false, 
+          error: 'Please contact administrator to set your password',
+          needsPasswordReset: true 
+        };
       }
 
-      // Auto-login after sign up
-      const { error: retryError } = await supabase.auth.signInWithPassword({
-        email: email.toLowerCase().trim(),
-        password,
-      });
-
-      if (retryError) {
-        return { success: false, error: 'Account created. Please try logging in again.' };
+      // Verify password
+      const isValidPassword = await verifyPassword(password, student.password_hash);
+      
+      if (!isValidPassword) {
+        return { success: false, error: 'Invalid email or password' };
       }
 
-      await loadStudentData(email.toLowerCase().trim());
-      return { success: true, message: 'Login successful!' };
+      // If password is plain text (legacy), upgrade it to bcrypt
+      if (student.password_hash && !student.password_hash.match(/^\$2[aby]\$/)) {
+        console.log('🔄 Upgrading plain text password to bcrypt hash');
+        const hashedPassword = await hashPassword(password);
+        
+        await supabase
+          .from('students')
+          .update({ 
+            password_hash: hashedPassword,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', student.id);
+      }
+
+      // Create user object
+      const userData = createUserObject(student);
+      
+      // Store session
+      setUser(userData);
+      storeSession(userData);
+
+      // Update last login time
+      await supabase
+        .from('students')
+        .update({ 
+          last_login: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', student.id);
+
+      console.log('✅ Login successful:', userData.name);
+      return { 
+        success: true, 
+        message: 'Login successful!',
+        user: userData 
+      };
+
     } catch (error) {
       console.error('Unexpected login error:', error);
-      return { success: false, error: 'An unexpected error occurred.' };
+      return { 
+        success: false, 
+        error: error.message || 'An unexpected error occurred' 
+      };
     } finally {
       setAuthLoading(false);
     }
@@ -194,12 +264,10 @@ export const StudentAuthProvider = ({ children }) => {
     setAuthLoading(true);
 
     try {
-      const { error } = await supabase.auth.signOut();
-      if (error) throw error;
-
+      clearSession();
       setUser(null);
       navigate('/login', { replace: true });
-      return { success: true };
+      return { success: true, message: 'Logged out successfully' };
     } catch (error) {
       console.error('Sign out error:', error);
       return { success: false, error: error.message };
@@ -210,77 +278,173 @@ export const StudentAuthProvider = ({ children }) => {
 
   // CHANGE PASSWORD
   const changePassword = async (currentPassword, newPassword, confirmPassword) => {
-    if (!user?.email) throw new Error('Please login first');
+    if (!user?.email) {
+      throw new Error('Please login first');
+    }
 
+    // Validate inputs
     if (!currentPassword || !newPassword || !confirmPassword) {
       throw new Error('All password fields are required');
     }
-    if (newPassword.length < 6) throw new Error('New password must be at least 6 characters');
-    if (newPassword !== confirmPassword) throw new Error('New passwords do not match');
-    if (currentPassword === newPassword) throw new Error('New password must be different');
+
+    if (newPassword !== confirmPassword) {
+      throw new Error('New passwords do not match');
+    }
+
+    if (currentPassword === newPassword) {
+      throw new Error('New password must be different from current password');
+    }
+
+    // Check password strength
+    const minLength = 8;
+    const hasUpperCase = /[A-Z]/.test(newPassword);
+    const hasLowerCase = /[a-z]/.test(newPassword);
+    const hasNumbers = /\d/.test(newPassword);
+    const hasSpecialChar = /[!@#$%^&*(),.?":{}|<>]/.test(newPassword);
+
+    if (newPassword.length < minLength || !hasUpperCase || !hasLowerCase || !hasNumbers || !hasSpecialChar) {
+      throw new Error(
+        'Password must be at least 8 characters long and contain uppercase, lowercase, numbers, and special characters'
+      );
+    }
 
     try {
+      // Get current student data
+      const { data: student, error: fetchError } = await supabase
+        .from('students')
+        .select('password_hash')
+        .eq('id', user.id)
+        .eq('status', 'active')
+        .single();
+
+      if (fetchError || !student) {
+        throw new Error('Student not found or inactive');
+      }
+
       // Verify current password
-      const { error: verifyError } = await supabase.auth.signInWithPassword({
-        email: user.email,
-        password: currentPassword,
-      });
-      if (verifyError) throw new Error('Current password is incorrect');
+      const isCurrentPasswordValid = await verifyPassword(currentPassword, student.password_hash);
+      
+      if (!isCurrentPasswordValid) {
+        throw new Error('Current password is incorrect');
+      }
 
-      // Update auth password
-      const { error: updateError } = await supabase.auth.updateUser({
-        password: newPassword,
-      });
-      if (updateError) throw new Error(`Failed to update password: ${updateError.message}`);
+      // Hash new password
+      const newPasswordHash = await hashPassword(newPassword);
 
-      // Update students table (optional)
-      await supabase
+      // Update password in database
+      const { error: updateError } = await supabase
         .from('students')
         .update({
-          password_hash: newPassword,
+          password_hash: newPasswordHash,
           updated_at: new Date().toISOString(),
         })
-        .eq('email', user.email);
+        .eq('id', user.id);
 
-      return { success: true, message: 'Password changed successfully!' };
+      if (updateError) {
+        throw new Error(`Failed to update password: ${updateError.message}`);
+      }
+
+      return { 
+        success: true, 
+        message: 'Password changed successfully!' 
+      };
     } catch (error) {
       console.error('Password change error:', error);
       throw error;
     }
   };
 
-  // RESET PASSWORD
-  const resetPassword = async (email) => {
+  // RESET PASSWORD REQUEST
+  const requestPasswordReset = async (email) => {
     try {
-      const { data: student } = await supabase
+      const { data: student, error } = await supabase
         .from('students')
-        .select('email')
+        .select('id, email, full_name, student_id')
         .eq('email', email.toLowerCase().trim())
-        .maybeSingle();
+        .eq('status', 'active')
+        .single();
 
-      if (!student) throw new Error('No student found with this email');
+      if (error || !student) {
+        // Don't reveal if email exists or not (security best practice)
+        console.log('Password reset requested for non-existent email:', email);
+        return { 
+          success: true, 
+          message: 'If an account exists with this email, you will receive password reset instructions.' 
+        };
+      }
 
-      const { error } = await supabase.auth.resetPasswordForEmail(email.toLowerCase().trim(), {
-        redirectTo: `${window.location.origin}/reset-password`,
-      });
-      if (error) throw error;
-
-      return { success: true, message: 'Password reset email sent.' };
+      // In a real implementation, you would send an email
+      console.log(`Password reset requested for ${email}`);
+      
+      return { 
+        success: true, 
+        message: 'If an account exists with this email, you will receive password reset instructions.'
+      };
     } catch (error) {
-      console.error('Password reset error:', error);
+      console.error('Password reset request error:', error);
+      return { 
+        success: true, 
+        message: 'If an account exists with this email, you will receive password reset instructions.' 
+      };
+    }
+  };
+
+  // UPDATE PROFILE
+  const updateProfile = async (updates) => {
+    if (!user?.id) {
+      throw new Error('Please login first');
+    }
+
+    try {
+      const { error } = await supabase
+        .from('students')
+        .update({
+          ...updates,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', user.id);
+
+      if (error) {
+        throw new Error(`Failed to update profile: ${error.message}`);
+      }
+
+      // Update local user state
+      const updatedUser = { ...user, ...updates };
+      setUser(updatedUser);
+      storeSession(updatedUser);
+
+      return { 
+        success: true, 
+        message: 'Profile updated successfully!',
+        user: updatedUser 
+      };
+    } catch (error) {
+      console.error('Profile update error:', error);
       throw error;
     }
+  };
+
+  // Check if user is authenticated
+  const checkAuth = () => {
+    return isSessionValid(getSession());
   };
 
   const value = {
     user,
     loading,
     authLoading,
-    isAuthenticated: !!user && !user.tempSession,
+    isAuthenticated: !!user && checkAuth(),
     signIn,
     signOut,
     changePassword,
-    resetPassword,
+    requestPasswordReset,
+    updateProfile,
+    refreshSession: () => {
+      if (user) {
+        storeSession(user);
+      }
+    },
+    getCurrentUser: () => user
   };
 
   return (

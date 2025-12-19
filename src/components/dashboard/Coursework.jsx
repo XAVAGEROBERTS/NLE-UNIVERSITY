@@ -239,89 +239,156 @@ const Coursework = () => {
   };
 
   // =================== ENHANCED FILE DOWNLOAD FUNCTIONS ===================
-  const handleDownloadAssignmentFile = async (assignment, fileUrl = null) => {
-    const url = fileUrl || assignment.main_assignment_file;
-    
-    if (!url) {
-      handleViewAllFiles(assignment);
-      return;
-    }
+ const handleDownloadAssignmentFile = async (assignment, fileUrl = null) => {
+  const url = fileUrl || assignment.main_assignment_file;
+  
+  if (!url) {
+    handleViewAllFiles(assignment);
+    return;
+  }
 
+  try {
+    // Extract filename from URL
+    let fileName = `Assignment_${assignment.title.replace(/[^a-z0-9]/gi, '_')}`;
+    
+    // Try to get actual filename from URL
+    const urlParts = url.split('/');
+    const lastPart = urlParts[urlParts.length - 1];
+    if (lastPart && lastPart.includes('.')) {
+      const actualFileName = lastPart.split('?')[0];
+      fileName = decodeURIComponent(actualFileName); // Decode URL-encoded characters
+    }
+    
+    console.log(`📥 Downloading lecturer file: ${fileName} from ${url}`);
+
+    // FORCE DOWNLOAD instead of opening in new tab
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch file: ${response.status} ${response.statusText}`);
+    }
+    
+    const blob = await response.blob();
+    const downloadUrl = window.URL.createObjectURL(blob);
+    
+    // Create download link
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = fileName; // This forces download instead of opening
+    a.style.display = 'none';
+    
+    document.body.appendChild(a);
+    a.click();
+    
+    // Cleanup
+    setTimeout(() => {
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(downloadUrl);
+    }, 100);
+    
+    console.log('✅ Download started');
+  } catch (error) {
+    console.error('❌ Error downloading assignment file:', error);
+    
+    // Fallback to old method if fetch fails
     try {
-      // Extract filename from URL
-      let fileName = `Assignment_${assignment.title.replace(/[^a-z0-9]/gi, '_')}`;
+      const a = document.createElement('a');
+      a.href = url;
       
-      // Try to get actual filename from URL
+      // Extract filename for download attribute
       const urlParts = url.split('/');
       const lastPart = urlParts[urlParts.length - 1];
       if (lastPart && lastPart.includes('.')) {
-        const actualFileName = lastPart.split('?')[0];
-        fileName = actualFileName;
+        a.download = lastPart.split('?')[0];
+      } else {
+        a.download = `Assignment_${assignment.title.replace(/[^a-z0-9]/gi, '_')}.pdf`;
       }
       
-      console.log(`📥 Downloading lecturer file: ${fileName} from ${url}`);
-
-      // Create download link
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      
+      a.style.display = 'none';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       
-      console.log('✅ Download started');
-    } catch (error) {
-      console.error('❌ Error downloading assignment file:', error);
-      alert('Error downloading assignment file. Please try again.');
+      console.log('✅ Download started (fallback method)');
+    } catch (fallbackError) {
+      console.error('❌ Fallback download failed:', fallbackError);
+      alert('Error downloading assignment file. Please try again or contact support.');
     }
-  };
+  }
+};
 
-  const handleDownloadSubmittedFiles = async (assignment) => {
-    if (!assignment.fileUrls || assignment.fileUrls.length === 0) {
-      alert('No files submitted for this assignment');
-      return;
-    }
+const handleDownloadSubmittedFiles = async (assignment) => {
+  if (!assignment.fileUrls || assignment.fileUrls.length === 0) {
+    alert('No files submitted for this assignment');
+    return;
+  }
 
-    try {
-      const confirmed = window.confirm(
-        `Download ${assignment.fileUrls.length} submitted file(s) for "${assignment.title}"?`
-      );
+  try {
+    const confirmed = window.confirm(
+      `Download ${assignment.fileUrls.length} submitted file(s) for "${assignment.title}"?`
+    );
+    
+    if (!confirmed) return;
+    
+    for (let i = 0; i < assignment.fileUrls.length; i++) {
+      const fileUrl = assignment.fileUrls[i];
+      let fileName = `my_submission_${assignment.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${i + 1}`;
       
-      if (!confirmed) return;
-      
-      for (let i = 0; i < assignment.fileUrls.length; i++) {
-        const fileUrl = assignment.fileUrls[i];
-        let fileName = `my_submission_${assignment.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${i + 1}`;
-        
-        // Try to get actual filename
-        const urlParts = fileUrl.split('/');
-        const lastPart = urlParts[urlParts.length - 1];
-        if (lastPart && lastPart.includes('.')) {
-          fileName = `submission_${lastPart.split('?')[0]}`;
-        }
-        
-        console.log(`📥 Downloading student submission: ${fileName} from ${fileUrl}`);
-        
-        const a = document.createElement('a');
-        a.href = fileUrl;
-        a.download = fileName;
-        a.target = '_blank';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        
-        await new Promise(resolve => setTimeout(resolve, 100));
+      // Try to get actual filename
+      const urlParts = fileUrl.split('/');
+      const lastPart = urlParts[urlParts.length - 1];
+      if (lastPart && lastPart.includes('.')) {
+        fileName = `submission_${lastPart.split('?')[0]}`;
       }
       
-      console.log('✅ All student files downloaded');
-    } catch (error) {
-      console.error('❌ Error downloading submission files:', error);
-      alert('Error downloading submission files. Please try again.');
+      console.log(`📥 Downloading student submission: ${fileName} from ${fileUrl}`);
+      
+      try {
+        // Try fetch method first for proper download
+        const response = await fetch(fileUrl);
+        if (response.ok) {
+          const blob = await response.blob();
+          const downloadUrl = window.URL.createObjectURL(blob);
+          
+          const a = document.createElement('a');
+          a.href = downloadUrl;
+          a.download = fileName;
+          a.style.display = 'none';
+          
+          document.body.appendChild(a);
+          a.click();
+          
+          setTimeout(() => {
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(downloadUrl);
+          }, 100);
+        } else {
+          // Fallback to direct method
+          const a = document.createElement('a');
+          a.href = fileUrl;
+          a.download = fileName;
+          a.style.display = 'none';
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => {
+            document.body.removeChild(a);
+          }, 100);
+        }
+      } catch (error) {
+        console.warn(`⚠️ Could not download file ${i + 1}:`, error);
+        // Continue with next file
+      }
+      
+      // Small delay between downloads
+      await new Promise(resolve => setTimeout(resolve, 300));
     }
-  };
+    
+    console.log('✅ All student files downloaded');
+    alert(`${assignment.fileUrls.length} file(s) downloaded successfully!`);
+  } catch (error) {
+    console.error('❌ Error downloading submission files:', error);
+    alert('Error downloading submission files. Please try again.');
+  }
+};
 
   // =================== MODAL HANDLERS ===================
   const handleSubmitAssignment = (assignment) => {
@@ -445,19 +512,22 @@ const Coursework = () => {
                       <div key={index} className="coursework-file-item">
                         <span className="coursework-file-name">File {index + 1}</span>
                         <button
-                          className="coursework-download-btn"
-                          onClick={() => {
-                            const fileName = `submission_${selectedAssignment.title.replace(/[^a-z0-9]/gi, '_')}_${index + 1}`;
-                            const a = document.createElement('a');
-                            a.href = url;
-                            a.download = fileName;
-                            document.body.appendChild(a);
-                            a.click();
-                            document.body.removeChild(a);
-                          }}
-                        >
-                          Download
-                        </button>
+  className="coursework-download-btn"
+  onClick={() => {
+    const fileName = `submission_${selectedAssignment.title.replace(/[^a-z0-9]/gi, '_')}_${index + 1}`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+    }, 100);
+  }}
+>
+  Download
+</button>
                       </div>
                     ))}
                   </div>
@@ -651,7 +721,7 @@ const Coursework = () => {
                 className="coursework-btn coursework-btn-primary"
                 onClick={() => handleDownloadAssignmentFile(selectedAssignment)}
               >
-                <i className="fas fa-download"></i> Download Assignment PDF
+                <i className="fas fa-download"></i> Download Assignment
               </button>
             )}
             {selectedAssignment.assignment_files && selectedAssignment.assignment_files.length > 1 && (
