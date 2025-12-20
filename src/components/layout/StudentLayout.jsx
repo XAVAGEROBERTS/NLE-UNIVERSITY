@@ -1,4 +1,4 @@
-// src/components/layout/StudentLayout.jsx - COMPLETE FILE
+// src/components/layout/StudentLayout.jsx - CORRECTED VERSION
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useStudentAuth } from '../../context/StudentAuthContext';
@@ -44,11 +44,12 @@ const StudentLayout = () => {
     return location.pathname === path;
   };
 
-  // Check mobile on mount and resize
+  // Check mobile on mount and resize - RESTORED TO 1024px
   useEffect(() => {
     const checkMobile = () => {
-      setIsMobile(window.innerWidth < 1024);
-      if (window.innerWidth < 1024) {
+      const mobile = window.innerWidth < 1024; // RESTORED: Keep 1024px for tablet compatibility
+      setIsMobile(mobile);
+      if (mobile) {
         setSidebarCollapsed(true);
         setMobileMenuOpen(false);
       } else {
@@ -455,14 +456,15 @@ const StudentLayout = () => {
         return 'fas fa-money-bill-wave';
       case 'exam':
       case 'examination':
+        return '#f72585';
       case 'result':
-        return 'fas fa-clipboard-list';
+        return '#9C27B0';
       case 'timetable':
-        return 'fas fa-calendar-alt';
+        return '#00BCD4';
       case 'announcement':
-        return 'fas fa-bullhorn';
+        return '#FF5722';
       default:
-        return 'fas fa-bell';
+        return '#9C27B0';
     }
   };
 
@@ -588,6 +590,7 @@ const StudentLayout = () => {
                 <button
                   className="mobile-menu-toggle"
                   onClick={toggleMobileMenu}
+                  aria-label="Toggle mobile menu"
                 >
                   <i className={mobileMenuOpen ? 'fas fa-times' : 'fas fa-bars'}></i>
                 </button>
@@ -619,6 +622,9 @@ const StudentLayout = () => {
                 ref={bellIconRef}
                 className={`notification-icon ${showNotifications ? 'active' : ''}`}
                 onClick={handleNotificationClick}
+                role="button"
+                tabIndex="0"
+                aria-label={`Notifications ${unreadCount > 0 ? `(${unreadCount} unread)` : ''}`}
               >
                 <i className="fas fa-bell"></i>
                 {unreadCount > 0 && (
@@ -632,6 +638,9 @@ const StudentLayout = () => {
                 <div 
                   className="user-info"
                   onClick={() => navigate('/settings')}
+                  role="button"
+                  tabIndex="0"
+                  aria-label="Go to settings"
                 >
                   {isLoadingUser && (
                     <div className="user-loading-indicator">
@@ -708,6 +717,8 @@ const StudentLayout = () => {
                     key={notification.id}
                     className={`notification-item ${notification.read ? '' : 'unread'}`}
                     onClick={() => handleNotificationItemClick(notification.id)}
+                    role="button"
+                    tabIndex="0"
                   >
                     <div 
                       className="notification-icon-wrapper"
@@ -734,6 +745,7 @@ const StudentLayout = () => {
                         deleteNotification(notification.id);
                       }}
                       className="notification-delete-btn"
+                      aria-label="Delete notification"
                     >
                       <i className="fas fa-times"></i>
                     </button>
@@ -765,6 +777,7 @@ const StudentLayout = () => {
               <button 
                 className="sidebar-toggle"
                 onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
               >
                 <i className={`fas fa-chevron-${sidebarCollapsed ? 'right' : 'left'}`}></i>
               </button>
@@ -779,6 +792,7 @@ const StudentLayout = () => {
                       onClick={() => handleNavigation(item.path)}
                       className={`nav-button ${isActive(item.path) ? 'active' : ''}`}
                       style={{ justifyContent: sidebarCollapsed ? 'center' : 'flex-start' }}
+                      aria-label={item.label}
                     >
                       {isActive(item.path) && !sidebarCollapsed && (
                         <div className="active-indicator" />
@@ -797,6 +811,7 @@ const StudentLayout = () => {
                     onClick={handleLogout}
                     className="logout-button"
                     style={{ justifyContent: sidebarCollapsed ? 'center' : 'flex-start' }}
+                    aria-label="Log out"
                   >
                     <i className="fas fa-sign-out-alt"></i>
                     {!sidebarCollapsed && <span>Log Out</span>}
@@ -812,6 +827,7 @@ const StudentLayout = () => {
               <div 
                 className="mobile-menu-backdrop"
                 onClick={() => setMobileMenuOpen(false)}
+                aria-label="Close menu"
               />
               
               <div 
@@ -833,17 +849,19 @@ const StudentLayout = () => {
                   </div>
                 </div>
 
-                <nav className="mobile-nav">
+                <nav className="mobile-nav" aria-label="Main navigation">
                   {menuItems.map((item) => (
                     <button
                       key={item.id}
                       onClick={() => handleNavigation(item.path)}
                       className={`mobile-nav-button ${isActive(item.path) ? 'active' : ''}`}
+                      aria-label={item.label}
+                      aria-current={isActive(item.path) ? "page" : undefined}
                     >
                       <i className={item.icon}></i>
                       <span>{item.label}</span>
                       {isActive(item.path) && (
-                        <i className="fas fa-circle active-dot"></i>
+                        <i className="fas fa-circle active-dot" aria-hidden="true"></i>
                       )}
                     </button>
                   ))}
@@ -852,6 +870,7 @@ const StudentLayout = () => {
                     <button
                       onClick={handleLogout}
                       className="mobile-logout-button"
+                      aria-label="Log out"
                     >
                       <i className="fas fa-sign-out-alt"></i>
                       <span>Log Out</span>
@@ -869,7 +888,7 @@ const StudentLayout = () => {
         </div>
       </div>
 
-      {/* CSS Styles */}
+      {/* CSS Styles - RESTORED PROPER BREAKPOINTS */}
       <style jsx="true">{`
         /* Global Styles */
         * {
@@ -948,7 +967,7 @@ const StudentLayout = () => {
           }
         }
         
-        /* Logout Modal */
+        /* Logout Modal - RESTORED STYLES */
         .logout-modal-overlay {
           position: fixed;
           top: 0;
@@ -1188,7 +1207,7 @@ const StudentLayout = () => {
           pointer-events: none;
         }
         
-        /* Header */
+        /* Header - RESTORED TO ORIGINAL WITH IMPROVEMENTS */
         .layout-header {
           height: 70px;
           background-color: white;
@@ -1202,10 +1221,19 @@ const StudentLayout = () => {
           border-bottom: 1px solid #e9ecef;
         }
         
+        /* Tablet and Mobile */
         @media (max-width: 1024px) {
           .layout-header {
             height: 60px;
             padding: 0 1rem;
+          }
+        }
+        
+        /* Small mobile devices - ADDED FOR EXTRA SMALL SCREENS */
+        @media (max-width: 480px) {
+          .layout-header {
+            height: 56px;
+            padding: 0 0.75rem;
           }
         }
         
@@ -1228,6 +1256,12 @@ const StudentLayout = () => {
           }
         }
         
+        @media (max-width: 480px) {
+          .header-logo {
+            gap: 0.5rem;
+          }
+        }
+        
         .mobile-menu-toggle {
           background: none;
           border: none;
@@ -1241,6 +1275,23 @@ const StudentLayout = () => {
           justify-content: center;
           width: 40px;
           height: 40px;
+          margin-right: 0.5rem;
+        }
+        
+        @media (max-width: 1024px) {
+          .mobile-menu-toggle {
+            width: 36px;
+            height: 36px;
+            font-size: 1.25rem;
+          }
+        }
+        
+        @media (max-width: 480px) {
+          .mobile-menu-toggle {
+            width: 32px;
+            height: 32px;
+            font-size: 1.1rem;
+          }
         }
         
         .mobile-menu-toggle:hover {
@@ -1254,6 +1305,13 @@ const StudentLayout = () => {
         }
         
         @media (max-width: 1024px) {
+          .logo {
+            width: 36px;
+            height: 36px;
+          }
+        }
+        
+        @media (max-width: 480px) {
           .logo {
             width: 32px;
             height: 32px;
@@ -1278,6 +1336,18 @@ const StudentLayout = () => {
           border-radius: 50%;
         }
         
+        @media (max-width: 1024px) {
+          .logo-fallback-small {
+            font-size: 18px;
+          }
+        }
+        
+        @media (max-width: 480px) {
+          .logo-fallback-small {
+            font-size: 16px;
+          }
+        }
+        
         .logo-badge {
           position: absolute;
           bottom: -5px;
@@ -1291,6 +1361,15 @@ const StudentLayout = () => {
         }
         
         @media (max-width: 1024px) {
+          .logo-badge {
+            font-size: 0.5rem;
+            padding: 1px 4px;
+            bottom: -3px;
+            right: -3px;
+          }
+        }
+        
+        @media (max-width: 480px) {
           .logo-badge {
             display: none;
           }
@@ -1307,7 +1386,7 @@ const StudentLayout = () => {
         
         @media (max-width: 1024px) {
           .header-logo h1 {
-            font-size: 1rem;
+            font-size: 1.1rem;
           }
         }
         
@@ -1324,6 +1403,12 @@ const StudentLayout = () => {
         }
         
         @media (max-width: 1024px) {
+          .header-logo p {
+            font-size: 0.7rem;
+          }
+        }
+        
+        @media (max-width: 480px) {
           .header-logo p {
             display: none;
           }
@@ -1342,7 +1427,7 @@ const StudentLayout = () => {
           }
         }
         
-        /* Notifications */
+        /* Notifications - RESTORED */
         .notification-icon {
           position: relative;
           font-size: 1.2rem;
@@ -1389,6 +1474,14 @@ const StudentLayout = () => {
           font-weight: bold;
         }
         
+        @media (max-width: 480px) {
+          .notification-badge {
+            width: 16px;
+            height: 16px;
+            font-size: 0.6rem;
+          }
+        }
+        
         .notification-dropdown {
           position: fixed;
           top: 70px;
@@ -1414,309 +1507,15 @@ const StudentLayout = () => {
           }
         }
         
-        @media (max-width: 767px) {
-          .notification-dropdown {
-            top: 70px;
-            right: 1rem;
-            width: calc(100% - 2rem);
-          }
-        }
-        
         @media (max-width: 480px) {
           .notification-dropdown {
+            top: 56px;
             right: 0.75rem;
             width: calc(100% - 1.5rem);
-            top: 65px;
           }
         }
         
-        .notification-header {
-          padding: 15px;
-          border-bottom: 1px solid #eee;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          background-color: #f8f9fa;
-        }
-        
-        .notification-header h4 {
-          margin: 0;
-          font-size: 16px;
-          color: #212529;
-        }
-        
-        @media (max-width: 1024px) {
-          .notification-header h4 {
-            font-size: 15px;
-          }
-        }
-        
-        .notification-header p {
-          margin: 5px 0 0 0;
-          font-size: 12px;
-          color: #6c757d;
-        }
-        
-        @media (max-width: 1024px) {
-          .notification-header p {
-            font-size: 11px;
-          }
-        }
-        
-        .notification-actions {
-          display: flex;
-          gap: 10px;
-        }
-        
-        .notification-action-btn {
-          background: none;
-          border: none;
-          cursor: pointer;
-          font-size: 12px;
-          padding: 4px 8px;
-          border-radius: 4px;
-        }
-        
-        @media (max-width: 1024px) {
-          .notification-action-btn {
-            font-size: 11px;
-          }
-        }
-        
-        .notification-action-btn.mark-read {
-          color: #3498db;
-        }
-        
-        .notification-action-btn.clear-all {
-          color: #e74c3c;
-        }
-        
-        .notification-action-btn:hover {
-          background-color: #edf2f7;
-        }
-        
-        .notification-list {
-          max-height: 320px;
-          overflow-y: auto;
-          overscroll-behavior: contain;
-        }
-        
-        @media (max-width: 1024px) {
-          .notification-list {
-            max-height: calc(60vh - 80px);
-          }
-        }
-        
-        .notification-loading {
-          padding: 30px 20px;
-          text-align: center;
-          color: #6c757d;
-        }
-        
-        .notification-spinner {
-          width: 30px;
-          height: 30px;
-          border: 3px solid #f3f3f3;
-          border-top-color: #3498db;
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
-          margin: 0 auto 15px auto;
-        }
-        
-        .notification-empty {
-          padding: 30px 20px;
-          text-align: center;
-          color: #6c757d;
-        }
-        
-        .notification-empty i {
-          font-size: 2rem;
-          margin-bottom: 10px;
-          opacity: 0.5;
-        }
-        
-        @media (max-width: 1024px) {
-          .notification-empty i {
-            font-size: 1.5rem;
-          }
-        }
-        
-        .notification-empty p {
-          margin: 0;
-        }
-        
-        .empty-subtext {
-          margin: 5px 0 0 0;
-          font-size: 12px;
-          opacity: 0.7;
-        }
-        
-        .notification-item {
-          padding: 15px;
-          display: flex;
-          border-bottom: 1px solid #f5f5f5;
-          background-color: white;
-          cursor: pointer;
-          position: relative;
-          transition: background-color 0.2s;
-        }
-        
-        @media (max-width: 1024px) {
-          .notification-item {
-            padding: 12px;
-          }
-        }
-        
-        .notification-item:hover {
-          background-color: #f8f9fa;
-        }
-        
-        .notification-item.unread {
-          background-color: #f8f9fa;
-        }
-        
-        .notification-item.unread:hover {
-          background-color: #edf2f7;
-        }
-        
-        .notification-icon-wrapper {
-          width: 40px;
-          height: 40px;
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          margin-right: 15px;
-          flex-shrink: 0;
-        }
-        
-        @media (max-width: 1024px) {
-          .notification-icon-wrapper {
-            width: 32px;
-            height: 32px;
-            margin-right: 10px;
-          }
-        }
-        
-        .notification-content {
-          flex: 1;
-          min-width: 0;
-        }
-        
-        .notification-header-row {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          gap: 8px;
-        }
-        
-        .notification-title {
-          margin: 0 0 5px 0;
-          font-size: 14px;
-          font-weight: 400;
-          color: #6c757d;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-        
-        @media (max-width: 1024px) {
-          .notification-title {
-            font-size: 13px;
-          }
-        }
-        
-        .notification-item.unread .notification-title {
-          font-weight: 600;
-          color: #212529;
-        }
-        
-        .unread-indicator {
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
-          background-color: #f72585;
-          flex-shrink: 0;
-          margin-top: 5px;
-        }
-        
-        .notification-message {
-          margin: 0 0 5px 0;
-          font-size: 13px;
-          color: #6c757d;
-          line-height: 1.4;
-          overflow: hidden;
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-        }
-        
-        @media (max-width: 1024px) {
-          .notification-message {
-            font-size: 12px;
-          }
-        }
-        
-        .notification-time {
-          color: #95a5a6;
-          font-size: 11px;
-        }
-        
-        @media (max-width: 1024px) {
-          .notification-time {
-            font-size: 10px;
-          }
-        }
-        
-        .notification-delete-btn {
-          position: absolute;
-          top: 5px;
-          right: 5px;
-          background: none;
-          border: none;
-          color: #adb5bd;
-          cursor: pointer;
-          font-size: 12px;
-          padding: 5px;
-          border-radius: 4px;
-          transition: all 0.2s;
-        }
-        
-        .notification-delete-btn:hover {
-          background-color: #f8f9fa;
-          color: #e74c3c;
-        }
-        
-        .notification-footer {
-          padding: 10px 15px;
-          border-top: 1px solid #eee;
-          text-align: center;
-          background-color: #f8f9fa;
-        }
-        
-        .view-all-btn {
-          background: none;
-          border: none;
-          color: #4361ee;
-          cursor: pointer;
-          font-size: 12px;
-          font-weight: 500;
-          padding: 5px 10px;
-          border-radius: 4px;
-          transition: all 0.2s;
-        }
-        
-        @media (max-width: 1024px) {
-          .view-all-btn {
-            font-size: 11px;
-          }
-        }
-        
-        .view-all-btn:hover {
-          background-color: #edf2f7;
-        }
-        
-        /* User Info */
+        /* User Info - RESTORED */
         .user-info {
           display: flex;
           align-items: center;
@@ -1793,9 +1592,16 @@ const StudentLayout = () => {
           display: flex;
           flex: 1;
           position: relative;
+          min-height: calc(100vh - 70px);
         }
         
-        /* Sidebar */
+        @media (max-width: 1024px) {
+          .main-content {
+            min-height: calc(100vh - 60px);
+          }
+        }
+        
+        /* Sidebar - RESTORED AND FIXED */
         .sidebar {
           width: 260px;
           background-color: white;
@@ -1812,7 +1618,7 @@ const StudentLayout = () => {
         
         @media (max-width: 1024px) {
           .sidebar {
-            display: none;
+            display: none; /* Hide sidebar on mobile/tablet */
           }
         }
         
@@ -1929,7 +1735,7 @@ const StudentLayout = () => {
           background-color: #f8f9fa;
         }
         
-        /* Mobile Menu */
+        /* Mobile Menu - IMPROVED */
         .mobile-menu-backdrop {
           position: fixed;
           top: 60px;
@@ -1939,6 +1745,13 @@ const StudentLayout = () => {
           background-color: rgba(0, 0, 0, 0.5);
           z-index: 98;
           animation: fadeIn 0.3s ease-out;
+        }
+        
+        @media (max-width: 480px) {
+          .mobile-menu-backdrop {
+            top: 56px;
+            height: calc(100vh - 56px);
+          }
         }
         
         .mobile-menu {
@@ -1966,6 +1779,8 @@ const StudentLayout = () => {
         
         @media (max-width: 480px) {
           .mobile-menu {
+            top: 56px;
+            height: calc(100vh - 56px);
             width: 85%;
             max-width: 280px;
           }
@@ -1980,12 +1795,25 @@ const StudentLayout = () => {
           border-bottom: 1px solid #e9ecef;
         }
         
+        @media (max-width: 480px) {
+          .mobile-user-info {
+            padding: 1rem;
+          }
+        }
+        
         .mobile-user-info img {
           width: 48px;
           height: 48px;
           border-radius: 50%;
           object-fit: cover;
           border: 2px solid #e9ecef;
+        }
+        
+        @media (max-width: 480px) {
+          .mobile-user-info img {
+            width: 40px;
+            height: 40px;
+          }
         }
         
         .mobile-user-name {
@@ -1995,15 +1823,27 @@ const StudentLayout = () => {
           margin-bottom: 4px;
         }
         
+        @media (max-width: 480px) {
+          .mobile-user-name {
+            font-size: 0.9rem;
+          }
+        }
+        
         .mobile-user-role {
           font-size: 0.8rem;
           color: #adb5bd;
           text-transform: uppercase;
         }
         
+        @media (max-width: 480px) {
+          .mobile-user-role {
+            font-size: 0.7rem;
+          }
+        }
+        
         .mobile-nav {
           display: flex;
-          flexDirection: column;
+          flex-direction: column;
           gap: 0.25rem;
           padding: 1rem 0;
           flex: 1;
@@ -2026,6 +1866,14 @@ const StudentLayout = () => {
           transition: all 0.2s;
         }
         
+        @media (max-width: 480px) {
+          .mobile-nav-button {
+            padding: 0.75rem 1rem;
+            font-size: 0.85rem;
+            gap: 0.75rem;
+          }
+        }
+        
         .mobile-nav-button:hover {
           background-color: #f1f3f5;
         }
@@ -2041,6 +1889,13 @@ const StudentLayout = () => {
           font-size: 1rem;
           width: 24px;
           text-align: center;
+        }
+        
+        @media (max-width: 480px) {
+          .mobile-nav-button i {
+            font-size: 0.9rem;
+            width: 20px;
+          }
         }
         
         .active-dot {
@@ -2074,17 +1929,24 @@ const StudentLayout = () => {
           transition: all 0.2s;
         }
         
+        @media (max-width: 480px) {
+          .mobile-logout-button {
+            padding: 0.75rem 1rem;
+            font-size: 0.85rem;
+          }
+        }
+        
         .mobile-logout-button:hover {
           background-color: #f8f9fa;
         }
         
-        /* Content Area */
+        /* Content Area - RESTORED */
         .content-area {
           flex: 1;
           padding: 2rem;
           background-color: #f5f7fb;
           overflow-y: auto;
-          height: calc(100vh - 70px);
+          min-height: calc(100vh - 70px);
           position: relative;
           z-index: 1;
         }
@@ -2092,11 +1954,49 @@ const StudentLayout = () => {
         @media (max-width: 1024px) {
           .content-area {
             padding: 1rem;
-            height: calc(100vh - 60px);
+            min-height: calc(100vh - 60px);
           }
         }
         
-        /* Scrollbar Styling */
+        @media (max-width: 480px) {
+          .content-area {
+            padding: 0.75rem;
+            min-height: calc(100vh - 56px);
+          }
+        }
+        
+        /* Tablet-specific improvements (769px-1024px) */
+        @media (min-width: 769px) and (max-width: 1024px) {
+          .content-area {
+            padding: 1.5rem;
+          }
+          
+          .sidebar {
+            display: block; /* Show sidebar on tablet */
+            width: 220px;
+          }
+          
+          .sidebar.collapsed {
+            width: 70px;
+          }
+          
+          .sidebar-toggle {
+            right: 15px;
+          }
+        }
+        
+        /* Additional responsive improvements */
+        @media (max-width: 768px) {
+          /* Better touch targets for mobile */
+          .mobile-nav-button,
+          .notification-icon,
+          .mobile-menu-toggle {
+            min-height: 44px;
+            min-width: 44px;
+          }
+        }
+        
+        /* Scrollbar Styling - RESTORED */
         .notification-list::-webkit-scrollbar {
           width: 6px;
         }
