@@ -1,10 +1,9 @@
-// src/App.jsx - UPDATED
+// src/App.jsx - FINAL
 import React, { Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { StudentAuthProvider, useStudentAuth } from './context/StudentAuthContext';
-import LogoutLoader from './components/auth/LogoutLoader';
 
-// Student components only
+// Lazy components
 const StudentLayout = React.lazy(() => import('./components/layout/StudentLayout'));
 const StudentLogin = React.lazy(() => import('./components/auth/StudentLogin'));
 const Dashboard = React.lazy(() => import('./components/dashboard/Dashboard'));
@@ -19,177 +18,109 @@ const Tutorials = React.lazy(() => import('./components/dashboard/Tutorials'));
 const Settings = React.lazy(() => import('./components/dashboard/Settings'));
 const Chatbot = React.lazy(() => import('./components/dashboard/Chatbot'));
 
-// Protected Route Component
-const ProtectedRoute = ({ children }) => {
-  const { isAuthenticated, loading } = useStudentAuth();
+const AuthGate = ({ children, requireAuth = true }) => {
+  const { user, loading } = useStudentAuth();
 
   if (loading) {
     return (
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '100vh',
-        backgroundColor: '#f5f7fb'
-      }}>
-        <div style={{
-          width: '50px',
-          height: '50px',
-          border: '4px solid #f3f3f3',
-          borderTop: '4px solid #3498db',
-          borderRadius: '50%',
-          animation: 'spin 1s linear infinite',
-          marginBottom: '20px'
-        }}></div>
-        <p style={{ color: '#7f8c8d', fontSize: '14px' }}>Loading...</p>
+      <div className="loading-screen">
+        <div className="spinner"></div>
+        <p>Restoring your session...</p>
         <style>{`
+          .loading-screen {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background: #f5f7fb;
+            gap: 20px;
+            font-family: system-ui, sans-serif;
+          }
+          .spinner {
+            width: 60px;
+            height: 60px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+          }
           @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
           }
         `}</style>
       </div>
     );
   }
 
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
+  if (requireAuth && !user) return <Navigate to="/login" replace />;
+  if (!requireAuth && user) return <Navigate to="/dashboard" replace />;
 
   return children;
 };
 
-// Public Route Component (redirects if already authenticated)
-const PublicRoute = ({ children }) => {
-  const { isAuthenticated, loading } = useStudentAuth();
+const AppContent = () => (
+  <Suspense fallback={
+    <div className="loading-screen">
+      <div className="spinner" style={{ borderTopColor: '#2ecc71' }}></div>
+      <p>Loading Student Portal...</p>
+      <style>{`
+        .loading-screen { /* same as above */ }
+        .spinner { /* same */ }
+        @keyframes spin { /* same */ }
+      `}</style>
+    </div>
+  }>
+    <Routes>
+      <Route path="/login" element={<AuthGate requireAuth={false}><StudentLogin /></AuthGate>} />
 
-  if (loading) {
-    return (
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '100vh',
-        backgroundColor: '#f5f7fb'
-      }}>
-        <div style={{
-          width: '50px',
-          height: '50px',
-          border: '4px solid #f3f3f3',
-          borderTop: '4px solid #3498db',
-          borderRadius: '50%',
-          animation: 'spin 1s linear infinite',
-          marginBottom: '20px'
-        }}></div>
-        <p style={{ color: '#7f8c8d', fontSize: '14px' }}>Loading...</p>
-      </div>
-    );
-  }
+      <Route path="/" element={<AuthGate requireAuth={true}><StudentLayout /></AuthGate>}>
+        <Route index element={<Navigate to="dashboard" replace />} />
+        <Route path="dashboard" element={<Dashboard />} />
+        <Route path="courses" element={<CourseUnits />} />
+        <Route path="lectures" element={<Lectures />} />
+        <Route path="timetable" element={<Timetable />} />
+        <Route path="coursework" element={<Coursework />} />
+        <Route path="examinations" element={<Examinations />} />
+        <Route path="results" element={<Results />} />
+        <Route path="finance" element={<Finance />} />
+        <Route path="tutorials" element={<Tutorials />} />
+        <Route path="chatbot" element={<Chatbot />} />
+        <Route path="settings" element={<Settings />} />
+      </Route>
 
-  if (isAuthenticated) {
-    return <Navigate to="/dashboard" replace />;
-  }
-
-  return children;
-};
-
-// App Content Component (to access auth context)
-const AppContent = () => {
-  const { logoutLoading, logoutProgress } = useStudentAuth();
-
-  return (
-    <>
-      {logoutLoading && <LogoutLoader progress={logoutProgress} />}
-      
-      <Suspense fallback={
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
-          height: '100vh',
-          backgroundColor: '#f5f7fb'
-        }}>
-          <div style={{
-            width: '50px',
-            height: '50px',
-            border: '4px solid #f3f3f3',
-            borderTop: '4px solid #3498db',
-            borderRadius: '50%',
-            animation: 'spin 1s linear infinite',
-            marginBottom: '20px'
-          }}></div>
-          <p style={{ color: '#7f8c8d', fontSize: '14px' }}>Loading Student Portal...</p>
+      <Route path="*" element={
+        <div className="not-found">
+          <h1>404</h1>
+          <h2>Page Not Found</h2>
+          <button onClick={() => window.location.href = '/login'}>Go to Login</button>
+          <style>{`
+            .not-found {
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+              height: 100vh;
+              text-align: center;
+              background: #f8f9fa;
+            }
+            button {
+              margin-top: 20px;
+              padding: 12px 24px;
+              background: #3498db;
+              color: white;
+              border: none;
+              border-radius: 8px;
+              cursor: pointer;
+            }
+          `}</style>
         </div>
-      }>
-        <Routes>
-          {/* Student Login - Public Route */}
-          <Route path="/login" element={
-            <PublicRoute>
-              <StudentLogin />
-            </PublicRoute>
-          } />
-          
-          {/* Protected Student Routes */}
-          <Route path="/" element={
-            <ProtectedRoute>
-              <StudentLayout />
-            </ProtectedRoute>
-          }>
-            <Route index element={<Navigate to="dashboard" replace />} />
-            <Route path="dashboard" element={<Dashboard />} />
-            <Route path="courses" element={<CourseUnits />} />
-            <Route path="lectures" element={<Lectures />} />
-            <Route path="timetable" element={<Timetable />} />
-            <Route path="coursework" element={<Coursework />} />
-            <Route path="examinations" element={<Examinations />} />
-            <Route path="results" element={<Results />} />
-            <Route path="finance" element={<Finance />} />
-            <Route path="tutorials" element={<Tutorials />} />
-            <Route path="chatbot" element={<Chatbot />} />
-            <Route path="settings" element={<Settings />} />
-          </Route>
-          
-          {/* 404 - Public Route */}
-          <Route path="*" element={
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: '100vh',
-              textAlign: 'center',
-              backgroundColor: '#f8f9fa',
-              padding: '20px'
-            }}>
-              <h1 style={{ fontSize: '48px', color: '#e74c3c', marginBottom: '10px' }}>404</h1>
-              <h2 style={{ color: '#2c3e50', marginBottom: '20px' }}>Page Not Found</h2>
-              <button 
-                onClick={() => window.location.href = '/login'}
-                style={{
-                  padding: '12px 24px',
-                  backgroundColor: '#3498db',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontSize: '16px',
-                  fontWeight: '600'
-                }}
-              >
-                Go to Student Login
-              </button>
-            </div>
-          } />
-        </Routes>
-      </Suspense>
-    </>
-  );
-};
+      } />
+    </Routes>
+  </Suspense>
+);
 
-// Main App Component
 function App() {
   return (
     <Router>

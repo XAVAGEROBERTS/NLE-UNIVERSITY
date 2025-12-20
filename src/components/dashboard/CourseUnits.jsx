@@ -29,330 +29,267 @@ const CourseUnits = () => {
       fetchStudentData();
     }
   }, [user]);
-const fetchStudentData = async () => {
-  try {
-    setLoading(true);
-    setError(null);
 
-    console.log('Fetching data for user:', user.email);
-
-    // Get student with year of study, semester, program_code, and program_duration_years
-    const { data: student, error: studentError } = await supabase
-      .from('students')
-      .select('id, year_of_study, semester, academic_year, program, program_code, program_duration_years, program_total_semesters')
-      .eq('email', user.email)
-      .single();
-
-    if (studentError) {
-      console.error('Student error:', studentError);
-      throw new Error(`Student data error: ${studentError.message}`);
-    }
-
-    if (!student) {
-      throw new Error('Student not found');
-    }
-
-    console.log('Student found:', student);
-    setStudentInfo(student);
-
-    // Calculate total semesters based on program duration
-    // Engineering (BSCE): 4 years × 2 semesters = 8 semesters
-    // Others (BSCS, BSSE, BIT): 3 years × 2 semesters = 6 semesters
-    const isEngineering = student.program_code === 'BSCE';
-    const totalYears = student.program_duration_years || (isEngineering ? 4 : 3);
-    const totalSemesters = student.program_total_semesters || totalYears * 2;
-    
-    console.log('Program:', student.program_code, 'Total years:', totalYears, 'Total semesters:', totalSemesters);
-
-    // NEW: Fetch ALL courses for the student's program, not just current semester
-    const { data: courses, error: coursesError } = await supabase
-      .from('courses')
-      .select('*')
-      .eq('program_code', student.program_code)
-      .eq('is_active', true)
-      .order('year', { ascending: true })
-      .order('semester', { ascending: true })
-      .order('course_code', { ascending: true });
-
-    if (coursesError) {
-      console.error('Courses error:', coursesError);
-      throw new Error(`Courses error: ${coursesError.message}`);
-    }
-
-    console.log('Courses fetched:', courses?.length || 0, 'for program:', student.program_code);
-
-    // If no courses found with exact match, try fallback
-    let finalCourses = courses;
-    if (!finalCourses || finalCourses.length === 0) {
-      console.log('No courses found with exact match, trying broader search...');
-      
-      // Fallback: Try to find courses by department
-      const departmentCode = isEngineering ? 'ENG' : 'SCT';
-      const { data: deptCourses } = await supabase
-        .from('courses')
-        .select('*')
-        .eq('department_code', departmentCode)
-        .eq('is_active', true)
-        .limit(30)
-        .order('course_code', { ascending: true });
-      
-      if (deptCourses && deptCourses.length > 0) {
-        finalCourses = deptCourses;
-        console.log('Using', finalCourses.length, 'department courses as fallback');
-      }
-    }
-
-    if (!finalCourses || finalCourses.length === 0) {
-      console.warn('No courses found at all');
-      setCourseData({});
-      setLoading(false);
-      return;
-    }
-
-    // Fetch student's course enrollments and grades
-    const { data: studentCourses, error: scError } = await supabase
-      .from('student_courses')
-      .select('course_id, status, grade, marks')
-      .eq('student_id', student.id);
-
-    if (scError) {
-      console.error('Student courses error:', scError);
-      throw new Error(`Student courses error: ${scError.message}`);
-    }
-
-    console.log('Student courses:', studentCourses?.length || 0);
-
-    // Create completed courses map
-    const completedMap = {};
-    if (studentCourses) {
-      studentCourses.forEach(sc => {
-        if (sc.status === 'completed') {
-          completedMap[sc.course_id] = {
-            completed: true,
-            grade: sc.grade,
-            marks: sc.marks
-          };
-        }
-      });
-    }
-
-    // Merge with localStorage
-    const saved = localStorage.getItem('completedCourses');
-    const savedMap = saved ? JSON.parse(saved) : {};
-    const mergedCompleted = { ...savedMap, ...completedMap };
-    setCompletedCourses(mergedCompleted);
-
-    // Get current year from student data
-    const currentYear = student.year_of_study || 1;
-    const currentSemester = student.semester || 1;
-    console.log('Current year of study:', currentYear, 'Semester:', currentSemester);
-
-    // NEW: Create tabs for ALL years in the program (1 to totalYears)
-    const organizedData = {};
-    
-    // Create tabs for each year (1 to totalYears)
-    for (let year = 1; year <= totalYears; year++) {
-      let tabKey = '';
-      let title = '';
-      
-      if (year === currentYear) {
-        tabKey = 'current';
-        title = `Year ${year} (Current)`;
-      } else if (year === currentYear - 1) {
-        tabKey = 'previous1';
-        title = `Year ${year}`;
-      } else if (year === currentYear - 2) {
-        tabKey = 'previous2';
-        title = `Year ${year}`;
-      } else if (year === currentYear - 3) {
-        tabKey = 'previous3';
-        title = `Year ${year}`;
-      } else if (year < currentYear) {
-        tabKey = `past${year}`;
-        title = `Year ${year}`;
-      } else if (year > currentYear) {
-        tabKey = `future${year}`;
-        title = `Year ${year}`;
-      } else {
-        tabKey = `year${year}`;
-        title = `Year ${year}`;
-      }
-      
-      organizedData[tabKey] = {
-        title: title,
-        yearNumber: year,
-        semesters: [],
-        academicYear: year === currentYear ? student.academic_year : null,
-        isCurrent: year === currentYear,
-        isPast: year < currentYear,
-        isFuture: year > currentYear
-      };
-    }
-    
-    // Set active tab to current year if it exists
-    const currentYearKey = Object.keys(organizedData).find(key => 
-      organizedData[key].yearNumber === currentYear
-    ) || Object.keys(organizedData)[0];
-    
-    if (currentYearKey && !activeTab) {
-      setActiveTab(currentYearKey);
-    }
-
-    // NEW: Group finalCourses by year and semester (all years)
-    if (finalCourses && finalCourses.length > 0) {
-      finalCourses.forEach(course => {
-        // Only include courses for years within the program duration
-        if (course.year >= 1 && course.year <= totalYears) {
-          // Find the tab key for this course's year
-          const tabEntry = Object.entries(organizedData).find(([key, data]) => 
-            data.yearNumber === course.year
-          );
-          
-          if (tabEntry) {
-            const [tabKey, yearData] = tabEntry;
-            
-            let semesterGroup = organizedData[tabKey].semesters.find(s => 
-              s.semesterNumber === course.semester
-            );
-            
-            if (!semesterGroup) {
-              semesterGroup = {
-                semesterNumber: course.semester,
-                semester: `Semester ${course.semester}`,
-                courses: []
-              };
-              organizedData[tabKey].semesters.push(semesterGroup);
-            }
-            
-            // Check if course already exists in this semester to avoid duplicates
-            const courseExists = semesterGroup.courses.some(c => c.id === course.id);
-            
-            if (!courseExists) {
-              const courseInfo = {
-                id: course.id,
-                code: course.course_code,
-                name: course.course_name,
-                credits: course.credits,
-                isCore: course.is_core,
-                year: course.year,
-                semester: course.semester,
-                program: course.program,
-                program_code: course.program_code,
-                department: course.department
-              };
-
-              // Add grade if completed
-              if (completedMap[course.id]) {
-                courseInfo.grade = completedMap[course.id].grade;
-                courseInfo.marks = completedMap[course.id].marks;
-                courseInfo.completed = true;
-              } else {
-                courseInfo.completed = false;
-              }
-
-              semesterGroup.courses.push(courseInfo);
-            }
-          }
-        }
-      });
-    }
-
-    // NEW: Add empty semesters for years that have no courses (for UI completeness)
-    Object.keys(organizedData).forEach(key => {
-      const yearData = organizedData[key];
-      const yearNumber = yearData.yearNumber;
-      
-      // Create both semesters (1 and 2) for each year
-      for (let semester = 1; semester <= 2; semester++) {
-        const hasSemester = yearData.semesters.some(s => s.semesterNumber === semester);
-        
-        if (!hasSemester) {
-          // Add empty semester placeholder
-          yearData.semesters.push({
-            semesterNumber: semester,
-            semester: `Semester ${semester}`,
-            courses: [],
-            isEmpty: true
-          });
-        }
-      }
-      
-      // Sort semesters by semester number
-      yearData.semesters.sort((a, b) => a.semesterNumber - b.semesterNumber);
-      
-      // Sort courses within each semester
-      yearData.semesters.forEach(semester => {
-        semester.courses.sort((a, b) => {
-          return a.code.localeCompare(b.code);
-        });
-      });
-      
-      // Filter out empty semesters if the year has no courses at all
-      const hasCourses = yearData.semesters.some(semester => semester.courses.length > 0);
-      if (!hasCourses) {
-        // Remove the year completely if it has no courses
-        delete organizedData[key];
-      }
-    });
-
-    console.log('Organized data:', organizedData);
-    setCourseData(organizedData);
-  } catch (err) {
-    console.error('Error fetching student data:', err);
-    setError(`Failed to load course data: ${err.message}`);
-  } finally {
-    setLoading(false);
-  }
-};
-  const toggleCourse = async (courseId) => {
+  const fetchStudentData = async () => {
     try {
-      if (!user?.email) return;
+      setLoading(true);
+      setError(null);
 
-      // Get student ID
-      const { data: student } = await supabase
+      console.log('Fetching data for user:', user.email);
+
+      // Get student with year of study, semester, program_code, and program_duration_years
+      const { data: student, error: studentError } = await supabase
         .from('students')
-        .select('id')
+        .select('id, year_of_study, semester, academic_year, program, program_code, program_duration_years, program_total_semesters')
         .eq('email', user.email)
         .single();
 
-      const isCurrentlyCompleted = completedCourses[courseId]?.completed || false;
-      const newStatus = !isCurrentlyCompleted;
+      if (studentError) {
+        console.error('Student error:', studentError);
+        throw new Error(`Student data error: ${studentError.message}`);
+      }
 
-      // Update in database
-      const { error: updateError } = await supabase
+      if (!student) {
+        throw new Error('Student not found');
+      }
+
+      console.log('Student found:', student);
+      setStudentInfo(student);
+
+      // Calculate total semesters based on program duration
+      const isEngineering = student.program_code === 'BSCE';
+      const totalYears = student.program_duration_years || (isEngineering ? 4 : 3);
+      const totalSemesters = student.program_total_semesters || totalYears * 2;
+      
+      console.log('Program:', student.program_code, 'Total years:', totalYears, 'Total semesters:', totalSemesters);
+
+      // Fetch ALL courses for the student's program
+      const { data: courses, error: coursesError } = await supabase
+        .from('courses')
+        .select('*')
+        .eq('program_code', student.program_code)
+        .eq('is_active', true)
+        .order('year', { ascending: true })
+        .order('semester', { ascending: true })
+        .order('course_code', { ascending: true });
+
+      if (coursesError) {
+        console.error('Courses error:', coursesError);
+        throw new Error(`Courses error: ${coursesError.message}`);
+      }
+
+      console.log('Courses fetched:', courses?.length || 0, 'for program:', student.program_code);
+
+      // If no courses found with exact match, try fallback
+      let finalCourses = courses;
+      if (!finalCourses || finalCourses.length === 0) {
+        console.log('No courses found with exact match, trying broader search...');
+        
+        const departmentCode = isEngineering ? 'ENG' : 'SCT';
+        const { data: deptCourses } = await supabase
+          .from('courses')
+          .select('*')
+          .eq('department_code', departmentCode)
+          .eq('is_active', true)
+          .limit(30)
+          .order('course_code', { ascending: true });
+        
+        if (deptCourses && deptCourses.length > 0) {
+          finalCourses = deptCourses;
+          console.log('Using', finalCourses.length, 'department courses as fallback');
+        }
+      }
+
+      if (!finalCourses || finalCourses.length === 0) {
+        console.warn('No courses found at all');
+        setCourseData({});
+        setLoading(false);
+        return;
+      }
+
+      // Fetch student's course enrollments and grades
+      const { data: studentCourses, error: scError } = await supabase
         .from('student_courses')
-        .upsert({
-          student_id: student.id,
-          course_id: courseId,
-          status: newStatus ? 'completed' : 'in_progress',
-          completion_date: newStatus ? new Date().toISOString().split('T')[0] : null,
-          updated_at: new Date().toISOString()
-        }, {
-          onConflict: 'student_id, course_id'
-        });
+        .select('course_id, status, grade, marks')
+        .eq('student_id', student.id);
 
-      if (updateError) throw updateError;
+      if (scError) {
+        console.error('Student courses error:', scError);
+        throw new Error(`Student courses error: ${scError.message}`);
+      }
 
-      // Update local state
-      setCompletedCourses(prev => {
-        const newState = {
-          ...prev,
-          [courseId]: {
-            ...prev[courseId],
-            completed: newStatus,
-            grade: newStatus ? 'A' : null,
-            marks: newStatus ? 85 : null
+      console.log('Student courses:', studentCourses?.length || 0);
+
+      // Create completed courses map from database only
+      const completedMap = {};
+      if (studentCourses) {
+        studentCourses.forEach(sc => {
+          if (sc.status === 'completed') {
+            completedMap[sc.course_id] = {
+              completed: true,
+              grade: sc.grade,
+              marks: sc.marks
+            };
           }
+        });
+      }
+
+      // Use only database data
+      setCompletedCourses(completedMap);
+
+      // Get current year from student data
+      const currentYear = student.year_of_study || 1;
+      const currentSemester = student.semester || 1;
+      console.log('Current year of study:', currentYear, 'Semester:', currentSemester);
+
+      // Create tabs for ALL years in the program
+      const organizedData = {};
+      
+      for (let year = 1; year <= totalYears; year++) {
+        let tabKey = '';
+        let title = '';
+        
+        if (year === currentYear) {
+          tabKey = 'current';
+          title = `Year ${year} (Current)`;
+        } else if (year === currentYear - 1) {
+          tabKey = 'previous1';
+          title = `Year ${year}`;
+        } else if (year === currentYear - 2) {
+          tabKey = 'previous2';
+          title = `Year ${year}`;
+        } else if (year === currentYear - 3) {
+          tabKey = 'previous3';
+          title = `Year ${year}`;
+        } else if (year < currentYear) {
+          tabKey = `past${year}`;
+          title = `Year ${year}`;
+        } else if (year > currentYear) {
+          tabKey = `future${year}`;
+          title = `Year ${year}`;
+        } else {
+          tabKey = `year${year}`;
+          title = `Year ${year}`;
+        }
+        
+        organizedData[tabKey] = {
+          title: title,
+          yearNumber: year,
+          semesters: [],
+          academicYear: year === currentYear ? student.academic_year : null,
+          isCurrent: year === currentYear,
+          isPast: year < currentYear,
+          isFuture: year > currentYear
         };
-        localStorage.setItem('completedCourses', JSON.stringify(newState));
-        return newState;
+      }
+      
+      const currentYearKey = Object.keys(organizedData).find(key => 
+        organizedData[key].yearNumber === currentYear
+      ) || Object.keys(organizedData)[0];
+      
+      if (currentYearKey && !activeTab) {
+        setActiveTab(currentYearKey);
+      }
+
+      // Group courses by year and semester
+      if (finalCourses && finalCourses.length > 0) {
+        finalCourses.forEach(course => {
+          if (course.year >= 1 && course.year <= totalYears) {
+            const tabEntry = Object.entries(organizedData).find(([key, data]) => 
+              data.yearNumber === course.year
+            );
+            
+           if (tabEntry) {
+  const [tabKey, yearData] = tabEntry;
+
+  // Skip non-current semester courses in the current year
+  // if (yearData.isCurrent && course.semester !== currentSemester) {
+  //   return; // Do not add Semester 2 courses to current tab
+  // }
+
+  let semesterGroup = yearData.semesters.find(s => 
+    s.semesterNumber === course.semester
+  );
+  
+  if (!semesterGroup) {
+    semesterGroup = {
+      semesterNumber: course.semester,
+      semester: `Semester ${course.semester}`,
+      courses: []
+    };
+    yearData.semesters.push(semesterGroup);
+  }
+  
+  const courseExists = semesterGroup.courses.some(c => c.id === course.id);
+  
+  if (!courseExists) {
+    const courseInfo = {
+      id: course.id,
+      code: course.course_code,
+      name: course.course_name,
+      credits: course.credits,
+      isCore: course.is_core,
+      year: course.year,
+      semester: course.semester,
+      program: course.program,
+      program_code: course.program_code,
+      department: course.department
+    };
+
+    if (completedMap[course.id]) {
+      courseInfo.grade = completedMap[course.id].grade;
+      courseInfo.marks = completedMap[course.id].marks;
+      courseInfo.completed = true;
+    } else {
+      courseInfo.completed = false;
+    }
+
+    semesterGroup.courses.push(courseInfo);
+  }
+}
+          }
+        });
+      }
+
+      // Add empty semesters for UI completeness
+      Object.keys(organizedData).forEach(key => {
+        const yearData = organizedData[key];
+        const yearNumber = yearData.yearNumber;
+        
+        for (let semester = 1; semester <= 2; semester++) {
+          const hasSemester = yearData.semesters.some(s => s.semesterNumber === semester);
+          
+          if (!hasSemester) {
+            yearData.semesters.push({
+              semesterNumber: semester,
+              semester: `Semester ${semester}`,
+              courses: [],
+              isEmpty: true
+            });
+          }
+        }
+        
+        yearData.semesters.sort((a, b) => a.semesterNumber - b.semesterNumber);
+        
+        yearData.semesters.forEach(semester => {
+          semester.courses.sort((a, b) => {
+            return a.code.localeCompare(b.code);
+          });
+        });
+        
+        const hasCourses = yearData.semesters.some(semester => semester.courses.length > 0);
+        if (!hasCourses) {
+          delete organizedData[key];
+        }
       });
 
-      // Refresh data
-      fetchStudentData();
-    } catch (error) {
-      console.error('Error updating course status:', error);
-      alert('Failed to update course status. Please try again.');
+      console.log('Organized data:', organizedData);
+      setCourseData(organizedData);
+    } catch (err) {
+      console.error('Error fetching student data:', err);
+      setError(`Failed to load course data: ${err.message}`);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -395,36 +332,34 @@ const fetchStudentData = async () => {
               {course.name}
             </h4>
           </div>
-          <button 
-            onClick={() => toggleCourse(course.id)}
-            style={{
-              padding: '6px 12px',
-              backgroundColor: isCompleted ? '#28a745' : '#6c757d',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '13px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              whiteSpace: 'nowrap',
-              minWidth: '100px',
-              justifyContent: 'center'
-            }}
-          >
+          <div style={{
+            padding: '6px 12px',
+            backgroundColor: isCompleted ? '#28a745' : '#f8f9fa',
+            color: isCompleted ? 'white' : '#6c757d',
+            border: isCompleted ? 'none' : '1px solid #dee2e6',
+            borderRadius: '6px',
+            fontSize: '13px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            whiteSpace: 'nowrap',
+            minWidth: '100px',
+            justifyContent: 'center',
+            cursor: isCompleted ? 'default' : 'not-allowed' 
+
+          }}>
             {isCompleted ? (
               <>
                 <i className="fas fa-check" style={{ fontSize: '12px' }}></i>
-                <span>Done</span>
+                <span>Completed</span>
               </>
             ) : (
               <>
-                <i className="fas fa-lock" style={{ fontSize: '12px' }}></i>
+                <i className="fas fa-clock" style={{ fontSize: '12px' }}></i>
                 <span>In Progress</span>
               </>
             )}
-          </button>
+          </div>
         </div>
         
         <div style={{ 
@@ -471,7 +406,6 @@ const fetchStudentData = async () => {
           </div>
         </div>
         
-        {/* DEBUG INFO - Show program_code and department */}
         <div style={{ 
           display: 'flex', 
           flexWrap: 'wrap', 
@@ -585,7 +519,7 @@ const fetchStudentData = async () => {
               padding: '4px 10px',
               borderRadius: '12px'
             }}>
-              {course.program_code} {/* Changed from program to program_code */}
+              {course.program_code}
             </span>
             <span className="course-dept" style={{
               backgroundColor: '#e9ecef',
@@ -600,7 +534,8 @@ const fetchStudentData = async () => {
               color: '#212529',
               padding: '4px 10px',
               borderRadius: '12px',
-              fontWeight: '500'
+              fontWeight: '500',
+              display: 'none'
             }}>Core</span>}
             {grade && (
               <span className={`course-grade grade-${grade}`} style={{
@@ -617,39 +552,36 @@ const fetchStudentData = async () => {
             )}
           </div>
         </div>
-        <button 
-          className={`course-toggle ${isCompleted ? 'completed' : ''}`}
-          onClick={() => toggleCourse(course.id)}
-          title={isCompleted ? 'Mark as in progress' : 'Mark as completed'}
+        <div 
+          className={`course-status-display ${isCompleted ? 'completed' : ''}`}
           style={{
             padding: 'clamp(8px, 1.5vw, 10px) clamp(12px, 2vw, 16px)',
-            backgroundColor: isCompleted ? '#28a745' : '#6c757d',
-            color: 'white',
-            border: 'none',
+            backgroundColor: isCompleted ? '#28a745' : '#f8f9fa',
+            color: isCompleted ? 'white' : '#6c757d',
+            border: isCompleted ? 'none' : '1px solid #dee2e6',
             borderRadius: '6px',
-            cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
             gap: '6px',
-            transition: 'background-color 0.3s',
             minWidth: 'clamp(120px, 15vw, 140px)',
             justifyContent: 'center',
             fontSize: 'clamp(13px, 1.6vw, 14px)',
-            whiteSpace: 'nowrap'
+            whiteSpace: 'nowrap',
+            cursor: isCompleted ? 'default' : 'not-allowed' 
           }}
         >
           {isCompleted ? (
             <>
               <i className="fas fa-check"></i>
-              <span className="toggle-text">Completed</span>
+              <span className="status-text">Completed</span>
             </>
           ) : (
             <>
-              <i className="fas fa-lock"></i>
-              <span className="toggle-text">In Progress</span>
+              <i className="fas fa-clock"></i>
+              <span className="status-text">In Progress</span>
             </>
           )}
-        </button>
+        </div>
       </div>
     );
   };
@@ -755,9 +687,8 @@ const fetchStudentData = async () => {
                 borderRadius: '6px',
                 flex: isMobile ? '1' : '0 1 auto'
               }}>
-                {currentYearData?.title || 'Year Information'}, 
-                Semester {currentYearData?.semesters?.[0]?.semesterNumber || 'N/A'} 
-                ({currentYearData?.academicYear || 'N/A'})
+               Year {studentInfo.year_of_study} (Current), Semester {studentInfo.semester} 
+                ({studentInfo.academic_year || 'N/A'})
               </div>
               <div style={{ 
                 fontSize: 'clamp(0.85rem, 2vw, 1rem)',
@@ -876,6 +807,7 @@ const fetchStudentData = async () => {
                   border: `1px solid ${activeTab === key ? '#007bff' : '#dee2e6'}`,
                   transition: 'all 0.3s ease',
                   flexShrink: '0'
+
                 }}
               >
                 {courseData[key].title}
@@ -905,16 +837,45 @@ const fetchStudentData = async () => {
                 <div key={semIndex} style={{ 
                   marginBottom: 'clamp(25px, 4vw, 35px)'
                 }}>
-                  <h3 style={{ 
-                    marginBottom: 'clamp(12px, 2.5vw, 16px)', 
-                    marginTop: semIndex > 0 ? 'clamp(25px, 4vw, 35px)' : '0',
-                    color: '#333',
-                    borderBottom: '2px solid #eee',
-                    paddingBottom: 'clamp(8px, 1.5vw, 12px)',
-                    fontSize: 'clamp(1.1rem, 2.5vw, 1.3rem)'
-                  }}>
-                    {courseData[activeTab].title}, {semester.semester}
-                  </h3>
+<h3 style={{ 
+  marginBottom: 'clamp(12px, 2.5vw, 16px)', 
+  marginTop: semIndex > 0 ? 'clamp(25px, 4vw, 35px)' : '0',
+  color: '#333',
+  borderBottom: '2px solid #eee',
+  paddingBottom: 'clamp(8px, 1.5vw, 12px)',
+  fontSize: 'clamp(1.1rem, 2.5vw, 1.3rem)',
+  display: 'flex',
+  alignItems: 'center',
+  gap: '10px'
+}}>
+  <span>{semester.semester}</span>
+  {courseData[activeTab].isCurrent && semester.semesterNumber === studentInfo.semester && (
+    <span style={{
+      backgroundColor: '#28a745',
+      color: 'white',
+      padding: '4px 10px',
+      borderRadius: '20px',
+      fontSize: '0.8em',
+      fontWeight: 'bold'
+    }}>
+      CURRENT SEMESTER
+    </span>
+  )}
+  {courseData[activeTab].isCurrent && semester.semesterNumber !== studentInfo.semester && (
+    <span style={{
+      backgroundColor: '#ffc107',
+      color: '#212529',
+      padding: '4px 10px',
+      borderRadius: '20px',
+      fontSize: '0.8em',
+      fontWeight: 'bold',
+      display: 'none'
+      
+    }}>
+      NEXT SEMESTER
+    </span>
+  )}
+</h3>
                   <div className="courses-list">
                     {isMobile ? (
                       // Mobile View: Compact Cards
@@ -999,10 +960,6 @@ const fetchStudentData = async () => {
             border-color: #dee2e6 !important;
           }
           
-          .course-toggle:hover {
-            background-color: ${completed => completed ? '#dc3545' : '#28a745'} !important;
-          }
-          
           .course-item:hover {
             transform: translateY(-2px);
             transition: transform 0.3s ease;
@@ -1012,9 +969,8 @@ const fetchStudentData = async () => {
         
         /* Improve touch targets on mobile */
         @media (max-width: 768px) {
-          button, .course-toggle {
+          button, .course-status-display {
             min-height: 44px;
-            min-width: 44px;
           }
           
           .tab {

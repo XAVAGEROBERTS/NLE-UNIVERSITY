@@ -1,32 +1,21 @@
-// src/services/supabase.js - Add logging
+// src/services/supabase.js
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-if (!supabaseUrl || !supabaseKey) {
-  console.error('Missing Supabase environment variables');
-  throw new Error('Missing Supabase configuration');
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error('Missing Supabase URL or anon key. Check your .env file.');
 }
 
 console.log('🔧 Initializing Supabase client...');
-console.log('URL:', supabaseUrl.substring(0, 20) + '...');
 
-export const supabase = createClient(supabaseUrl, supabaseKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: false,
-    storage: localStorage,
-    storageKey: 'supabase.auth.token'
-  }
-});
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-// Test connection
-supabase.auth.getSession().then(({ data, error }) => {
-  if (error) {
-    console.error('❌ Supabase connection error:', error);
-  } else {
-    console.log('✅ Supabase connected. Session:', data.session ? 'Active' : 'None');
-  }
-});
+// Development-only session logging
+if (import.meta.env.DEV) {
+  supabase.auth.getSession().then(({ data: { session } }) => {
+    console.log('✅ Supabase ready · Session:', session ? 'Active' : 'None');
+    if (session) console.log('👤 Logged in as:', session.user.email);
+  });
+}
