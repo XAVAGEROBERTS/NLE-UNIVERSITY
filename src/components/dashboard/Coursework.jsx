@@ -30,213 +30,241 @@ const Coursework = () => {
     }
   }, [user]);
 
-  // =================== FETCH ASSIGNMENTS WITH LECTURER FILES ===================
-  const fetchAssignments = async () => {
-    try {
-      setLoading(true);
-      console.clear();
-      console.log('🚀 ===== STARTING ASSIGNMENT FETCH =====');
+ // =================== FETCH ASSIGNMENTS WITH LECTURER FILES ===================
+const fetchAssignments = async () => {
+  try {
+    setLoading(true);
+    console.clear();
+    console.log('🚀 ===== STARTING ASSIGNMENT FETCH =====');
 
-      // 1. Get student by email
-      const { data: student, error: studentError } = await supabase
-        .from('students')
-        .select('id, student_id, full_name, email, department_code')
-        .eq('email', user.email)
-        .single();
+    // 1. Get student by email
+    const { data: student, error: studentError } = await supabase
+      .from('students')
+      .select('id, student_id, full_name, email, department_code')
+      .eq('email', user.email)
+      .single();
 
-      if (studentError) {
-        console.error('❌ Student error:', studentError);
-        throw studentError;
-      }
-      
-      setStudentId(student.id);
-
-      console.log('👤 STUDENT:', {
-        id: student.id,
-        name: student.full_name,
-        email: student.email,
-        department: student.department_code
-      });
-
-      // 2. Get assignments for student's department - CHANGED: Sort by created_at DESC for newest first
-      console.log(`🔍 Fetching assignments for department: ${student.department_code}`);
-      
-      const { data: assignmentsData, error: assignmentsError } = await supabase
-        .from('assignments')
-        .select(`
-          *,
-          courses!inner (
-            id,
-            course_code,
-            course_name,
-            department_code
-          ),
-          lecturers (full_name)
-        `)
-        .eq('courses.department_code', student.department_code)
-        .in('status', ['published', 'closed', 'graded'])
-        .order('created_at', { ascending: false }); // CHANGED: Sort by creation date, newest first
-
-      if (assignmentsError) {
-        console.error('❌ Assignments error:', assignmentsError);
-        throw assignmentsError;
-      }
-
-      console.log(`📚 Found ${assignmentsData?.length || 0} assignments`);
-
-      // 3. Get THIS STUDENT'S submissions only
-      const { data: submissions, error: subsError } = await supabase
-        .from('assignment_submissions')
-        .select('*')
-        .eq('student_id', student.id);
-
-      if (subsError) {
-        console.error('❌ Submissions error:', subsError);
-        throw subsError;
-      }
-
-      console.log(`📤 Student has ${submissions?.length || 0} submissions`);
-
-      // 4. Process assignments with PROPER BUCKET URLS
-      const processedAssignments = (assignmentsData || []).map(assignment => {
-        // Find THIS student's submission
-        const submission = submissions?.find(sub => 
-          sub.assignment_id === assignment.id
-        );
-
-        // Check submission status
-        let isSubmitted = false;
-        let submissionStatus = 'not submitted';
-        let canSubmit = true;
-        let isGraded = false;
-        
-        if (submission) {
-          submissionStatus = submission.status || 'not submitted';
-          isSubmitted = ['submitted', 'graded', 'late'].includes(submissionStatus);
-          isGraded = submissionStatus === 'graded';
-        }
-
-        const dueDate = new Date(assignment.due_date);
-        const now = new Date();
-        const isPastDue = dueDate < now;
-        canSubmit = !isSubmitted && !isPastDue;
-
-        // =========== CRITICAL: PROCESS LECTURER FILES FROM LECTURERBUCKET ===========
-        const assignmentFiles = assignment.file_urls || [];
-        const processedFiles = assignmentFiles.map(fileUrl => {
-          if (!fileUrl) return null;
-          
-          // If it's already a full URL, keep it
-          if (fileUrl.startsWith('http')) {
-            return fileUrl;
-          }
-          
-          // If it's a path/name, construct lecturerbucket URL
-          // Get project reference from Supabase URL
-          const projectRef = supabase.supabaseUrl.split('//')[1].split('.')[0];
-          
-          // Try to extract file path from different formats
-          let filePath = fileUrl;
-          
-          // Remove any "lecturerbucket/" prefix if present
-          if (filePath.includes('lecturerbucket/')) {
-            filePath = filePath.split('lecturerbucket/')[1];
-          }
-          
-          // Construct the full URL to lecturerbucket
-          const fullUrl = `https://${projectRef}.supabase.co/storage/v1/object/public/lecturerbucket/${filePath}`;
-          
-          console.log(`📁 Lecturer file: ${filePath} → ${fullUrl}`);
-          return fullUrl;
-        }).filter(url => url && url !== '');
-
-        console.log(`   Assignment "${assignment.title}": ${processedFiles.length} lecturer files`);
-
-        // =========== PROCESS STUDENT SUBMISSION FILES (from assignments bucket) ===========
-        const studentSubmissionFiles = (submission?.file_urls || []).map(fileUrl => {
-          if (!fileUrl) return null;
-          
-          if (fileUrl.startsWith('http')) {
-            return fileUrl;
-          }
-          
-          // Get project reference
-          const projectRef = supabase.supabaseUrl.split('//')[1].split('.')[0];
-          
-          // Student submissions go to 'assignments' bucket
-          const fullUrl = `https://${projectRef}.supabase.co/storage/v1/object/public/assignments/${fileUrl}`;
-          
-          return fullUrl;
-        }).filter(url => url && url !== '');
-
-        // Find main PDF file from lecturer
-        const mainPdfFile = processedFiles.find(file => 
-          file && (file.toLowerCase().endsWith('.pdf') || 
-          file.includes('assignment') || 
-          file.includes('question'))
-        ) || processedFiles[0];
-
-        return {
-          id: assignment.id,
-          courseCode: assignment.courses?.course_code || 'N/A',
-          courseName: assignment.courses?.course_name || 'N/A',
-          courseDepartment: assignment.courses?.department_code,
-          title: assignment.title,
-          description: assignment.description || '',
-          instructions: assignment.instructions || '',
-          assignedDate: new Date(assignment.created_at).toLocaleDateString('en-US', {
-            day: 'numeric',
-            month: 'short',
-            year: 'numeric'
-          }),
-          dueDate: dueDate.toLocaleDateString('en-US', {
-            day: 'numeric',
-            month: 'short',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: true
-          }) + ' EAT',
-          rawDueDate: dueDate,
-          isPastDue,
-          status: submissionStatus,
-          isSubmitted: isSubmitted,
-          submissionId: submission?.id,
-          submissionDate: submission?.submission_date,
-          fileUrls: studentSubmissionFiles, // Student's submitted files (assignments bucket)
-          submittedText: submission?.submitted_text || '',
-          feedback: submission?.feedback || '',
-          marks: submission?.marks_obtained
-            ? `${submission.marks_obtained}/${assignment.total_marks}`
-            : '',
-          totalMarks: assignment.total_marks,
-          obtainedMarks: submission?.marks_obtained,
-          lecturer: assignment.lecturers?.full_name || 'Unknown Lecturer',
-          submission_type: assignment.submission_type || 'file',
-          allowed_formats: assignment.allowed_formats || ['pdf', 'doc', 'docx', 'zip'],
-          max_file_size: assignment.max_file_size || 10,
-          assignment_files: processedFiles, // Lecturer's files (lecturerbucket)
-          main_assignment_file: mainPdfFile,
-          canSubmit: canSubmit,
-          isGraded: isGraded,
-          original_file_urls: assignment.file_urls || [],
-          created_at: assignment.created_at // Keep for sorting
-        };
-      });
-
-      console.log(`✅ Processed ${processedAssignments.length} assignments`);
-      
-      // CHANGED: Already sorted by created_at DESC from the query
-      setAssignments(processedAssignments);
-
-    } catch (error) {
-      console.error('❌ Error in fetchAssignments:', error);
-      alert(`Error loading assignments: ${error.message}`);
-      setAssignments([]);
-    } finally {
-      setLoading(false);
+    if (studentError) {
+      console.error('❌ Student error:', studentError);
+      throw studentError;
     }
-  };
+    
+    setStudentId(student.id);
+
+    console.log('👤 STUDENT:', {
+      id: student.id,
+      name: student.full_name,
+      email: student.email,
+      department: student.department_code
+    });
+
+    // 2. Get student's enrolled courses and filter out completed ones
+    console.log('📚 Fetching student courses...');
+    const { data: studentCourses, error: coursesError } = await supabase
+      .from('student_courses')
+      .select('course_id, status')
+      .eq('student_id', student.id);
+
+    if (coursesError) {
+      console.error('❌ Student courses error:', coursesError);
+      throw coursesError;
+    }
+
+    // Filter out completed courses
+    const activeCourseIds = studentCourses
+      ?.filter(course => course.status !== 'completed')
+      .map(course => course.course_id) || [];
+
+    console.log(`📊 Student has ${studentCourses?.length || 0} total courses`);
+    console.log(`📊 Active courses (not completed): ${activeCourseIds.length}`);
+
+    if (activeCourseIds.length === 0) {
+      console.log('✅ No active courses found - setting empty assignments');
+      setAssignments([]);
+      setLoading(false);
+      return;
+    }
+
+    // 3. Get assignments for student's department AND active courses only
+    console.log(`🔍 Fetching assignments for department: ${student.department_code}`);
+    
+    const { data: assignmentsData, error: assignmentsError } = await supabase
+      .from('assignments')
+      .select(`
+        *,
+        courses!inner (
+          id,
+          course_code,
+          course_name,
+          department_code
+        ),
+        lecturers (full_name)
+      `)
+      .eq('courses.department_code', student.department_code)
+      .in('status', ['published', 'closed', 'graded'])
+      .in('course_id', activeCourseIds) // CRITICAL: Only fetch assignments for active courses
+      .order('created_at', { ascending: false });
+
+    if (assignmentsError) {
+      console.error('❌ Assignments error:', assignmentsError);
+      throw assignmentsError;
+    }
+
+    console.log(`📚 Found ${assignmentsData?.length || 0} assignments for active courses`);
+
+    // 4. Get THIS STUDENT'S submissions only
+    const { data: submissions, error: subsError } = await supabase
+      .from('assignment_submissions')
+      .select('*')
+      .eq('student_id', student.id);
+
+    if (subsError) {
+      console.error('❌ Submissions error:', subsError);
+      throw subsError;
+    }
+
+    console.log(`📤 Student has ${submissions?.length || 0} submissions`);
+
+    // 5. Process assignments with PROPER BUCKET URLS
+    const processedAssignments = (assignmentsData || []).map(assignment => {
+      // Find THIS student's submission
+      const submission = submissions?.find(sub => 
+        sub.assignment_id === assignment.id
+      );
+
+      // Check submission status
+      let isSubmitted = false;
+      let submissionStatus = 'not submitted';
+      let canSubmit = true;
+      let isGraded = false;
+      
+      if (submission) {
+        submissionStatus = submission.status || 'not submitted';
+        isSubmitted = ['submitted', 'graded', 'late'].includes(submissionStatus);
+        isGraded = submissionStatus === 'graded';
+      }
+
+      const dueDate = new Date(assignment.due_date);
+      const now = new Date();
+      const isPastDue = dueDate < now;
+      canSubmit = !isSubmitted && !isPastDue;
+
+      // =========== CRITICAL: PROCESS LECTURER FILES FROM LECTURERBUCKET ===========
+      const assignmentFiles = assignment.file_urls || [];
+      const processedFiles = assignmentFiles.map(fileUrl => {
+        if (!fileUrl) return null;
+        
+        // If it's already a full URL, keep it
+        if (fileUrl.startsWith('http')) {
+          return fileUrl;
+        }
+        
+        // If it's a path/name, construct lecturerbucket URL
+        // Get project reference from Supabase URL
+        const projectRef = supabase.supabaseUrl.split('//')[1].split('.')[0];
+        
+        // Try to extract file path from different formats
+        let filePath = fileUrl;
+        
+        // Remove any "lecturerbucket/" prefix if present
+        if (filePath.includes('lecturerbucket/')) {
+          filePath = filePath.split('lecturerbucket/')[1];
+        }
+        
+        // Construct the full URL to lecturerbucket
+        const fullUrl = `https://${projectRef}.supabase.co/storage/v1/object/public/lecturerbucket/${filePath}`;
+        
+        console.log(`📁 Lecturer file: ${filePath} → ${fullUrl}`);
+        return fullUrl;
+      }).filter(url => url && url !== '');
+
+      console.log(`   Assignment "${assignment.title}": ${processedFiles.length} lecturer files`);
+
+      // =========== PROCESS STUDENT SUBMISSION FILES (from assignments bucket) ===========
+      const studentSubmissionFiles = (submission?.file_urls || []).map(fileUrl => {
+        if (!fileUrl) return null;
+        
+        if (fileUrl.startsWith('http')) {
+          return fileUrl;
+        }
+        
+        // Get project reference
+        const projectRef = supabase.supabaseUrl.split('//')[1].split('.')[0];
+        
+        // Student submissions go to 'assignments' bucket
+        const fullUrl = `https://${projectRef}.supabase.co/storage/v1/object/public/assignments/${fileUrl}`;
+        
+        return fullUrl;
+      }).filter(url => url && url !== '');
+
+      // Find main PDF file from lecturer
+      const mainPdfFile = processedFiles.find(file => 
+        file && (file.toLowerCase().endsWith('.pdf') || 
+        file.includes('assignment') || 
+        file.includes('question'))
+      ) || processedFiles[0];
+
+      return {
+        id: assignment.id,
+        courseCode: assignment.courses?.course_code || 'N/A',
+        courseName: assignment.courses?.course_name || 'N/A',
+        courseDepartment: assignment.courses?.department_code,
+        title: assignment.title,
+        description: assignment.description || '',
+        instructions: assignment.instructions || '',
+        assignedDate: new Date(assignment.created_at).toLocaleDateString('en-US', {
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric'
+        }),
+        dueDate: dueDate.toLocaleDateString('en-US', {
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true
+        }) + ' EAT',
+        rawDueDate: dueDate,
+        isPastDue,
+        status: submissionStatus,
+        isSubmitted: isSubmitted,
+        submissionId: submission?.id,
+        submissionDate: submission?.submission_date,
+        fileUrls: studentSubmissionFiles, // Student's submitted files (assignments bucket)
+        submittedText: submission?.submitted_text || '',
+        feedback: submission?.feedback || '',
+        marks: submission?.marks_obtained
+          ? `${submission.marks_obtained}/${assignment.total_marks}`
+          : '',
+        totalMarks: assignment.total_marks,
+        obtainedMarks: submission?.marks_obtained,
+        lecturer: assignment.lecturers?.full_name || 'Unknown Lecturer',
+        submission_type: assignment.submission_type || 'file',
+        allowed_formats: assignment.allowed_formats || ['pdf', 'doc', 'docx', 'zip'],
+        max_file_size: assignment.max_file_size || 10,
+        assignment_files: processedFiles, // Lecturer's files (lecturerbucket)
+        main_assignment_file: mainPdfFile,
+        canSubmit: canSubmit,
+        isGraded: isGraded,
+        original_file_urls: assignment.file_urls || [],
+        created_at: assignment.created_at // Keep for sorting
+      };
+    });
+
+    console.log(`✅ Processed ${processedAssignments.length} assignments`);
+    
+    // Already sorted by created_at DESC from the query
+    setAssignments(processedAssignments);
+
+  } catch (error) {
+    console.error('❌ Error in fetchAssignments:', error);
+    alert(`Error loading assignments: ${error.message}`);
+    setAssignments([]);
+  } finally {
+    setLoading(false);
+  }
+};
 
   // =================== ENHANCED FILE DOWNLOAD FUNCTIONS ===================
  const handleDownloadAssignmentFile = async (assignment, fileUrl = null) => {
