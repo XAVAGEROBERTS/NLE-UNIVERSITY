@@ -30,17 +30,17 @@ const Coursework = () => {
     }
   }, [user]);
 
- // =================== FETCH ASSIGNMENTS WITH LECTURER FILES ===================
+// =================== FETCH ASSIGNMENTS WITH LECTURER FILES ===================
 const fetchAssignments = async () => {
   try {
     setLoading(true);
     console.clear();
     console.log('🚀 ===== STARTING ASSIGNMENT FETCH =====');
 
-    // 1. Get student by email
+    // 1. Get student by email with current semester/year info
     const { data: student, error: studentError } = await supabase
       .from('students')
-      .select('id, student_id, full_name, email, department_code')
+      .select('id, student_id, full_name, email, department_code, year_of_study, semester')
       .eq('email', user.email)
       .single();
 
@@ -55,7 +55,9 @@ const fetchAssignments = async () => {
       id: student.id,
       name: student.full_name,
       email: student.email,
-      department: student.department_code
+      department: student.department_code,
+      year: student.year_of_study,
+      semester: student.semester
     });
 
     // 2. Get student's enrolled courses and filter out completed ones
@@ -70,24 +72,27 @@ const fetchAssignments = async () => {
       throw coursesError;
     }
 
-    // Filter out completed courses
-    const activeCourseIds = studentCourses
+    // Get course IDs that are not completed
+    const nonCompletedCourseIds = studentCourses
       ?.filter(course => course.status !== 'completed')
       .map(course => course.course_id) || [];
 
     console.log(`📊 Student has ${studentCourses?.length || 0} total courses`);
-    console.log(`📊 Active courses (not completed): ${activeCourseIds.length}`);
+    console.log(`📊 Non-completed courses: ${nonCompletedCourseIds.length}`);
 
-    if (activeCourseIds.length === 0) {
-      console.log('✅ No active courses found - setting empty assignments');
+    if (nonCompletedCourseIds.length === 0) {
+      console.log('✅ No non-completed courses found - setting empty assignments');
       setAssignments([]);
       setLoading(false);
       return;
     }
 
-    // 3. Get assignments for student's department AND active courses only
-    console.log(`🔍 Fetching assignments for department: ${student.department_code}`);
-    
+    // 3. Get assignments for student's department, current semester, and non-completed courses
+    console.log(`🔍 Fetching assignments for:
+      - Department: ${student.department_code}
+      - Year: ${student.year_of_study}
+      - Semester: ${student.semester}`);
+
     const { data: assignmentsData, error: assignmentsError } = await supabase
       .from('assignments')
       .select(`
@@ -96,13 +101,17 @@ const fetchAssignments = async () => {
           id,
           course_code,
           course_name,
-          department_code
+          department_code,
+          year,
+          semester
         ),
         lecturers (full_name)
       `)
       .eq('courses.department_code', student.department_code)
+      .eq('courses.year', student.year_of_study)
+      .eq('courses.semester', student.semester)
       .in('status', ['published', 'closed', 'graded'])
-      .in('course_id', activeCourseIds) // CRITICAL: Only fetch assignments for active courses
+      .in('course_id', nonCompletedCourseIds)
       .order('created_at', { ascending: false });
 
     if (assignmentsError) {
@@ -110,7 +119,7 @@ const fetchAssignments = async () => {
       throw assignmentsError;
     }
 
-    console.log(`📚 Found ${assignmentsData?.length || 0} assignments for active courses`);
+    console.log(`📚 Found ${assignmentsData?.length || 0} assignments for current semester`);
 
     // 4. Get THIS STUDENT'S submissions only
     const { data: submissions, error: subsError } = await supabase
@@ -209,6 +218,8 @@ const fetchAssignments = async () => {
         courseCode: assignment.courses?.course_code || 'N/A',
         courseName: assignment.courses?.course_name || 'N/A',
         courseDepartment: assignment.courses?.department_code,
+        courseYear: assignment.courses?.year,
+        courseSemester: assignment.courses?.semester,
         title: assignment.title,
         description: assignment.description || '',
         instructions: assignment.instructions || '',
