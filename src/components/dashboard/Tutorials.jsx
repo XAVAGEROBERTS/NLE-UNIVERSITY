@@ -51,184 +51,200 @@ const Tutorials = () => {
     }
   }, [showDownloadToast]);
 
-  const fetchTutorials = async () => {
-    try {
-      setLoading(true);
-      setError(null);
+const fetchTutorials = async () => {
+  try {
+    setLoading(true);
+    setError(null);
 
-      // 1. Get student profile
-      const { data: student, error: studentError } = await supabase
-        .from('students')
-        .select('id')
-        .eq('email', user.email)
-        .single();
+const { data: student, error: studentError } = await supabase
+  .from('students')
+  .select('id, student_id, program_code, academic_year, year_of_study, semester')
+  .eq('email', user.email)
+  .single();
 
-      if (studentError || !student) {
-        throw new Error('Unable to load student profile');
-      }
+if (studentError || !student) {
+  throw new Error('Unable to load student profile');
+}
 
-      // 2. Get enrolled course IDs
-      const { data: enrollments, error: enrollError } = await supabase
-        .from('student_courses')
-        .select('course_id')
-        .eq('student_id', student.id);
+if (!student.program_code || !student.academic_year) {
+  throw new Error('Your profile is incomplete: missing program code or academic year. Contact admin.');
+}
+const {
+  id: studentId, // UUID
+  program_code: studentProgramCode,
+  academic_year: studentAcademicYear,
+  year_of_study: studentYear,
+  semester: studentSemester
+} = student;
 
-      if (enrollError) throw enrollError;
+const studentCohort = `Year${studentYear}_Sem${studentSemester}`;
 
-      const courseIds = enrollments?.map(e => e.course_id) || [];
+console.log('Student cohort:', {
+  programCode: studentProgramCode,
+  academicYear: studentAcademicYear,
+  cohort: studentCohort,
+  uuid: studentId
+});
 
-      // 3. Fetch tutorial metadata from DB
-      let tutorialEntries = [];
-      if (courseIds.length > 0) {
-        const { data, error } = await supabase
-          .from('tutorials')
-          .select(`
-            id,
-            title,
-            description,
-            duration_minutes,
-            difficulty_level,
-            course_id,
-            view_count,
-            file_urls,
-            thumbnail_url,
-            courses (course_code, course_name),
-            lecturers (full_name)
-          `)
-          .in('course_id', courseIds)
-          .eq('is_public', true)
-          .order('created_at', { ascending: false });
+    // === RECURSIVE STORAGE SCAN (CORRECTED & WORKING) ===
+    const scanFolder = async (prefix = '') => {
+      let allFiles = [];
 
-        if (error) console.warn('No tutorial entries in DB:', error);
-        tutorialEntries = data || [];
-      }
+      const listAndProcess = async (path = '') => {
+        const { data: items, error } = await supabase.storage
+          .from('Tutorials')
+          .list(path, {
+            limit: 1000,
+            offset: 0,
+            sortBy: { column: 'name', order: 'asc' }
+          });
 
-      // 4. SCAN STORAGE FOR VIDEOS
-      let allVideoFiles = [];
-      
-      const scanFolder = async (folderPath = '') => {
-        try {
-          const { data: items, error } = await supabase.storage
-            .from('Tutorials')
-            .list(folderPath, {
-              limit: 1000,
-              sortBy: { column: 'name', order: 'asc' }
+        if (error) {
+          console.error('Storage list error at path', path, error);
+          return;
+        }
+
+        if (!items || items.length === 0) return;
+
+        for (const item of items) {
+          const fullPath = path ? `${path}/${item.name}` : item.name;
+
+          // Folder: recurse
+          if (item.id === null || item.name.endsWith('/')) {
+            await listAndProcess(fullPath);
+          } else {
+            // File: add to list
+            const { data: urlData } = supabase.storage
+              .from('Tutorials')
+              .getPublicUrl(fullPath);
+
+            allFiles.push({
+              name: item.name,
+              path: fullPath,
+              url: urlData.publicUrl,
+              created_at: item.created_at
             });
-
-          if (error) return [];
-
-          if (!items || items.length === 0) return [];
-
-          const videos = [];
-          const subfolders = [];
-
-          for (const item of items) {
-            const itemPath = folderPath ? `${folderPath}/${item.name}` : item.name;
-            
-            if (!item.metadata || item.name.endsWith('/')) {
-              subfolders.push(itemPath.replace(/\/+$/, ''));
-            } else {
-              const isVideo = /\.(mp4|mkv|mov|webm|avi|m4v|mpeg|mpg|flv|wmv|3gp)$/i.test(item.name);
-              if (isVideo) {
-                // Get public URL for the video
-                const { data: publicUrlData } = supabase.storage
-                  .from('Tutorials')
-                  .getPublicUrl(itemPath);
-                
-                if (publicUrlData?.publicUrl) {
-                  videos.push({
-                    name: item.name,
-                    path: itemPath,
-                    url: publicUrlData.publicUrl,
-                    created_at: item.created_at
-                  });
-                }
-              }
-            }
           }
-
-          for (const subfolder of subfolders) {
-            const subVideos = await scanFolder(subfolder);
-            videos.push(...subVideos);
-          }
-
-          return videos;
-        } catch (err) {
-          console.error('Error scanning folder:', err);
-          return [];
         }
       };
 
-      allVideoFiles = await scanFolder();
-      console.log(`Found ${allVideoFiles.length} videos`);
+      await listAndProcess(prefix);
+      return allFiles;
+    };
 
-      // 5. Match videos to tutorial entries
-      const matchedTutorials = tutorialEntries.map(entry => {
-        const matchedVideo = allVideoFiles.find(v => {
-          const videoName = v.name.toLowerCase();
-          const courseCode = entry.courses?.course_code?.toLowerCase() || '';
-          const title = entry.title?.toLowerCase() || '';
-          
-          return videoName.includes(courseCode) || 
-                 videoName.includes(title.replace(/[^a-z0-9]/g, '_')) ||
-                 videoName.includes(entry.id);
-        });
+    // Only ONE declaration of allFiles
+    const allFiles = await scanFolder();
+    console.log(`Found ${allFiles.length} ACTUAL FILES in Tutorials bucket:`, allFiles.map(f => f.path));
 
-        return {
-          id: entry.id,
-          title: entry.title || 'Untitled Tutorial',
-          description: entry.description || '',
-          duration: entry.duration_minutes || 0,
-          difficulty: entry.difficulty_level || 'beginner',
-          videoSrc: matchedVideo?.url || null,
-          videoPath: matchedVideo?.path || null,
-          hasVideo: !!matchedVideo?.url,
-          lecturer: entry.lecturers?.full_name || 'Unknown Lecturer',
-          courseCode: entry.courses?.course_code || 'N/A',
-          courseName: entry.courses?.course_name || 'Unknown Course',
-          viewCount: entry.view_count || 0,
-          fileUrls: entry.file_urls || [],
-          thumbnailUrl: entry.thumbnail_url || null
-        };
-      });
+const matchingFiles = allFiles.filter(file => {
+  const parts = file.path.split('/');
+  if (parts.length < 5) return false; // Need at least program/[course]/year1/year2/cohort/file
 
-      // 6. Add orphan videos
-      const usedVideoPaths = matchedTutorials.map(t => t.videoPath).filter(Boolean);
-      const orphanVideos = allVideoFiles
-        .filter(v => !usedVideoPaths.includes(v.path))
-        .map(v => ({
-          id: `video-${v.path.replace(/\//g, '-').replace(/\./g, '_')}`,
-          title: v.name.replace(/\.[^.]+$/, '').replace(/[_-]/g, ' '),
-          description: 'Uploaded tutorial video',
-          duration: 0,
-          difficulty: 'beginner',
-          videoSrc: v.url,
-          videoPath: v.path,
-          hasVideo: true,
-          lecturer: 'Unknown Lecturer',
-          courseCode: 'General',
-          courseName: 'Tutorial Video',
-          viewCount: 0,
-          fileUrls: [],
-          thumbnailUrl: null
-        }));
+  const programCode = parts[0].toUpperCase().trim();
 
-      // 7. Combine and filter
-      const allTutorials = [
-        ...matchedTutorials.filter(t => t.hasVideo),
-        ...orphanVideos
-      ];
+  // Determine if there's a course code
+  let startIndex = 1; // default: program/year1/year2/cohort/file
+  if (parts.length >= 6 && /^[A-Z0-9]{4,12}$/.test(parts[1])) {
+    startIndex = 2; // program/course/year1/year2/cohort/file
+  }
 
-      allTutorials.sort((a, b) => a.title.localeCompare(b.title));
-      setTutorials(allTutorials);
+  const year1 = parts[startIndex];
+  const year2 = parts[startIndex + 1];
+  const cohortPart = parts[startIndex + 2];
 
-    } catch (err) {
-      console.error('Critical error:', err);
-      setError(`Failed to load tutorials: ${err.message}`);
-    } finally {
-      setLoading(false);
+  // Reconstruct academic year as "2025/2029"
+  const folderAcademicYear = `${year1}/${year2}`;
+
+  const normFolderAY = folderAcademicYear
+    .replace(/_/g, '/')
+    .replace(/-/g, '/')
+    .trim()
+    .toUpperCase();
+
+  const normStudentAY = studentAcademicYear.toUpperCase().trim();
+
+  const normCohort = (cohortPart || '').toUpperCase().trim();
+  const normStudentCohort = studentCohort.toUpperCase();
+
+  console.log('ULTIMATE CHECK:', file.path, {
+    programMatch: programCode === studentProgramCode.toUpperCase().trim(),
+    ayMatch: normFolderAY === normStudentAY,
+    cohortMatch: normCohort === normStudentCohort,
+    extracted: { program: programCode, ay: normFolderAY, cohort: normCohort }
+  });
+
+  return (
+    programCode === studentProgramCode.toUpperCase().trim() &&
+    normFolderAY === normStudentAY &&
+    normCohort === normStudentCohort
+  );
+});
+
+    console.log(`Filtered to ${matchingFiles.length} matching tutorials`);
+    
+    console.log(`Found ${allFiles.length} files in Tutorials bucket`);
+
+  
+
+allFiles.forEach(file => {
+  console.log('Available file path:', file.path);
+});
+
+    console.log(`Filtered to ${matchingFiles.length} matching tutorials`);
+const { data: enrollments, error: enrollError } = await supabase
+  .from('student_courses')
+  .select('courses(course_code)')
+  .eq('student_id', student.id); // Now uses correct UUID
+
+if (enrollError) {
+  console.warn('Could not load enrollments:', enrollError);
+  // Continue without strict course check
+}
+
+    const enrolledCourseCodes = enrollments?.map(e => e.courses?.course_code?.toUpperCase()) || [];
+
+    // 5. Create tutorial objects from matching files
+    const studentTutorials = matchingFiles.map(file => {
+      const fileName = file.name.replace(/\.[^.]+$/, ''); // remove extension
+      const cleanTitle = fileName.replace(/[_-]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+
+      // Extract course code if present
+      const parts = file.path.split('/');
+      let displayCourseCode = 'General';
+      if (parts.length >= 5 && parts[1].length <= 10) {
+        displayCourseCode = parts[1];
+      }
+
+      return {
+        id: `storage-${file.path.replace(/\//g, '-').replace(/\./g, '_')}`,
+        title: cleanTitle,
+        description: 'Tutorial material uploaded by your lecturer',
+        videoSrc: file.url,
+        hasVideo: true,
+        lecturer: 'Your Lecturer',
+        courseCode: displayCourseCode,
+        courseName: displayCourseCode === 'General' ? 'General Tutorial' : `Course ${displayCourseCode}`,
+        fileUrls: [], // no extra materials for now
+        viewCount: 0
+      };
+    });
+
+    // Sort by filename/title
+    studentTutorials.sort((a, b) => a.title.localeCompare(b.title));
+
+    setTutorials(studentTutorials);
+
+    if (studentTutorials.length === 0) {
+      setError('No tutorials available for your program and cohort yet. Check back later!');
     }
-  };
+
+  } catch (err) {
+    console.error('Error loading tutorials:', err);
+    setError(`Failed to load tutorials: ${err.message}`);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const openVideoPlayer = async (tutorial) => {
     if (!tutorial.videoSrc) {
