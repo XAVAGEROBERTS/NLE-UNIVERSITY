@@ -14,75 +14,67 @@ export const StudentAuthProvider = ({ children }) => {
   const [authLoading, setAuthLoading] = useState(false);
   const navigate = useNavigate();
 
- const loadProfile = async (authUser) => {
-  if (!authUser?.email) {
-    console.warn('No email — cannot load profile');
-    return null;
-  }
-
-  try {
-    // Fetch student profile
-    const { data: student, error } = await supabase
-      .from('students')
-      .select('*')
-      .eq('email', authUser.email.toLowerCase().trim())
-      .eq('status', 'active')
-      .single();
-
-    if (error || !student) {
-      console.warn('No active student found');
+  const loadProfile = async (authUser) => {
+    if (!authUser?.email) {
+      console.warn('No email — cannot load profile');
       return null;
     }
 
-    // === SINGLE DEVICE VALIDATION ===
-    const storedToken = localStorage.getItem('active_device_token');
-    const dbToken = student.active_device_token;
+    try {
+      console.log('Fetching profile for:', authUser.email);
 
-    // If there's a token in DB but it doesn't match the one in localStorage → old session
-    if (dbToken && storedToken && dbToken !== storedToken) {
-      console.warn('Session invalid: logged in from another device');
-      await supabase.auth.signOut();
-      localStorage.removeItem('active_device_token');
-      // Optional: show message on login page later
+      const { data, error } = await supabase
+        .from('students')
+        .select('*')
+        .eq('email', authUser.email.toLowerCase().trim())
+        .eq('status', 'active')
+        .single(); // Use .single() — we'll handle error properly
+
+      if (error) {
+        console.error('Profile fetch error:', error.message);
+        return null;
+      }
+
+      if (!data) {
+        console.warn('No active student found for email:', authUser.email);
+        return null;
+      }
+
+      console.log('✅ Profile loaded successfully:', data.full_name);
+
+      // Update last_login
+      supabase
+        .from('students')
+        .update({ last_login: new Date().toISOString() })
+        .eq('id', data.id);
+
+      return {
+        id: data.id,
+        authId: authUser.id,
+        studentId: data.student_id,
+        email: data.email,
+        name: data.full_name,
+        phone: data.phone || '',
+        dateOfBirth: data.date_of_birth || '',
+        program: data.program || '',
+        yearOfStudy: data.year_of_study || 1,
+        semester: data.semester || 1,
+        intake: data.intake || '',
+        academicYear: data.academic_year || '',
+        programCode: data.program_code || '',
+        department: data.department || '',
+        departmentCode: data.department_code || '',
+        programDurationYears: data.program_duration_years,
+        programTotalSemesters: data.program_total_semesters,
+        status: data.status,
+        createdAt: data.created_at,
+        lastLogin: new Date().toISOString(),
+      };
+    } catch (err) {
+      console.error('Unexpected profile error:', err);
       return null;
     }
-    // === END VALIDATION ===
-
-    console.log('✅ Profile loaded successfully:', student.full_name);
-
-    // Update last_login as before
-    supabase
-      .from('students')
-      .update({ last_login: new Date().toISOString() })
-      .eq('id', student.id);
-
-    return {
-      id: student.id,
-      authId: authUser.id,
-      studentId: student.student_id,
-      email: student.email,
-      name: student.full_name,
-      phone: student.phone || '',
-      dateOfBirth: student.date_of_birth || '',
-      program: student.program || '',
-      yearOfStudy: student.year_of_study || 1,
-      semester: student.semester || 1,
-      intake: student.intake || '',
-      academicYear: student.academic_year || '',
-      programCode: student.program_code || '',
-      department: student.department || '',
-      departmentCode: student.department_code || '',
-      programDurationYears: student.program_duration_years,
-      programTotalSemesters: student.program_total_semesters,
-      status: student.status,
-      createdAt: student.created_at,
-      lastLogin: new Date().toISOString(),
-    };
-  } catch (err) {
-    console.error('Unexpected profile error:', err);
-    return null;
-  }
-};
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -134,45 +126,21 @@ export const StudentAuthProvider = ({ children }) => {
     };
   }, [navigate]);
 
-const signIn = async (email, password) => {
-  setAuthLoading(true);
-  try {
-    const { data: { session }, error } = await supabase.auth.signInWithPassword({
-      email: email.toLowerCase().trim(),
-      password,
-    });
-
-    if (error) throw error;
-
-    // === SINGLE DEVICE LOGIC START ===
-    // Generate a unique token for this device/session
-    const deviceToken = crypto.randomUUID();
-
-    // Save this token in localStorage (so we can check it later)
-    localStorage.setItem('active_device_token', deviceToken);
-
-    // Update the student's row: overwrite any previous token
-    const { error: updateError } = await supabase
-      .from('students')
-      .update({
-        active_device_token: deviceToken,
-        last_active_at: new Date().toISOString(), // optional: track last activity
-      })
-      .eq('email', email.toLowerCase().trim());
-
-    if (updateError) {
-      console.warn('Could not update device token (non-critical):', updateError.message);
-      // Don't block login — just means single-device won't be fully enforced
+  const signIn = async (email, password) => {
+    setAuthLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.toLowerCase().trim(),
+        password,
+      });
+      if (error) throw error;
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    } finally {
+      setAuthLoading(false);
     }
-    // === SINGLE DEVICE LOGIC END ===
-
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: err.message };
-  } finally {
-    setAuthLoading(false);
-  }
-};
+  };
 
   const signOut = async () => {
     setAuthLoading(true);
