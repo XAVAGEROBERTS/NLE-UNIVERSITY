@@ -214,7 +214,7 @@ const StudentLogin = () => {
       {/* Background Image */}
       <div style={styles.bgImage}>
         <img 
-          src="/images/back G login.jpg" 
+          src="/back G login.jpg" 
           alt="University Campus" 
           style={styles.bgImageImg}
           onError={(e) => {
