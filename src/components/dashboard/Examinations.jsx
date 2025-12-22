@@ -31,144 +31,211 @@ const Examinations = () => {
       fetchExams();
     }
   }, [user]);
+const fetchExams = async () => {
+  try {
+    setLoading(true);
+    setError(null);
 
-  const fetchExams = async () => {
-    try {
-      setLoading(true);
-      setError(null);
+    console.log('Fetching exams for user:', user.email);
 
-      console.log('Fetching exams for user:', user.email);
+    // Get student data
+    const { data: student, error: studentError } = await supabase
+      .from('students')
+      .select('id, full_name, student_id, program, year_of_study, semester, academic_year, program_id')
+      .eq('email', user.email)
+      .single();
 
-      // Get student data
-      const { data: student, error: studentError } = await supabase
-        .from('students')
-        .select('id, full_name, student_id, program, year_of_study, semester, academic_year')
-        .eq('email', user.email)
-        .single();
-
-      if (studentError) {
-        console.error('Student error:', studentError);
-        throw new Error(`Student data error: ${studentError.message}`);
-      }
-
-      if (!student) {
-        throw new Error('Student not found');
-      }
-
-      console.log('Student found:', student.full_name);
-      setStudentInfo(student);
-
-      // Fetch student's enrolled courses
-      const { data: studentCourses, error: coursesError } = await supabase
-        .from('student_courses')
-        .select('course_id, status')
-        .eq('student_id', student.id)
-        .in('status', ['enrolled', 'in_progress', 'completed']);
-
-      if (coursesError) {
-        console.error('Courses error:', coursesError);
-        throw new Error(`Courses error: ${coursesError.message}`);
-      }
-
-      const courseIds = studentCourses ? studentCourses.map(sc => sc.course_id) : [];
-      console.log('Enrolled course IDs:', courseIds);
-
-      if (courseIds.length === 0) {
-        console.log('No enrolled courses found');
-        setExams([]);
-        setLoading(false);
-        return;
-      }
-
-      // Fetch exams for these courses
-      const { data: examsData, error: examsError } = await supabase
-        .from('examinations')
-        .select(`
-          *,
-          courses (id, course_code, course_name)
-        `)
-        .in('course_id', courseIds)
-        .in('status', ['published', 'active', 'completed'])
-        .order('start_time', { ascending: true });
-
-      if (examsError) {
-        console.error('Exams error:', examsError);
-        throw new Error(`Exams error: ${examsError.message}`);
-      }
-
-      console.log('Exams fetched:', examsData?.length || 0);
-
-      // Fetch student's exam submissions separately to avoid nested query issues
-      const { data: submissionsData, error: submissionsError } = await supabase
-        .from('exam_submissions')
-        .select('*')
-        .eq('student_id', student.id);
-
-      if (submissionsError) {
-        console.error('Submissions error:', submissionsError);
-        throw new Error(`Submissions error: ${submissionsError.message}`);
-      }
-
-      console.log('Submissions found:', submissionsData?.length || 0);
-
-      // Process exams with submissions
-      const processedExams = examsData ? examsData.map(exam => {
-        const studentSubmission = submissionsData?.find(
-          sub => sub.exam_id === exam.id
-        );
-
-        return {
-          id: exam.id,
-          title: exam.title,
-          description: exam.description,
-          courseId: exam.course_id,
-          courseCode: exam.courses?.course_code || 'N/A',
-          courseName: exam.courses?.course_name || exam.title,
-          examType: exam.exam_type,
-          startTime: exam.start_time,
-          endTime: exam.end_time,
-          duration: exam.duration_minutes,
-          totalMarks: exam.total_marks,
-          passingMarks: exam.passing_marks,
-          location: exam.location,
-          supervisor: exam.supervisor,
-          instructions: exam.instructions,
-          status: exam.status,
-          submitted: !!studentSubmission,
-          submission: studentSubmission || null,
-          isActive: checkIfExamIsActive(exam),
-          canStart: checkIfCanStartExam(exam, studentSubmission)
-        };
-      }) : [];
-
-      console.log('Processed exams:', processedExams.length);
-      setExams(processedExams);
-    } catch (error) {
-      console.error('Error fetching exams:', error);
-      setError(`Failed to load examinations: ${error.message}`);
-      setExams([]);
-    } finally {
-      setLoading(false);
+    if (studentError) {
+      console.error('Student error:', studentError);
+      throw new Error(`Student data error: ${studentError.message}`);
     }
-  };
 
-  const checkIfExamIsActive = (exam) => {
-    const now = new Date();
-    const startTime = new Date(exam.start_time);
-    const endTime = new Date(exam.end_time);
-    return now >= startTime && now <= endTime && exam.status === 'active';
-  };
+    if (!student) {
+      throw new Error('Student not found');
+    }
 
-  const checkIfCanStartExam = (exam, submission) => {
-    if (submission) return false; // Already submitted
+    console.log('Student found:', student.full_name);
+    setStudentInfo(student);
+
+    // Fetch student's enrolled courses - ONLY courses that are NOT completed
+    const { data: studentCourses, error: coursesError } = await supabase
+      .from('student_courses')
+      .select('course_id, status')
+      .eq('student_id', student.id)
+      .eq('status', 'enrolled'); // ONLY get enrolled courses (not completed)
+
+    if (coursesError) {
+      console.error('Courses error:', coursesError);
+      throw new Error(`Courses error: ${coursesError.message}`);
+    }
+
+    const courseIds = studentCourses ? studentCourses.map(sc => sc.course_id) : [];
+    console.log('Enrolled course IDs (non-completed):', courseIds);
+
+    if (courseIds.length === 0) {
+      console.log('No enrolled courses found');
+      setExams([]);
+      setLoading(false);
+      return;
+    }
+
+    // Fetch exams for these courses
+    let query = supabase
+      .from('examinations')
+      .select(`
+        *,
+        courses (id, course_code, course_name)
+      `)
+      .in('course_id', courseIds)
+      .in('status', ['scheduled', 'published', 'active', 'completed']) // Include all statuses
+      .order('start_time', { ascending: true });
+
+    // Apply cohort targeting if student has cohort data
+    const cleanAY = (student.academic_year || '').trim().replace(/\s/g, '');
     
-    const now = new Date();
-    const startTime = new Date(exam.start_time);
-    const endTime = new Date(exam.end_time);
-    
-    return now >= startTime && now <= endTime && exam.status === 'active';
-  };
+    if (cleanAY || student.year_of_study || student.semester || student.program_id) {
+      const orConditions = [];
+      
+      // Academic year
+      if (cleanAY) {
+        orConditions.push(`target_academic_year.eq.${cleanAY}`);
+        orConditions.push(`target_academic_year.is.null`);
+      }
+      
+      // Year of study
+      if (student.year_of_study != null) {
+        orConditions.push(`target_year_of_study.eq.${student.year_of_study}`);
+        orConditions.push(`target_year_of_study.is.null`);
+      }
+      
+      // Semester
+      if (student.semester != null) {
+        orConditions.push(`target_semester.eq.${student.semester}`);
+        orConditions.push(`target_semester.is.null`);
+      }
+      
+      // Program
+      if (student.program_id) {
+        orConditions.push(`target_program_id.eq.${student.program_id}`);
+        orConditions.push(`target_program_id.is.null`);
+      }
+      
+      if (orConditions.length > 0) {
+        query = query.or(orConditions.join(','));
+        console.log('Applied cohort filter:', orConditions.join(','));
+      }
+    }
 
+    const { data: examsData, error: examsError } = await query;
+
+    if (examsError) {
+      console.error('Exams error:', examsError);
+      throw new Error(`Exams error: ${examsError.message}`);
+    }
+
+    // Fetch ALL exam submissions for this student (including past ones)
+    const { data: submissionsData, error: submissionsError } = await supabase
+      .from('exam_submissions')
+      .select('*')
+      .eq('student_id', student.id);
+
+    if (submissionsError) {
+      console.error('Submissions error:', submissionsError);
+      throw new Error(`Submissions error: ${submissionsError.message}`);
+    }
+    
+    console.log('All exam submissions found:', submissionsData?.length || 0);
+
+    // Process ALL exams regardless of current status
+    const processedExams = examsData ? examsData.map(exam => {
+      const studentSubmission = submissionsData?.find(
+        sub => sub.exam_id === exam.id
+      );
+
+      const now = new Date();
+      const startTime = new Date(exam.start_time);
+      const endTime = new Date(exam.end_time);
+      
+      // Determine exam status based on current time
+      let status = exam.status;
+      let isActive = now >= startTime && now <= endTime;
+      let isUpcoming = now < startTime;
+      let isEnded = now > endTime;
+      let canStart = false;
+
+      // Check if student can start this exam
+      if (!studentSubmission) {
+        if (isActive && exam.status === 'active') {
+          canStart = true;
+        }
+      }
+
+      return {
+        id: exam.id,
+        title: exam.title,
+        description: exam.description,
+        courseId: exam.course_id,
+        courseCode: exam.courses?.course_code || 'N/A',
+        courseName: exam.courses?.course_name || exam.title,
+        examType: exam.exam_type,
+        startTime: exam.start_time,
+        endTime: exam.end_time,
+        duration: exam.duration_minutes,
+        totalMarks: exam.total_marks,
+        passingMarks: exam.passing_marks,
+        location: exam.location,
+        supervisor: exam.supervisor,
+        instructions: exam.instructions,
+        status: status,
+        submitted: !!studentSubmission,
+        submission: studentSubmission || null,
+        isActive: isActive,
+        isUpcoming: isUpcoming,
+        isEnded: isEnded,
+        canStart: canStart,
+        // Add these for easier rendering
+        rawStatus: exam.status
+      };
+    }) : [];
+
+    console.log('Processed exams (all statuses):', processedExams.length);
+    
+    // Log breakdown by status
+    const activeExams = processedExams.filter(e => e.isActive).length;
+    const upcomingExams = processedExams.filter(e => e.isUpcoming).length;
+    const endedExams = processedExams.filter(e => e.isEnded).length;
+    const submittedExams = processedExams.filter(e => e.submitted).length;
+    
+    console.log('Breakdown:', {
+      active: activeExams,
+      upcoming: upcomingExams,
+      ended: endedExams,
+      submitted: submittedExams,
+      total: processedExams.length
+    });
+
+    setExams(processedExams);
+  } catch (error) {
+    console.error('Error fetching exams:', error);
+    setError(`Failed to load examinations: ${error.message}`);
+    setExams([]);
+  } finally {
+    setLoading(false);
+  }
+};
+
+ const checkIfExamIsActive = (exam) => {
+  const now = new Date();
+  const startTime = new Date(exam.startTime);
+  const endTime = new Date(exam.endTime);
+  return now >= startTime && now <= endTime;
+};
+
+const checkIfCanStartExam = (exam, submission) => {
+  if (submission) return false; // Already submitted
+  if (!exam.isActive) return false; // Not active
+  return true;
+};
   const handleExamClick = async (exam) => {
     if (exam.submitted) {
       // Navigate to results view
@@ -238,6 +305,8 @@ const Examinations = () => {
         alert('Student information not available. Please try again.');
         return;
       }
+
+
 
       // Create permit element
       const permitElement = document.createElement('div');
@@ -417,18 +486,14 @@ const Examinations = () => {
     }) + ' EAT';
   };
 
-  const getExamStatus = (exam) => {
-    const now = new Date();
-    const startTime = new Date(exam.startTime);
-    const endTime = new Date(exam.endTime);
-
-    if (exam.submitted) return 'submitted';
-    if (exam.isActive) return 'active';
-    if (now < startTime) return 'upcoming';
-    if (exam.status === 'completed') return 'ended';
-    return 'upcoming';
-  };
-
+  // FIXED: Use the correct property names (camelCase instead of snake_case)
+ const getExamStatus = (exam) => {
+  if (exam.submitted) return 'submitted';
+  if (exam.isActive) return 'active';
+  if (exam.isUpcoming) return 'upcoming';
+  if (exam.isEnded) return 'ended';
+  return 'upcoming';
+};
   const getStatusColor = (status) => {
     switch(status) {
       case 'submitted': return '#28a745';
@@ -439,6 +504,19 @@ const Examinations = () => {
     }
   };
 
+  // FIXED: Get time until start with correct property names
+  const getTimeUntilStart = (exam) => {
+    const now = new Date();
+    const startTime = new Date(exam.startTime); // Changed from exam.start_time
+    
+    if (now >= startTime) return 'Started';
+    
+    const diffSeconds = Math.floor((startTime - now) / 1000);
+    const hours = Math.floor(diffSeconds / 3600);
+    const minutes = Math.floor((diffSeconds % 3600) / 60);
+    return `${hours}h ${minutes}m`;
+  };
+
   const refreshExams = () => {
     fetchExams();
   };
@@ -447,6 +525,7 @@ const Examinations = () => {
   const renderMobileExamCard = (exam, index) => {
     const status = getExamStatus(exam);
     const statusColor = getStatusColor(status);
+    const timeUntilStart = getTimeUntilStart(exam);
     
     return (
       <div 
@@ -650,8 +729,8 @@ const Examinations = () => {
                   cursor: 'not-allowed'
                 }}
               >
-                <i className="fas fa-lock"></i>
-                Not Available Yet
+                <i className="fas fa-clock"></i>
+                Starts in {timeUntilStart}
               </button>
             ) : (
               <button 
@@ -682,6 +761,7 @@ const Examinations = () => {
   const renderDesktopExamCard = (exam, index) => {
     const status = getExamStatus(exam);
     const statusColor = getStatusColor(status);
+    const timeUntilStart = getTimeUntilStart(exam);
     
     return (
       <div 
@@ -896,17 +976,17 @@ const Examinations = () => {
                   View Results
                 </button>
               </div>
-            ) : exam.canStart ? (
+            ) : status === 'active' ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
                 <div style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
                   color: '#dc3545',
-                  fontWeight: '500'
+                  fontWeight: 'bold'
                 }}>
-                  <i className="fas fa-exclamation-circle"></i>
-                  Exam is now active
+                  <i className="fas fa-exclamation-triangle"></i>
+                  Exam is ONGOING
                 </div>
                 <button 
                   onClick={() => handleExamClick(exam)}
@@ -937,7 +1017,7 @@ const Examinations = () => {
                   color: '#007bff'
                 }}>
                   <i className="fas fa-clock"></i>
-                  Starts in {Math.floor((new Date(exam.startTime) - new Date()) / 1000 / 3600)}h {Math.floor(((new Date(exam.startTime) - new Date()) / 1000 / 60) % 60)}m
+                  Starts in {timeUntilStart}
                 </div>
                 <button 
                   disabled
