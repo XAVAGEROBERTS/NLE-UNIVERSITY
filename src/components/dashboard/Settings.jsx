@@ -869,10 +869,10 @@ const Settings = () => {
               <div>
                 <strong>Password Change Instructions:</strong>
                 <ul style={{ margin: '5px 0 0 0', paddingLeft: '20px', fontSize: '13px', color: '#666' }}>
-                  <li><strong>Default password:</strong> "Test1234" (for all students)</li>
+        
                   <li>If you don't remember your current password, try the default</li>
                   <li>New password must be at least 6 characters long</li>
-                  <li>Passwords are stored as plain text (for development only)</li>
+
                   <li>You will need to use your new password on next login</li>
                   <li>For security reasons, never share your password with anyone</li>
                 </ul>
