@@ -388,6 +388,7 @@ const CourseUnits = () => {
           </div>
           <div>
             <p style={{ 
+              display: 'none',
               margin: '0 0 2px 0',
               fontSize: '11px',
               color: '#999',
@@ -396,6 +397,7 @@ const CourseUnits = () => {
               Type
             </p>
             <p style={{ 
+              display: 'none',
               margin: '0',
               fontSize: '14px',
               fontWeight: '500',

@@ -58,27 +58,59 @@ const Settings = () => {
     }
   }, [authLoading, authUser, navigate]);
 
-  // Calculate GPA from completed courses
+  // Grade points mapping (same as Results component)
+  const getGradePoints = (grade) => {
+    if (!grade) return 0.0;
+    const gradeMap = {
+      'A': 5.0, 'B+': 4.5, 'B': 4.0, 'C+': 3.5,
+      'C': 3.0, 'D+': 2.5, 'D': 2.0, 'E': 1.0, 'F': 0.0
+    };
+    return gradeMap[grade.toUpperCase()] || 0.0;
+  };
+
+  // Get grade from marks (same as Results component)
+  const getGradeFromMarks = (marks) => {
+    if (!marks && marks !== 0) return 'N/A';
+    const numericMarks = parseFloat(marks);
+    if (isNaN(numericMarks)) return 'N/A';
+    
+    if (numericMarks >= 70) return 'A';
+    if (numericMarks >= 60) return 'B+';
+    if (numericMarks >= 50) return 'B';
+    if (numericMarks >= 45) return 'C+';
+    if (numericMarks >= 40) return 'C';
+    if (numericMarks >= 35) return 'D+';
+    if (numericMarks >= 30) return 'D';
+    if (numericMarks >= 20) return 'E';
+    return 'F';
+  };
+
+  // Calculate GPA from completed courses (updated to match Results component)
   const calculateGPA = (studentCourses) => {
-    if (!studentCourses || studentCourses.length === 0) return 0;
+    if (!studentCourses || studentCourses.length === 0) return 0.0;
     
+    // Filter completed courses with grades
     const completedCourses = studentCourses.filter(
-      course => course.status === 'completed' && course.grade_points
+      course => course.status === 'completed' && (course.grade || course.marks)
     );
     
-    if (completedCourses.length === 0) return 0;
+    if (completedCourses.length === 0) return 0.0;
     
-    const totalPoints = completedCourses.reduce(
-      (sum, course) => sum + (course.grade_points * course.credits), 
-      0
-    );
+    let totalPoints = 0;
+    let totalCredits = 0;
     
-    const totalCredits = completedCourses.reduce(
-      (sum, course) => sum + course.credits, 
-      0
-    );
+    completedCourses.forEach(course => {
+      const grade = course.grade || getGradeFromMarks(course.marks);
+      const gradePoints = course.grade_points || getGradePoints(grade);
+      const credits = course.credits || 3;
+      
+      if (gradePoints && credits) {
+        totalPoints += gradePoints * credits;
+        totalCredits += credits;
+      }
+    });
     
-    return totalCredits > 0 ? totalPoints / totalCredits : 0;
+    return totalCredits > 0 ? parseFloat((totalPoints / totalCredits).toFixed(2)) : 0.0;
   };
 
   // 2. Fetch student data
@@ -114,11 +146,24 @@ const Settings = () => {
           .eq('user_id', student.id)
           .single();
 
-        if (profileError && profileError.code !== 'PGRST116') {
-          console.log('Profile error:', profileError.message);
-        }
-
-        if (profile) {
+        if (profileError) {
+          if (profileError.code !== 'PGRST116') {
+            console.log('Profile error:', profileError.message);
+          }
+          // Create empty profile object if it doesn't exist
+          setProfileData({
+            user_id: student.id,
+            user_type: 'student',
+            address: '',
+            city: '',
+            country: 'Uganda',
+            emergency_contact_name: '',
+            emergency_contact_phone: '',
+            notification_preferences: {},
+            theme_preferences: {},
+            privacy_settings: {}
+          });
+        } else if (profile) {
           setProfileData(profile);
           setFormData(prev => ({
             ...prev,
@@ -149,54 +194,126 @@ const Settings = () => {
   // Fetch academic statistics
   const fetchAcademicStats = async (studentId) => {
     try {
-      // Get course statistics with proper join for credits
-      const { data: studentCourses, error: coursesError } = await supabase
+      // First, get student's program and year information
+      const { data: studentInfo, error: studentError } = await supabase
+        .from('students')
+        .select('program_code, year_of_study, semester')
+        .eq('id', studentId)
+        .single();
+
+      if (studentError) throw studentError;
+
+      // Get ALL courses for the student's program
+      const { data: programCourses, error: coursesError } = await supabase
+        .from('courses')
+        .select('*')
+        .eq('program_code', studentInfo.program_code)
+        .eq('is_active', true);
+
+      if (coursesError) throw coursesError;
+
+      // Get courses student is currently enrolled in with complete course data
+      const { data: enrolledCourses, error: enrolledError } = await supabase
         .from('student_courses')
         .select(`
           *,
           courses (
             id,
+            course_code,
+            course_name,
             credits
           )
         `)
         .eq('student_id', studentId);
 
-      if (coursesError) throw coursesError;
+      if (enrolledError) throw enrolledError;
 
-      const totalCourses = studentCourses?.length || 0;
-      const completedCourses = studentCourses?.filter(c => c.status === 'completed').length || 0;
+      // Calculate stats
+      const totalCourses = programCourses?.length || 0;
       
-      // Calculate GPA (same as dashboard)
-      const coursesWithGrades = (studentCourses || []).map(sc => ({
-        ...sc,
-        credits: sc.courses?.credits || 3,
-        grade_points: sc.grade_points || 0
-      }));
+      // Filter completed courses (status = 'completed')
+      const completedCourses = enrolledCourses?.filter(c => c.status === 'completed').length || 0;
+      
+      // Filter active/enrolled courses (not completed)
+      const activeCourses = enrolledCourses?.filter(c => c.status !== 'completed') || [];
+      const enrolledCoursesCount = activeCourses.length;
+      
+      // Get course IDs for ACTIVE courses only (not completed)
+      const activeCourseIds = activeCourses.map(sc => sc.course_id) || [];
+      
+      // Calculate GPA from completed courses only using updated logic
+      const completedCoursesWithGrades = enrolledCourses?.filter(c => c.status === 'completed') || [];
+      
+      // Transform data to match Results component structure
+      const coursesWithGrades = completedCoursesWithGrades.map(sc => {
+        const courseData = sc.courses || {};
+        const grade = sc.grade || getGradeFromMarks(sc.marks);
+        return {
+          ...sc,
+          grade: grade,
+          grade_points: sc.grade_points || getGradePoints(grade),
+          credits: courseData.credits || 3,
+          status: sc.status
+        };
+      });
       
       const currentGPA = calculateGPA(coursesWithGrades);
 
-      // Get pending assignments
-      const { data: pendingAssignments, error: assignmentsError } = await supabase
-        .from('assignments')
-        .select('id')
-        .eq('status', 'published')
-        .gt('due_date', new Date().toISOString());
+      // Get pending assignments - ONLY for ACTIVE courses (not completed) that student is enrolled in
+      let pendingCount = 0;
+      if (activeCourseIds.length > 0) {
+        const { data: allAssignments, error: assignmentsError } = await supabase
+          .from('assignments')
+          .select('id, course_id, title, due_date')
+          .eq('status', 'published')
+          .gt('due_date', new Date().toISOString());
 
-      const pendingCount = pendingAssignments?.length || 0;
+        if (!assignmentsError && allAssignments) {
+          // Filter assignments to only include those for courses the student is actively enrolled in
+          const pendingAssignments = allAssignments.filter(assignment => 
+            activeCourseIds.includes(assignment.course_id)
+          );
+          
+          pendingCount = pendingAssignments.length;
+          
+          // Debug log
+          console.log('Student active course IDs:', activeCourseIds);
+          console.log('All assignments found:', allAssignments.length);
+          console.log('Filtered pending assignments:', pendingAssignments.length);
+        } else if (assignmentsError) {
+          console.error('Error fetching assignments:', assignmentsError);
+        }
+      }
 
-      // Get upcoming exams
-      const { data: upcomingExams, error: examsError } = await supabase
-        .from('examinations')
-        .select('id')
-        .eq('status', 'published')
-        .gt('start_time', new Date().toISOString());
+      // Get upcoming exams - ONLY for ACTIVE courses (not completed) that student is enrolled in
+      let examsCount = 0;
+      if (activeCourseIds.length > 0) {
+        const { data: allExams, error: examsError } = await supabase
+          .from('examinations')
+          .select('id, course_id, title, start_time')
+          .eq('status', 'published')
+          .gt('start_time', new Date().toISOString());
 
-      const examsCount = upcomingExams?.length || 0;
+        if (!examsError && allExams) {
+          // Filter exams to only include those for courses the student is actively enrolled in
+          const upcomingExams = allExams.filter(exam => 
+            activeCourseIds.includes(exam.course_id)
+          );
+          
+          examsCount = upcomingExams.length;
+          
+          // Debug log
+          console.log('Upcoming exams for active courses:', upcomingExams.length);
+        } else if (examsError) {
+          console.error('Error fetching exams:', examsError);
+        }
+      }
 
       setAcademicStats({
-        totalCourses,
+        totalCourses: totalCourses,
+        enrolledCourses: enrolledCoursesCount,
         completedCourses,
-        currentGPA: parseFloat(currentGPA.toFixed(2)),
+        currentGPA: currentGPA,
         pendingAssignments: pendingCount,
         upcomingExams: examsCount
       });
@@ -206,8 +323,9 @@ const Settings = () => {
       // Set default values on error
       setAcademicStats({
         totalCourses: 0,
+        enrolledCourses: 0,
         completedCourses: 0,
-        currentGPA: 0,
+        currentGPA: 0.0,
         pendingAssignments: 0,
         upcomingExams: 0
       });
@@ -262,25 +380,44 @@ const Settings = () => {
         if (phoneError) throw phoneError;
       }
 
-      // Update or create profile
+      // Prepare profile data for update/insert
       const profileDataToUpdate = {
         user_id: studentData.id,
         user_type: 'student',
-        address: formData.address,
-        city: formData.city,
-        country: formData.country,
-        emergency_contact_name: formData.emergency_contact_name,
-        emergency_contact_phone: formData.emergency_contact_phone,
+        address: formData.address || '',
+        city: formData.city || '',
+        country: formData.country || 'Uganda',
+        emergency_contact_name: formData.emergency_contact_name || '',
+        emergency_contact_phone: formData.emergency_contact_phone || '',
         updated_at: new Date().toISOString()
       };
 
-      const { error: profileError } = await supabase
+      // Check if profile exists
+      const { data: existingProfile, error: checkError } = await supabase
         .from('profiles')
-        .upsert(profileDataToUpdate, {
-          onConflict: 'user_id'
-        });
+        .select('id')
+        .eq('user_id', studentData.id)
+        .single();
 
-      if (profileError) throw profileError;
+      let operationError;
+      
+      if (checkError && checkError.code === 'PGRST116') {
+        // Profile doesn't exist, insert new
+        profileDataToUpdate.created_at = new Date().toISOString();
+        const { error: insertError } = await supabase
+          .from('profiles')
+          .insert([profileDataToUpdate]);
+        operationError = insertError;
+      } else if (!checkError) {
+        // Profile exists, update it
+        const { error: updateError } = await supabase
+          .from('profiles')
+          .update(profileDataToUpdate)
+          .eq('user_id', studentData.id);
+        operationError = updateError;
+      }
+
+      if (operationError) throw operationError;
 
       // Update local state
       setProfileData(prev => ({
@@ -288,7 +425,18 @@ const Settings = () => {
         ...profileDataToUpdate
       }));
 
+      // Update student data in state
+      setStudentData(prev => ({
+        ...prev,
+        phone: formData.phone
+      }));
+
       setMessage({ type: 'success', text: 'Profile updated successfully!' });
+
+      // Clear success message after 5 seconds
+      setTimeout(() => {
+        setMessage({ type: '', text: '' });
+      }, 5000);
 
     } catch (error) {
       console.error('Error updating profile:', error);
@@ -360,6 +508,11 @@ const Settings = () => {
         setTimeout(() => {
           setPasswordMessage({ type: '', text: '' });
         }, 5000);
+      } else {
+        setPasswordMessage({ 
+          type: 'error', 
+          text: result.message || 'Failed to change password' 
+        });
       }
     } catch (error) {
       console.error('Error changing password:', error);
@@ -397,16 +550,14 @@ const Settings = () => {
 
   // Reset profile form to original values
   const handleResetForm = () => {
-    if (profileData) {
-      setFormData({
-        phone: studentData?.phone || '',
-        address: profileData.address || '',
-        city: profileData.city || '',
-        country: profileData.country || 'Uganda',
-        emergency_contact_name: profileData.emergency_contact_name || '',
-        emergency_contact_phone: profileData.emergency_contact_phone || ''
-      });
-    }
+    setFormData({
+      phone: studentData?.phone || '',
+      address: profileData?.address || '',
+      city: profileData?.city || '',
+      country: profileData?.country || 'Uganda',
+      emergency_contact_name: profileData?.emergency_contact_name || '',
+      emergency_contact_phone: profileData?.emergency_contact_phone || ''
+    });
   };
 
   // Handle logout
@@ -533,7 +684,7 @@ const Settings = () => {
             
             <div style={styles.statCard}>
               <div style={styles.statValue}>{academicStats.completedCourses}</div>
-              <div style={styles.statLabel}>Completed</div>
+              <div style={styles.statLabel}>Completed Courses</div>
             </div>
             
             <div style={styles.statCard}>
@@ -543,7 +694,7 @@ const Settings = () => {
             
             <div style={styles.statCard}>
               <div style={styles.statValue}>{academicStats.pendingAssignments}</div>
-              <div style={styles.statLabel}>Pending Assignments</div>
+              <div style={styles.statLabel}>Total Assignments</div>
             </div>
             
             <div style={styles.statCard}>
@@ -780,7 +931,7 @@ const Settings = () => {
               </div>
               <div style={styles.passwordHint}>
                 <i className="fas fa-info-circle"></i>
-                <span>Default password for all students is "Test1234"</span>
+                <span>Default password</span>
               </div>
             </div>
             
@@ -869,10 +1020,8 @@ const Settings = () => {
               <div>
                 <strong>Password Change Instructions:</strong>
                 <ul style={{ margin: '5px 0 0 0', paddingLeft: '20px', fontSize: '13px', color: '#666' }}>
-        
                   <li>If you don't remember your current password, try the default</li>
                   <li>New password must be at least 6 characters long</li>
-
                   <li>You will need to use your new password on next login</li>
                   <li>For security reasons, never share your password with anyone</li>
                 </ul>
@@ -885,7 +1034,7 @@ const Settings = () => {
   );
 };
 
-// Styles
+// Styles (keep exactly as in your original code)
 const styles = {
   container: {
     backgroundColor: '#f8f9fa',

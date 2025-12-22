@@ -37,7 +37,7 @@ const Dashboard = () => {
     upcomingExams: 2,
     financialPaid: 7500,
     financialBalance: 2550,
-    cgpa: 4.5,
+    cgpa: 0.0,
     attendanceRate: 80
   });
   const [upcomingLectures, setUpcomingLectures] = useState([]);
@@ -61,27 +61,59 @@ const Dashboard = () => {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Calculate GPA from completed courses
+  // Grade points mapping (same as Results component)
+  const getGradePoints = (grade) => {
+    if (!grade) return 0.0;
+    const gradeMap = {
+      'A': 5.0, 'B+': 4.5, 'B': 4.0, 'C+': 3.5,
+      'C': 3.0, 'D+': 2.5, 'D': 2.0, 'E': 1.0, 'F': 0.0
+    };
+    return gradeMap[grade.toUpperCase()] || 0.0;
+  };
+
+  // Get grade from marks (same as Results component)
+  const getGradeFromMarks = (marks) => {
+    if (!marks && marks !== 0) return 'N/A';
+    const numericMarks = parseFloat(marks);
+    if (isNaN(numericMarks)) return 'N/A';
+    
+    if (numericMarks >= 70) return 'A';
+    if (numericMarks >= 60) return 'B+';
+    if (numericMarks >= 50) return 'B';
+    if (numericMarks >= 45) return 'C+';
+    if (numericMarks >= 40) return 'C';
+    if (numericMarks >= 35) return 'D+';
+    if (numericMarks >= 30) return 'D';
+    if (numericMarks >= 20) return 'E';
+    return 'F';
+  };
+
+  // Calculate GPA from completed courses (updated to match Results component)
   const calculateGPA = (studentCourses) => {
-    if (!studentCourses || studentCourses.length === 0) return 0;
+    if (!studentCourses || studentCourses.length === 0) return 0.0;
     
+    // Filter completed courses with grades
     const completedCourses = studentCourses.filter(
-      course => course.status === 'completed' && course.grade_points
+      course => course.status === 'completed' && (course.grade || course.marks)
     );
     
-    if (completedCourses.length === 0) return 0;
+    if (completedCourses.length === 0) return 0.0;
     
-    const totalPoints = completedCourses.reduce(
-      (sum, course) => sum + (course.grade_points * course.credits), 
-      0
-    );
+    let totalPoints = 0;
+    let totalCredits = 0;
     
-    const totalCredits = completedCourses.reduce(
-      (sum, course) => sum + course.credits, 
-      0
-    );
+    completedCourses.forEach(course => {
+      const grade = course.grade || getGradeFromMarks(course.marks);
+      const gradePoints = course.grade_points || getGradePoints(grade);
+      const credits = course.credits || 3;
+      
+      if (gradePoints && credits) {
+        totalPoints += gradePoints * credits;
+        totalCredits += credits;
+      }
+    });
     
-    return totalCredits > 0 ? totalPoints / totalCredits : 0;
+    return totalCredits > 0 ? parseFloat((totalPoints / totalCredits).toFixed(2)) : 0.0;
   };
 
   // Determine program duration based on program type
@@ -142,19 +174,31 @@ const Dashboard = () => {
             *,
             courses (
               id,
-              credits
+              course_code,
+              course_name,
+              credits,
+              year,
+              semester
             )
           `)
           .eq('student_id', student.id);
 
+        // Calculate GPA using updated logic
+        let cgpa = 0.0;
         if (!coursesError && studentCourses) {
-          const coursesWithGrades = studentCourses.map(sc => ({
-            ...sc,
-            credits: sc.courses?.credits || 3,
-            grade_points: sc.grade_points || 0
-          }));
+          // Transform data to match Results component structure
+          const coursesWithGrades = studentCourses.map(sc => {
+            const grade = sc.grade || getGradeFromMarks(sc.marks);
+            return {
+              ...sc,
+              grade: grade,
+              grade_points: sc.grade_points || getGradePoints(grade),
+              credits: sc.courses?.credits || 3,
+              status: sc.status
+            };
+          });
           
-          const gpa = calculateGPA(coursesWithGrades);
+          cgpa = calculateGPA(coursesWithGrades);
           
           // 3. Calculate program progress
           const programDuration = getProgramDuration(student.program);
@@ -180,21 +224,49 @@ const Dashboard = () => {
             );
           }
 
-          // 5. Fetch pending assignments
-          const { data: assignments } = await supabase
-            .from('assignments')
-            .select('id, due_date')
-            .eq('status', 'published')
-            .gt('due_date', new Date().toISOString());
+          // 5. Get active courses (not completed)
+          const activeCourses = studentCourses.filter(c => c.status !== 'completed') || [];
+          const activeCourseIds = activeCourses.map(sc => sc.course_id) || [];
 
-          // 6. Fetch upcoming exams
-          const { data: exams } = await supabase
-            .from('examinations')
-            .select('id, start_time')
-            .eq('status', 'published')
-            .gt('start_time', new Date().toISOString());
+          // 6. Fetch pending assignments - ONLY for ACTIVE courses (not completed)
+          let pendingAssignmentsCount = 0;
+          if (activeCourseIds.length > 0) {
+            const { data: allAssignments, error: assignmentsError } = await supabase
+              .from('assignments')
+              .select('id, course_id')
+              .eq('status', 'published')
+              .gt('due_date', new Date().toISOString());
 
-          // 7. Fetch financial summary
+            if (!assignmentsError && allAssignments) {
+              // Filter assignments to only include those for active courses
+              const pendingAssignments = allAssignments.filter(assignment => 
+                activeCourseIds.includes(assignment.course_id)
+              );
+              
+              pendingAssignmentsCount = pendingAssignments.length;
+            }
+          }
+
+          // 7. Fetch upcoming exams - ONLY for ACTIVE courses (not completed)
+          let upcomingExamsCount = 0;
+          if (activeCourseIds.length > 0) {
+            const { data: allExams, error: examsError } = await supabase
+              .from('examinations')
+              .select('id, course_id')
+              .eq('status', 'published')
+              .gt('start_time', new Date().toISOString());
+
+            if (!examsError && allExams) {
+              // Filter exams to only include those for active courses
+              const upcomingExams = allExams.filter(exam => 
+                activeCourseIds.includes(exam.course_id)
+              );
+              
+              upcomingExamsCount = upcomingExams.length;
+            }
+          }
+
+          // 8. Fetch financial summary
           const { data: financial } = await supabase
             .from('financial_records')
             .select('amount, balance_due, status, academic_year')
@@ -216,23 +288,33 @@ const Dashboard = () => {
             };
           }
 
-          // 8. Fetch upcoming lectures for the week
+          // 9. Fetch upcoming lectures for the week - ONLY for ACTIVE courses
           const today = new Date();
           const nextWeek = new Date();
           nextWeek.setDate(today.getDate() + 7);
 
-          const { data: lectures } = await supabase
-            .from('lectures')
-            .select(`
-              *,
-              courses (course_code, course_name),
-              lecturers (full_name)
-            `)
-            .gte('scheduled_date', today.toISOString().split('T')[0])
-            .lte('scheduled_date', nextWeek.toISOString().split('T')[0])
-            .in('status', ['scheduled', 'ongoing'])
-            .order('scheduled_date', { ascending: true })
-            .order('start_time', { ascending: true });
+          let lectures = [];
+          if (activeCourseIds.length > 0) {
+            const { data: allLectures, error: lecturesError } = await supabase
+              .from('lectures')
+              .select(`
+                *,
+                courses (course_code, course_name),
+                lecturers (full_name)
+              `)
+              .gte('scheduled_date', today.toISOString().split('T')[0])
+              .lte('scheduled_date', nextWeek.toISOString().split('T')[0])
+              .in('status', ['scheduled', 'ongoing'])
+              .order('scheduled_date', { ascending: true })
+              .order('start_time', { ascending: true });
+
+            if (!lecturesError && allLectures) {
+              // Filter lectures to only include those for active courses
+              lectures = allLectures.filter(lecture => 
+                activeCourseIds.includes(lecture.course_id)
+              );
+            }
+          }
 
           let formattedLectures = [];
           if (lectures) {
@@ -261,11 +343,11 @@ const Dashboard = () => {
           // Update all states
           setDashboardStats({
             programProgress: calculateProgramProgress(),
-            pendingAssignments: assignments?.length || 0,
-            upcomingExams: exams?.length || 0,
+            pendingAssignments: pendingAssignmentsCount,
+            upcomingExams: upcomingExamsCount,
             financialPaid: financialSummary.paid,
             financialBalance: financialSummary.balance,
-            cgpa: parseFloat(gpa.toFixed(2)),
+            cgpa: cgpa,
             attendanceRate: Math.round((attendanceArray.filter(val => val === 1).length / attendanceArray.length) * 100)
           });
 
@@ -280,7 +362,7 @@ const Dashboard = () => {
           upcomingExams: 2,
           financialPaid: 7500,
           financialBalance: 2550,
-          cgpa: 4.5,
+          cgpa: 0.0,
           attendanceRate: 80
         });
       } finally {
@@ -1084,7 +1166,6 @@ const Dashboard = () => {
                 whiteSpace: 'nowrap',
                 flexShrink: '0',
                 display: showAdminControls ? 'flex' : 'none'
-
               }}
             >
               <i className="fas fa-edit"></i> {showAdminControls ? 'Hide Controls' : 'Edit'}

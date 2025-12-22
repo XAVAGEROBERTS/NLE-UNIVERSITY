@@ -626,12 +626,12 @@ const StudentLayout = () => {
                 tabIndex="0"
                 aria-label={`Notifications ${unreadCount > 0 ? `(${unreadCount} unread)` : ''}`}
               >
-                <i className="fas fa-bell"></i>
+                {/* <i className="fas fa-bell"></i>
                 {unreadCount > 0 && (
                   <span className="notification-badge">
                     {unreadCount > 9 ? '9+' : unreadCount}
                   </span>
-                )}
+                )} */}
               </div>
 
               {!isMobile && (
