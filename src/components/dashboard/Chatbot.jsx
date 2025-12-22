@@ -1,4 +1,3 @@
-// src/components/dashboard/Chatbot.jsx
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useStudentAuth } from '../../context/StudentAuthContext';
 import { supabase } from '../../services/supabase';
@@ -14,6 +13,7 @@ const Chatbot = () => {
   const [isMobile, setIsMobile] = useState(false);
   const [greetingTypes, setGreetingTypes] = useState([]);
   const [isScrolledToBottom, setIsScrolledToBottom] = useState(true);
+  const [activeCourseIds, setActiveCourseIds] = useState([]);
   
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
@@ -31,23 +31,7 @@ const Chatbot = () => {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Define all possible greetings and responses
-  useEffect(() => {
-    const greetings = [
-      "hi", "hello", "hey", "good morning", "good afternoon", "good evening",
-      "greetings", "what's up", "howdy", "yo", "sup", "hi there", "hello there",
-      "good day", "morning", "afternoon", "evening", "hola", "bonjour", "namaste",
-      "aloha", "ciao", "salam", "shalom", "how are you", "how's it going",
-      "what's happening", "what's new", "long time no see", "nice to see you",
-      "pleased to meet you", "how have you been", "good to see you", "hiya", "hey there",
-      "greetings", "salutations", "what's good", "what's poppin", "how's everything",
-      "how's life", "how's your day", "how's your day going", "good to see you again",
-      "lovely to see you", "great to see you", "welcome back"
-    ];
-    setGreetingTypes(greetings);
-  }, []);
-
-  // Enhanced AI knowledge base
+  // Enhanced AI knowledge base with more responses
   const knowledgeBase = {
     // Greeting responses
     greetings: [
@@ -55,7 +39,12 @@ const Chatbot = () => {
       "Hello! Ready to help you with your academic journey! 🎓",
       "Hi there! What would you like to know about your progress? 📈",
       "Welcome back! How can I make your study day better? 🌟",
-      "Hey! Let's work on your academic success together! 💪"
+      "Hey! Let's work on your academic success together! 💪",
+      "Greetings! I'm here to help you ace your courses! 🏆",
+      "Hello there! Ready to tackle your academic challenges? 💯",
+      "Hi! How's your learning journey going? Let me help! 🚀",
+      "Good to see you! What academic goals can we work on today? 🎯",
+      "Welcome! I'm excited to help you succeed in your studies! ✨"
     ],
     
     // Thank you responses
@@ -64,7 +53,12 @@ const Chatbot = () => {
       "No problem at all! Let me know if you need anything else! 👍",
       "Glad I could help! Keep up the great work! 🎯",
       "Anytime! Remember, I'm here 24/7 for your academic needs! ⏰",
-      "My pleasure! Wishing you success in all your courses! 🏆"
+      "My pleasure! Wishing you success in all your courses! 🏆",
+      "Happy to assist! Your success is my priority! 💫",
+      "You're very welcome! Keep crushing those academic goals! 💪",
+      "No thanks needed! Just doing my part to help you succeed! 😄",
+      "Always here for you! Don't hesitate to ask more questions! 🤝",
+      "The pleasure is mine! Watching you succeed makes my day! 🌟"
     ],
     
     // Encouragement responses
@@ -73,7 +67,12 @@ const Chatbot = () => {
       "Stay focused and you'll achieve all your academic goals! 🎯",
       "Remember, every small step counts toward your success! 👣",
       "You've got this! Your dedication will pay off! 💯",
-      "Keep up the great work! Your progress is impressive! 📊"
+      "Keep up the great work! Your progress is impressive! 📊",
+      "Believe in yourself! You're capable of great things! 🌟",
+      "Consistency is key! Keep showing up and you'll succeed! 🔑",
+      "Your hard work is paying off! Stay on this path! 💪",
+      "Learning is a journey! Enjoy every step of the way! 🛣️",
+      "You're growing every day! That's something to celebrate! 🎉"
     ],
     
     // Study tips
@@ -85,33 +84,124 @@ const Chatbot = () => {
       "**Practice Problems**: Apply knowledge through practical exercises ✍️",
       "**Healthy Breaks**: Take regular breaks to maintain focus 🧘",
       "**Consistency**: Study regularly instead of cramming 📚",
-      "**Goal Setting**: Set specific, measurable academic goals 🎯"
+      "**Goal Setting**: Set specific, measurable academic goals 🎯",
+      "**Mind Mapping**: Create visual diagrams to connect ideas 🗺️",
+      "**Study Groups**: Collaborate with peers for better understanding 👥",
+      "**Note Summaries**: Create concise summaries of key points 📝",
+      "**Real-World Application**: Connect theory to practical examples 🌍",
+      "**Digital Tools**: Use apps for flashcards and organization 📱",
+      "**Regular Review**: Revisit material weekly to retain information 🔄",
+      "**Ask Questions**: Don't hesitate to seek clarification ❓"
+    ],
+
+    // Motivational quotes
+    motivational: [
+      "Education is the most powerful weapon which you can use to change the world. - Nelson Mandela",
+      "The beautiful thing about learning is that no one can take it away from you. - B.B. King",
+      "Success is not final, failure is not fatal: it is the courage to continue that counts. - Winston Churchill",
+      "The expert in anything was once a beginner. - Helen Hayes",
+      "Don't let what you cannot do interfere with what you can do. - John Wooden",
+      "Believe you can and you're halfway there. - Theodore Roosevelt",
+      "Your education is a dress rehearsal for a life that is yours to lead. - Nora Ephron",
+      "The only way to learn mathematics is to do mathematics. - Paul Halmos",
+      "Learning never exhausts the mind. - Leonardo da Vinci",
+      "Education is not preparation for life; education is life itself. - John Dewey"
+    ],
+
+    // Exam preparation tips
+    examTips: [
+      "**Start Early**: Begin studying at least 2 weeks before exams 📅",
+      "**Past Papers**: Practice with previous exam questions 📋",
+      "**Study Groups**: Collaborate with classmates for difficult topics 👥",
+      "**Healthy Habits**: Get adequate sleep and nutrition before exams 🍎",
+      "**Time Management**: Allocate specific times for each subject ⏱️",
+      "**Mock Tests**: Take practice tests under exam conditions ✍️",
+      "**Active Review**: Explain concepts out loud to reinforce learning 🗣️",
+      "**Organization**: Keep all study materials in one place 📚",
+      "**Breaks**: Take regular breaks to maintain concentration 🧠",
+      "**Positive Mindset**: Stay calm and confident during exams 🧘"
+    ],
+
+    // Assignment help
+    assignmentHelp: [
+      "**Understand Requirements**: Read the assignment brief carefully 📖",
+      "**Plan Ahead**: Break the assignment into manageable tasks 📋",
+      "**Research Thoroughly**: Use reliable academic sources 🔍",
+      "**Outline First**: Create a structure before writing 📝",
+      "**Proofread**: Check for errors before submission ✅",
+      "**Cite Sources**: Always give credit to original authors 📚",
+      "**Ask Questions**: Clarify doubts with your lecturer early ❓",
+      "**Peer Review**: Get feedback from classmates 👥",
+      "**Time Management**: Set deadlines for each section ⏰",
+      "**Quality Over Quantity**: Focus on depth rather than length 🎯"
+    ],
+
+    // General advice
+    advice: [
+      "**Stay Organized**: Use planners or digital calendars 📅",
+      "**Ask for Help**: Don't struggle alone - seek assistance when needed 🤝",
+      "**Balance**: Maintain a healthy work-life balance ⚖️",
+      "**Network**: Connect with classmates and professors 👥",
+      "**Resources**: Utilize all available campus resources 📚",
+      "**Health First**: Prioritize physical and mental health 🧘",
+      "**Curiosity**: Stay curious and ask questions in class ❓",
+      "**Feedback**: Act on feedback to improve performance 🔄",
+      "**Goals**: Set both short-term and long-term academic goals 🎯",
+      "**Enjoy Learning**: Find joy in the learning process itself 😊"
     ]
   };
 
-  // CORRECTED GPA CALCULATION (Matches Dashboard.jsx)
+  // CORRECTED GPA CALCULATION (Matches Results and Dashboard)
+  const getGradePoints = (grade) => {
+    if (!grade) return 0.0;
+    const gradeMap = {
+      'A': 5.0, 'B+': 4.5, 'B': 4.0, 'C+': 3.5,
+      'C': 3.0, 'D+': 2.5, 'D': 2.0, 'E': 1.0, 'F': 0.0
+    };
+    return gradeMap[grade.toUpperCase()] || 0.0;
+  };
+
+  const getGradeFromMarks = (marks) => {
+    if (!marks && marks !== 0) return 'N/A';
+    const numericMarks = parseFloat(marks);
+    if (isNaN(numericMarks)) return 'N/A';
+    
+    if (numericMarks >= 70) return 'A';
+    if (numericMarks >= 60) return 'B+';
+    if (numericMarks >= 50) return 'B';
+    if (numericMarks >= 45) return 'C+';
+    if (numericMarks >= 40) return 'C';
+    if (numericMarks >= 35) return 'D+';
+    if (numericMarks >= 30) return 'D';
+    if (numericMarks >= 20) return 'E';
+    return 'F';
+  };
+
   const calculateGPA = (studentCourses) => {
-    if (!studentCourses || studentCourses.length === 0) return 0;
+    if (!studentCourses || studentCourses.length === 0) return 0.0;
     
-    // Filter completed courses with grade_points
+    // Filter completed courses with grades
     const completedCourses = studentCourses.filter(
-      course => course.status === 'completed' && course.grade_points
+      course => course.status === 'completed' && (course.grade || course.marks)
     );
     
-    if (completedCourses.length === 0) return 0;
+    if (completedCourses.length === 0) return 0.0;
     
-    // Calculate weighted GPA (grade_points * credits) / total credits
-    const totalPoints = completedCourses.reduce(
-      (sum, course) => sum + (course.grade_points * course.credits), 
-      0
-    );
+    let totalPoints = 0;
+    let totalCredits = 0;
     
-    const totalCredits = completedCourses.reduce(
-      (sum, course) => sum + course.credits, 
-      0
-    );
+    completedCourses.forEach(course => {
+      const grade = course.grade || getGradeFromMarks(course.marks);
+      const gradePoints = course.grade_points || getGradePoints(grade);
+      const credits = course.credits || 3;
+      
+      if (gradePoints && credits) {
+        totalPoints += gradePoints * credits;
+        totalCredits += credits;
+      }
+    });
     
-    return totalCredits > 0 ? totalPoints / totalCredits : 0;
+    return totalCredits > 0 ? parseFloat((totalPoints / totalCredits).toFixed(2)) : 0.0;
   };
 
   // Format time like Dashboard
@@ -134,8 +224,8 @@ const Chatbot = () => {
     });
   };
 
-  // FIXED: Fetch upcoming lectures (same as Dashboard.jsx)
-  const fetchUpcomingLectures = async () => {
+  // CORRECTED: Fetch upcoming lectures (filtered for active courses only)
+  const fetchUpcomingLectures = async (activeCourseIds) => {
     try {
       const today = new Date();
       const nextWeek = new Date();
@@ -156,7 +246,12 @@ const Chatbot = () => {
 
       if (error) throw error;
 
-      return lectures?.map(lecture => {
+      // Filter lectures for active courses only
+      const filteredLectures = lectures?.filter(lecture => 
+        activeCourseIds.includes(lecture.course_id)
+      ) || [];
+
+      return filteredLectures.map(lecture => {
         const startTime = lecture.start_time || '09:00';
         const endTime = lecture.end_time || '11:00';
         const startDate = new Date(`2000-01-01T${startTime}`);
@@ -175,12 +270,79 @@ const Chatbot = () => {
           google_meet_link: lecture.google_meet_link,
           status: lecture.status
         };
-      }) || [];
+      });
     } catch (error) {
       console.error('Error fetching lectures:', error);
       return [];
     }
   };
+
+  // CORRECTED: Fetch assignments for active courses only
+// CORRECTED: Fetch assignments for active courses only with student-specific submissions
+const fetchAssignments = async (activeCourseIds, studentId) => {
+  try {
+    if (!activeCourseIds.length) return [];
+    if (!studentId) return [];
+
+    const { data: assignments, error } = await supabase
+      .from('assignments')
+      .select(`
+        *,
+        courses (*),
+        assignment_submissions (
+          *
+        ).filter(student_id.eq.${studentId})
+      `)
+      .in('course_id', activeCourseIds)
+      .eq('status', 'published')
+      .order('due_date', { ascending: true });
+
+    if (error) throw error;
+
+    // Process assignments data
+    return assignments?.map(assignment => ({
+      ...assignment,
+      submissions: assignment.assignment_submissions || []
+    })) || [];
+
+  } catch (error) {
+    console.error('Error fetching assignments:', error);
+    return [];
+  }
+};
+
+// CORRECTED: Fetch exams for active courses only with student-specific submissions
+const fetchExams = async (activeCourseIds, studentId) => {
+  try {
+    if (!activeCourseIds.length) return [];
+    if (!studentId) return [];
+
+    const { data: exams, error } = await supabase
+      .from('examinations')
+      .select(`
+        *,
+        courses (*),
+        exam_submissions (
+          *
+        ).filter(student_id.eq.${studentId})
+      `)
+      .in('course_id', activeCourseIds)
+      .eq('status', 'published')
+      .order('start_time', { ascending: true });
+
+    if (error) throw error;
+
+    // Process exams data
+    return exams?.map(exam => ({
+      ...exam,
+      submissions: exam.exam_submissions || []
+    })) || [];
+
+  } catch (error) {
+    console.error('Error fetching exams:', error);
+    return [];
+  }
+};
 
   // Fetch all student data
   const fetchAllStudentData = useCallback(async () => {
@@ -210,7 +372,9 @@ const Chatbot = () => {
             id,
             course_code,
             course_name,
-            credits
+            credits,
+            year,
+            semester
           )
         `)
         .eq('student_id', student.id);
@@ -218,45 +382,33 @@ const Chatbot = () => {
       if (coursesError) throw coursesError;
 
       // Process courses with credits
-      const coursesWithGrades = (studentCourses || []).map(sc => ({
-        ...sc,
-        credits: sc.courses?.credits || 3,
-        grade_points: sc.grade_points || 0,
-        course_code: sc.courses?.course_code || 'N/A',
-        course_name: sc.courses?.course_name || 'Unknown Course'
-      }));
+      const coursesWithGrades = (studentCourses || []).map(sc => {
+        const grade = sc.grade || getGradeFromMarks(sc.marks);
+        return {
+          ...sc,
+          grade: grade,
+          grade_points: sc.grade_points || getGradePoints(grade),
+          credits: sc.courses?.credits || 3,
+          course_code: sc.courses?.course_code || 'N/A',
+          course_name: sc.courses?.course_name || 'Unknown Course',
+          status: sc.status || 'in_progress'
+        };
+      });
 
-      // Calculate GPA using the same method as Dashboard
+      // Calculate GPA using the updated method
       const gpa = calculateGPA(coursesWithGrades);
 
-      // 3. FIXED: Fetch upcoming lectures (same as Dashboard)
-      const lectures = await fetchUpcomingLectures();
+      // 3. Get active courses (not completed)
+      const activeCourses = coursesWithGrades.filter(c => c.status !== 'completed') || [];
+      const activeCourseIds = activeCourses.map(sc => sc.course_id).filter(Boolean);
+      setActiveCourseIds(activeCourseIds);
 
-      // 4. Fetch assignments
-      const courseIds = coursesWithGrades.map(c => c.course_id).filter(Boolean);
-      
-      const { data: assignments } = await supabase
-        .from('assignments')
-        .select(`
-          *,
-          courses (*),
-          assignment_submissions!left (*)
-        `)
-        .in('course_id', courseIds)
-        .eq('status', 'published');
+      // 4. CORRECTED: Fetch data for active courses only
+      const lectures = await fetchUpcomingLectures(activeCourseIds);
+      const assignments = await fetchAssignments(activeCourseIds, student.id);
+      const exams = await fetchExams(activeCourseIds, student.id);
 
-      // 5. Fetch exams
-      const { data: exams } = await supabase
-        .from('examinations')
-        .select(`
-          *,
-          courses (*),
-          exam_submissions!left (*)
-        `)
-        .in('course_id', courseIds)
-        .eq('status', 'published');
-
-      // 6. Fetch financial records
+      // 5. Fetch financial records
       const { data: finance } = await supabase
         .from('financial_records')
         .select('*')
@@ -264,7 +416,7 @@ const Chatbot = () => {
         .eq('academic_year', student.academic_year)
         .order('payment_date', { ascending: false });
 
-      // 7. Fetch attendance records
+      // 6. Fetch attendance records
       const { data: attendance } = await supabase
         .from('attendance_records')
         .select(`
@@ -275,25 +427,25 @@ const Chatbot = () => {
         .gte('date', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0])
         .order('date', { ascending: false });
 
-      // 8. Fetch timetable slots
-      const { data: timetable } = await supabase
+      // 7. Fetch timetable slots for active courses
+      const { data: timetable } = activeCourseIds.length > 0 ? await supabase
         .from('timetable_slots')
         .select(`
           *,
           courses (*),
           lecturers (*)
         `)
-        .in('course_id', courseIds)
-        .eq('is_active', true);
+        .in('course_id', activeCourseIds)
+        .eq('is_active', true) : { data: [] };
 
-      // 9. Fetch library books
+      // 8. Fetch library books
       const { data: libraryBooks } = await supabase
         .from('library_books')
         .select('*')
         .eq('status', 'available')
         .limit(5);
 
-      // 10. Fetch campus events
+      // 9. Fetch campus events
       const { data: events } = await supabase
         .from('campus_events')
         .select('*')
@@ -301,7 +453,7 @@ const Chatbot = () => {
         .order('date', { ascending: true })
         .limit(5);
 
-      // 11. Fetch academic calendar
+      // 10. Fetch academic calendar
       const { data: academicCalendar } = await supabase
         .from('academic_calendar')
         .select('*')
@@ -311,7 +463,6 @@ const Chatbot = () => {
 
       // Calculate statistics
       const processedStats = {
-        // Basic student info
         studentInfo: {
           name: student.full_name,
           id: student.student_id,
@@ -327,7 +478,7 @@ const Chatbot = () => {
         courses: {
           total: coursesWithGrades.length || 0,
           completed: coursesWithGrades.filter(c => c.status === 'completed').length || 0,
-          inProgress: coursesWithGrades.filter(c => c.status === 'in_progress').length || 0,
+          inProgress: activeCourses.length || 0,
           list: coursesWithGrades.map(c => ({
             id: c.course_id,
             code: c.course_code,
@@ -342,57 +493,57 @@ const Chatbot = () => {
           })) || []
         },
 
-        // GPA calculation (matches Dashboard)
-        gpa: parseFloat(gpa.toFixed(2)),
+        // GPA calculation (matches Dashboard and Results)
+        gpa: gpa,
 
-        // FIXED: Lectures (same as Dashboard)
+        // Lectures for active courses only
         lectures: lectures,
 
-        // Assignment statistics
+        // CORRECTED: Assignment statistics for active courses only
         assignments: {
           total: assignments?.length || 0,
           submitted: assignments?.filter(a => 
-            a.assignment_submissions?.some(s => s.student_id === student.id)
+            a.submissions?.some(s => s.student_id === student.id)
           ).length || 0,
           pending: assignments?.filter(a => {
-            const submission = a.assignment_submissions?.find(s => s.student_id === student.id);
+            const submission = a.submissions?.find(s => s.student_id === student.id);
             return !submission && new Date(a.due_date) > new Date();
           }).length || 0,
           graded: assignments?.filter(a => {
-            const submission = a.assignment_submissions?.find(s => s.student_id === student.id);
+            const submission = a.submissions?.find(s => s.student_id === student.id);
             return submission?.status === 'graded';
           }).length || 0,
           overdue: assignments?.filter(a => {
-            const submission = a.assignment_submissions?.find(s => s.student_id === student.id);
+            const submission = a.submissions?.find(s => s.student_id === student.id);
             return !submission && new Date(a.due_date) < new Date();
           }).length || 0,
           upcoming: assignments?.filter(a => {
-            const submission = a.assignment_submissions?.find(s => s.student_id === student.id);
+            const submission = a.submissions?.find(s => s.student_id === student.id);
             return !submission && new Date(a.due_date) > new Date();
           }).sort((a, b) => new Date(a.due_date) - new Date(b.due_date)).slice(0, 5),
           recentGrades: assignments?.filter(a => {
-            const submission = a.assignment_submissions?.find(s => s.student_id === student.id);
+            const submission = a.submissions?.find(s => s.student_id === student.id);
             return submission?.status === 'graded';
           }).sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)).slice(0, 3)
         },
 
-        // Exam statistics
+        // CORRECTED: Exam statistics for active courses only
         exams: {
           total: exams?.length || 0,
           completed: exams?.filter(e => {
-            const submission = e.exam_submissions?.find(s => s.student_id === student.id);
+            const submission = e.submissions?.find(s => s.student_id === student.id);
             return submission && submission.status === 'graded';
           }).length || 0,
           upcoming: exams?.filter(e => {
-            const submission = e.exam_submissions?.find(s => s.student_id === student.id);
+            const submission = e.submissions?.find(s => s.student_id === student.id);
             return !submission && new Date(e.start_time) > new Date();
           }).sort((a, b) => new Date(a.start_time) - new Date(b.start_time)).slice(0, 5),
           performance: calculateExamPerformance(exams?.filter(e => 
-            e.exam_submissions?.some(s => s.student_id === student.id && s.status === 'graded')
+            e.submissions?.some(s => s.student_id === student.id && s.status === 'graded')
           ) || [])
         },
 
-        // Financial statistics (matches Dashboard)
+        // Financial statistics
         finance: {
           totalPaid: finance?.filter(f => f.status === 'paid').reduce((sum, f) => sum + (f.amount || 0), 0) || 0,
           totalPending: finance?.filter(f => f.status === 'pending').reduce((sum, f) => sum + (f.amount || 0), 0) || 0,
@@ -420,7 +571,7 @@ const Chatbot = () => {
           trend: calculateAttendanceTrend(attendance || [])
         },
 
-        // Timetable statistics
+        // Timetable statistics for active courses
         timetable: {
           total: timetable?.length || 0,
           today: timetable?.filter(slot => {
@@ -485,7 +636,7 @@ const Chatbot = () => {
     if (gradedExams.length === 0) return { average: 0, highest: 0, lowest: 0, grades: [] };
     
     const percentages = gradedExams.map(exam => {
-      const submission = exam.exam_submissions?.find(s => s.student_id === studentData?.id);
+      const submission = exam.submissions?.find(s => s.student_id === studentData?.id);
       return submission?.percentage || 0;
     }).filter(p => p > 0);
 
@@ -497,10 +648,14 @@ const Chatbot = () => {
     
     // Calculate grade distribution
     const grades = percentages.map(p => {
-      if (p >= 80) return 'A';
-      if (p >= 70) return 'B';
-      if (p >= 60) return 'C';
-      if (p >= 50) return 'D';
+      if (p >= 70) return 'A';
+      if (p >= 60) return 'B+';
+      if (p >= 50) return 'B';
+      if (p >= 45) return 'C+';
+      if (p >= 40) return 'C';
+      if (p >= 35) return 'D+';
+      if (p >= 30) return 'D';
+      if (p >= 20) return 'E';
       return 'F';
     });
 
@@ -589,16 +744,25 @@ const Chatbot = () => {
     return 'Good Evening';
   };
 
+  // Enhanced welcome message generator
   const generateWelcomeMessage = (student, stats) => {
     const currentClass = stats.timetable.currentClass;
     const nextAssignment = stats.assignments.upcoming[0];
+    const nextExam = stats.exams.upcoming[0];
+    const today = new Date();
+    const dayOfWeek = today.toLocaleDateString('en-US', { weekday: 'long' });
     
+    // Random motivational quote
+    const randomQuote = knowledgeBase.motivational[
+      Math.floor(Math.random() * knowledgeBase.motivational.length)
+    ];
+
     return `👋 **${getGreeting()} ${student.full_name.split(' ')[0]}!** 
 
-I'm your AI Student Assistant, connected to your personal academic database. Here's your current status:
+I'm your AI Student Assistant, connected to your personal academic database. Happy ${dayOfWeek}! 😊
 
 **📚 Academic Summary:**
-• **CGPA:** ${stats.gpa} (calculated from ${stats.courses.completed} completed courses)
+• **CGPA:** ${stats.gpa.toFixed(2)} (calculated from ${stats.courses.completed} completed courses)
 • **Courses:** ${stats.courses.completed} completed, ${stats.courses.inProgress} in progress
 • **Year:** ${student.year_of_study || 'N/A'}.${student.semester || 'N/A'}
 
@@ -606,15 +770,20 @@ ${currentClass ? `**📅 Current Class:**\n• **${currentClass.courses?.course_
 
 ${nextAssignment ? `**📝 Next Assignment:**\n• **${nextAssignment.title}** due ${formatDate(nextAssignment.due_date)}\n` : ''}
 
+${nextExam ? `**📋 Next Exam:**\n• **${nextExam.title}** on ${formatDate(nextExam.start_time)}\n` : ''}
+
 **🎯 Quick Stats:**
 • **Attendance Rate:** ${stats.attendance.rate}%
 • **Pending Assignments:** ${stats.assignments.pending}
 • **Upcoming Exams:** ${stats.exams.upcoming.length}
 • **Financial Balance:** $${(stats.finance.totalPending + stats.finance.totalPartial).toFixed(2)}
 
+**💭 Motivational Quote:**
+"${randomQuote}"
+
 **How can I help you today?** Here are some things you can ask:
 1. "How's my GPA looking?"
-2. "What assignments are due?"
+2. "What assignments are due this week?"
 3. "Show me today's schedule"
 4. "What's my attendance status?"
 5. "Any upcoming exams?"
@@ -622,135 +791,129 @@ ${nextAssignment ? `**📝 Next Assignment:**\n• **${nextAssignment.title}** d
 7. "Recommend study tips"
 8. "What library books are available?"
 9. "Any campus events this week?"
-10. "How can I improve my grades?"`;
+10. "How can I improve my grades?"
+
+Or just chat with me about anything academic! I'm here to help! 🤖`;
   };
 
-  // Enhanced query detection
+  // Enhanced query detection with more patterns
   const detectQueryType = (query) => {
     const q = query.toLowerCase();
     
-    // Greetings
-    if (greetingTypes.some(g => q.includes(g))) {
+    // Enhanced greetings detection
+    if (/(hi|hello|hey|greetings|good\s*(morning|afternoon|evening|day)|what'?s\s*up|howdy|yo|sup|hi\s*there|hello\s*there|morning|afternoon|evening|hola|bonjour|namaste|aloha|ciao|salam|shalom|how\s*are\s*you|how'?s\s*it\s*going|how'?s\s*(everything|life|your\s*day)|what'?s\s*(happening|new|good|poppin)|long\s*time\s*no\s*see|nice\s*to\s*see\s*you|pleased\s*to\s*meet\s*you|how\s*have\s*you\s*been|good\s*to\s*see\s*you|hiya|hey\s*there|salutations|welcome\s*back|lovely\s*to\s*see\s*you|great\s*to\s*see\s*you)/.test(q)) {
       return 'greeting';
     }
     
-    // Thanks
-    if (q.includes('thank') || q.includes('thanks') || q.includes('appreciate')) {
+    // Thanks detection
+    if (/(thank|thanks|thankyou|appreciate|grateful|obliged|cheers|ta|much\s*obliged)/.test(q)) {
       return 'thanks';
     }
     
     // Courses & GPA
-    if (q.includes('gpa') || q.includes('cgpa') || q.includes('grade point') || 
-        q.includes('academic standing') || q.includes('cumulative')) {
-      return 'gpa';
+    if (/(gpa|cgpa|grade\s*point|academic\s*standing|cumulative|grades?|marks?|scores?|academic\s*performance)/.test(q)) {
+      return q.includes('gpa') || q.includes('cgpa') || q.includes('grade point') ? 'gpa' : 'grades';
     }
     
-    if (q.includes('course') || q.includes('subject') || q.includes('unit')) {
+    if (/(course|subject|unit|module|class)/.test(q)) {
       return 'courses';
     }
     
-    if (q.includes('grade') || q.includes('mark') || q.includes('score')) {
-      return 'grades';
-    }
-    
     // Assignments
-    if (q.includes('assignment') || q.includes('homework') || q.includes('project')) {
+    if (/(assignment|homework|project|coursework|essay|report|paper|dissertation|thesis|portfolio)/.test(q)) {
       return 'assignments';
     }
     
-    if (q.includes('deadline') || q.includes('due date') || q.includes('submission')) {
+    if (/(deadline|due\s*date|submission|hand\s*in|submit|when\s*is)/.test(q)) {
       return 'deadlines';
     }
     
     // Exams
-    if (q.includes('exam') || q.includes('test') || q.includes('midterm') || 
-        q.includes('final') || q.includes('quiz')) {
+    if (/(exam|test|midterm|final|quiz|assessment|evaluation|paper|examination)/.test(q)) {
       return 'exams';
     }
     
     // Schedule & Lectures
-    if (q.includes('lecture') || q.includes('class') || q.includes('schedule') || 
-        q.includes('timetable') || q.includes('routine')) {
+    if (/(lecture|class|schedule|timetable|routine|when\s*do\s*i|what\s*time)/.test(q)) {
       return 'schedule';
     }
     
-    if (q.includes('today') || q.includes('now') || q.includes('current')) {
+    if (/(today|now|current)/.test(q)) {
       return 'today';
     }
     
-    if (q.includes('tomorrow') || q.includes('next day')) {
+    if (/(tomorrow|next\s*day)/.test(q)) {
       return 'tomorrow';
     }
     
-    if (q.includes('week') || q.includes('upcoming')) {
+    if (/(week|upcoming|next\s*week|this\s*week)/.test(q)) {
       return 'week';
     }
     
     // Finance
-    if (q.includes('fee') || q.includes('payment') || q.includes('finance') || 
-        q.includes('balance') || q.includes('money') || q.includes('tuition')) {
+    if (/(fee|payment|finance|balance|money|tuition|fees|bill|invoice|payment|scholarship|loan)/.test(q)) {
       return 'finance';
     }
     
     // Attendance
-    if (q.includes('attendance') || q.includes('present') || q.includes('absent') || 
-        q.includes('late') || q.includes('attended')) {
+    if (/(attendance|present|absent|late|attended|punctual|late|missing)/.test(q)) {
       return 'attendance';
     }
     
     // Library
-    if (q.includes('library') || q.includes('book') || q.includes('resource') || 
-        q.includes('study material')) {
+    if (/(library|book|resource|study\s*material|reading|textbook|journal|publication)/.test(q)) {
       return 'library';
     }
     
     // Events
-    if (q.includes('event') || q.includes('activity') || q.includes('campus') || 
-        q.includes('extra curricular')) {
+    if (/(event|activity|campus|extra\s*curricular|club|society|workshop|seminar|conference)/.test(q)) {
       return 'events';
     }
     
     // Study help
-    if (q.includes('study') || q.includes('learn') || q.includes('prepar') || 
-        q.includes('improve') || q.includes('tip') || q.includes('advice')) {
+    if (/(study|learn|prepar|improve|tip|advice|suggestion|how\s*to|method|technique|strategy)/.test(q)) {
       return 'study';
     }
     
     // Progress & Performance
-    if (q.includes('progress') || q.includes('performance') || q.includes('how am i') || 
-        q.includes('summary') || q.includes('overview') || q.includes('report')) {
+    if (/(progress|performance|how\s*am\s*i|summary|overview|report|status|update)/.test(q)) {
       return 'progress';
     }
     
     // Help
-    if (q.includes('help') || q.includes('what can') || q.includes('capabilities') || 
-        q.includes('assist') || q.includes('how to use')) {
+    if (/(help|what\s*can|capabilities|assist|how\s*to\s*use|guide|manual|tutorial)/.test(q)) {
       return 'help';
     }
     
     // University info
-    if (q.includes('university') || q.includes('campus') || q.includes('faculty') || 
-        q.includes('department') || q.includes('program')) {
+    if (/(university|campus|faculty|department|program|college|school|institution)/.test(q)) {
       return 'university';
     }
     
     // Personal info
-    if (q.includes('my info') || q.includes('profile') || q.includes('details') || 
-        q.includes('who am i') || q.includes('student info')) {
+    if (/(my\s*info|profile|details|who\s*am\s*i|student\s*info|information\s*about\s*me)/.test(q)) {
       return 'profile';
+    }
+    
+    // Motivational/Encouragement
+    if (/(motivat|inspire|encourage|cheer\s*up|feeling\s*(down|sad|stressed|overwhelmed))/i.test(q)) {
+      return 'motivation';
+    }
+    
+    // Goodbye
+    if (/(bye|goodbye|see\s*you|farewell|take\s*care|later|ciao|adios)/i.test(q)) {
+      return 'goodbye';
+    }
+    
+    // How are you
+    if (/(how\s*are\s*you|how\s*do\s*you\s*do|how'?s\s*it\s*going)/i.test(q)) {
+      return 'howareyou';
     }
     
     return 'unknown';
   };
 
-  // Check if query is a greeting
-  const isGreeting = (query) => {
-    return greetingTypes.some(greeting => 
-      query.toLowerCase().includes(greeting.toLowerCase())
-    );
-  };
-
-  // ENHANCED AI Response Generator
+  // ENHANCED AI Response Generator with more intelligent responses
   const generateAIResponse = (userQuery) => {
     if (!studentStats || !studentData) {
       return "I'm still loading your data. Please wait a moment...";
@@ -764,7 +927,15 @@ ${nextAssignment ? `**📝 Next Assignment:**\n• **${nextAssignment.title}** d
       const randomGreeting = knowledgeBase.greetings[
         Math.floor(Math.random() * knowledgeBase.greetings.length)
       ];
-      return randomGreeting;
+      const randomTip = knowledgeBase.studyTips[
+        Math.floor(Math.random() * knowledgeBase.studyTips.length)
+      ];
+      
+      return `${randomGreeting}
+
+**Quick Tip:** ${randomTip}
+
+What would you like to know about your academic progress today?`;
     }
     
     // Handle thanks
@@ -772,35 +943,93 @@ ${nextAssignment ? `**📝 Next Assignment:**\n• **${nextAssignment.title}** d
       const randomThanks = knowledgeBase.thanks[
         Math.floor(Math.random() * knowledgeBase.thanks.length)
       ];
-      return randomThanks;
+      const randomEncouragement = knowledgeBase.encouragement[
+        Math.floor(Math.random() * knowledgeBase.encouragement.length)
+      ];
+      
+      return `${randomThanks}
+
+${randomEncouragement}`;
+    }
+    
+    // Handle "how are you"
+    if (queryType === 'howareyou') {
+      return `I'm doing great, thank you for asking! 😊 As an AI assistant, I don't have feelings, but I'm always ready and excited to help you with your academic journey!
+
+How about you? How's your day going? Is there anything academic I can assist you with today?`;
+    }
+    
+    // Handle motivation requests
+    if (queryType === 'motivation') {
+      const randomQuote = knowledgeBase.motivational[
+        Math.floor(Math.random() * knowledgeBase.motivational.length)
+      ];
+      const randomEncouragement = knowledgeBase.encouragement[
+        Math.floor(Math.random() * knowledgeBase.encouragement.length)
+      ];
+      
+      return `🌟 **Here's some motivation for you:**
+
+"${randomQuote}"
+
+${randomEncouragement}
+
+**Remember:** Every expert was once a beginner. Keep going! 💪`;
+    }
+    
+    // Handle goodbye
+    if (queryType === 'goodbye') {
+      return `👋 Goodbye, ${studentData.full_name.split(' ')[0]}! 
+
+It was great chatting with you! Remember:
+• Take regular breaks during study sessions
+• Stay hydrated and get enough sleep
+• Don't hesitate to reach out if you need help
+
+Wishing you all the best in your studies! Come back anytime! 📚✨`;
     }
     
     // GPA query
     if (queryType === 'gpa') {
       const topCourses = studentStats.courses.list
-        .filter(c => c.gradePoints)
+        .filter(c => c.gradePoints && c.status === 'completed')
         .sort((a, b) => b.gradePoints - a.gradePoints)
         .slice(0, 5);
       
-      const improvement = studentStats.gpa < 3.0 ? 
-        "Consider focusing more on your current courses to improve your GPA." :
-        studentStats.gpa < 3.5 ?
-        "Good work! Aim for a 3.5+ GPA for better opportunities." :
-        "Excellent! Maintain this strong academic performance.";
+      const completedCourses = studentStats.courses.list.filter(c => c.status === 'completed');
+      const totalCredits = completedCourses.reduce((sum, c) => sum + c.credits, 0);
       
-      return `📊 **Your Academic Performance:**
+      let advice = '';
+      let icon = '📊';
+      
+      if (studentStats.gpa < 2.0) {
+        advice = "You might want to speak with an academic advisor. Focus on passing current courses.";
+        icon = "⚠️";
+      } else if (studentStats.gpa < 3.0) {
+        advice = "Consider focusing more on your current courses to improve your GPA.";
+        icon = "📈";
+      } else if (studentStats.gpa < 3.5) {
+        advice = "Good work! Aim for a 3.5+ GPA for better opportunities.";
+        icon = "👍";
+      } else if (studentStats.gpa < 4.0) {
+        advice = "Excellent! Maintain this strong academic performance.";
+        icon = "🎯";
+      } else {
+        advice = "Outstanding! You're at the top of your class!";
+        icon = "🏆";
+      }
+      
+      return `${icon} **Your Academic Performance:**
 
 **Overall CGPA:** ${studentStats.gpa.toFixed(2)}
-**Calculation:** Weighted average from ${studentStats.courses.completed} completed courses
-**Credits Completed:** ${studentStats.courses.list.filter(c => c.status === 'completed').reduce((sum, c) => sum + c.credits, 0)} credits
-**Academic Standing:** ${studentStats.gpa >= 3.5 ? 'Excellent' : studentStats.gpa >= 3.0 ? 'Good' : 'Needs Improvement'}
+**Completed Courses:** ${completedCourses.length} courses
+**Total Credits:** ${totalCredits} credits
+**Academic Standing:** ${studentStats.gpa >= 3.5 ? 'Excellent' : studentStats.gpa >= 3.0 ? 'Good' : studentStats.gpa >= 2.0 ? 'Satisfactory' : 'Needs Improvement'}
 
-**Top Performing Courses:**
-${topCourses.length > 0 ? 
-  topCourses.map(c => `• **${c.code}** - ${c.name}\n  Grade: ${c.grade || 'N/A'} | Points: ${c.gradePoints} | Credits: ${c.credits}`).join('\n\n') : 
-  'No completed courses yet'}
+${topCourses.length > 0 ? `**Top Performing Courses:**
+${topCourses.map(c => `• **${c.code}** - ${c.name}\n  Grade: ${c.grade || 'N/A'} | Points: ${c.gradePoints} | Credits: ${c.credits}`).join('\n\n')}\n` : ''}
 
-**Recommendation:** ${improvement}
+**Advice:** ${advice}
 
 **Note:** CGPA = (Σ grade_points × credits) / (Σ credits)`;
     }
@@ -813,17 +1042,23 @@ ${topCourses.length > 0 ?
       const completedCourses = studentStats.courses.list
         .filter(c => c.status === 'completed');
       
+      const upcomingCourses = studentStats.courses.list
+        .filter(c => c.status === 'enrolled' || c.status === 'registered');
+      
       return `📚 **Your Course Information:**
 
 **Current Semester Courses (${currentCourses.length}):**
 ${currentCourses.length > 0 ? 
-  currentCourses.map(c => `• **${c.code}** - ${c.name}\n  Credits: ${c.credits} | Lecturer: ${c.lecturer || 'TBA'}`).join('\n\n') : 
+  currentCourses.map(c => `• **${c.code}** - ${c.name}\n  Credits: ${c.credits} | Status: ${c.status.replace('_', ' ')}`).join('\n\n') : 
   'No courses currently in progress'}
 
 **Completed Courses (${completedCourses.length}):**
 ${completedCourses.length > 0 ? 
   completedCourses.slice(0, 5).map(c => `• **${c.code}** - ${c.name}\n  Grade: ${c.grade || 'N/A'} | Credits: ${c.credits}`).join('\n\n') : 
   'No courses completed yet'}
+
+${upcomingCourses.length > 0 ? `**Upcoming/Registered Courses (${upcomingCourses.length}):**
+${upcomingCourses.map(c => `• **${c.code}** - ${c.name}`).join('\n')}\n` : ''}
 
 **Total Credits This Semester:** ${currentCourses.reduce((sum, c) => sum + c.credits, 0)}`;
     }
@@ -834,6 +1069,15 @@ ${completedCourses.length > 0 ?
       const overdueAssignments = studentStats.assignments.overdue;
       const recentGrades = studentStats.assignments.recentGrades;
       
+      let urgencyMessage = '';
+      if (overdueAssignments > 0) {
+        urgencyMessage = `**🚨 URGENT:** You have ${overdueAssignments} overdue assignment${overdueAssignments !== 1 ? 's' : ''}! Please submit immediately!`;
+      } else if (studentStats.assignments.pending > 3) {
+        urgencyMessage = `**⚠️ ALERT:** You have ${studentStats.assignments.pending} pending assignments. Consider starting on them soon!`;
+      } else if (studentStats.assignments.pending > 0) {
+        urgencyMessage = `**📝 REMINDER:** You have ${studentStats.assignments.pending} pending assignment${studentStats.assignments.pending !== 1 ? 's' : ''}.`;
+      }
+      
       return `📝 **Your Assignments:**
 
 **Summary:**
@@ -843,20 +1087,31 @@ ${completedCourses.length > 0 ?
 • **Overdue:** ${overdueAssignments}
 • **Graded:** ${studentStats.assignments.graded}
 
-${overdueAssignments > 0 ? `**⚠️ Overdue Assignments:** ${overdueAssignments} assignment(s) need immediate attention!\n` : ''}
+${urgencyMessage ? urgencyMessage + '\n' : ''}
 
 **Upcoming Deadlines:**
 ${upcomingAssignments.length > 0 ? 
   upcomingAssignments.map(a => {
     const dueDate = new Date(a.due_date);
     const daysLeft = Math.ceil((dueDate - new Date()) / (1000 * 60 * 60 * 24));
-    return `• **${a.title}**\n  Course: ${a.courses?.course_name || 'Unknown'}\n  Due: ${dueDate.toLocaleDateString()} (${daysLeft} day${daysLeft !== 1 ? 's' : ''} left)\n  Total Marks: ${a.total_marks}`;
+    let urgency = '';
+    if (daysLeft <= 1) urgency = ' 🚨';
+    else if (daysLeft <= 3) urgency = ' ⚠️';
+    else if (daysLeft <= 7) urgency = ' 📅';
+    
+    return `• **${a.title}**${urgency}\n  Course: ${a.courses?.course_name || 'Unknown'}\n  Due: ${dueDate.toLocaleDateString()} (${daysLeft} day${daysLeft !== 1 ? 's' : ''} left)\n  Total Marks: ${a.total_marks}`;
   }).join('\n\n') : 
   'No upcoming assignments! Great job keeping up!'}
 
-${recentGrades.length > 0 ? `**Recent Grades:**\n${recentGrades.map(a => {
-  const submission = a.assignment_submissions?.find(s => s.student_id === studentData.id);
-  return `• **${a.title}**: ${submission?.marks_obtained || 0}/${a.total_marks} (${submission?.percentage || 0}%)`;
+${recentGrades.length > 0 ? `**Recent Grades:**
+${recentGrades.map(a => {
+  const submission = a.submissions?.find(s => s.student_id === studentData.id);
+  const percentage = submission?.percentage || 0;
+  let emoji = '📊';
+  if (percentage >= 70) emoji = '🎯';
+  else if (percentage >= 50) emoji = '👍';
+  
+  return `• **${a.title}**: ${submission?.marks_obtained || 0}/${a.total_marks} (${percentage}%) ${emoji}`;
 }).join('\n')}` : ''}`;
     }
     
@@ -870,24 +1125,49 @@ ${recentGrades.length > 0 ? `**Recent Grades:**\n${recentGrades.map(a => {
         ...upcomingExams.map(e => ({ ...e, type: 'exam', date: e.start_time }))
       ].sort((a, b) => new Date(a.date) - new Date(b.date));
       
+      const now = new Date();
+      const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const deadlinesThisWeek = allDeadlines.filter(d => new Date(d.date) <= nextWeek);
+      
       return `⏰ **All Upcoming Deadlines:**
 
-${allDeadlines.length > 0 ? 
-  allDeadlines.slice(0, 8).map(item => {
+**This Week (${deadlinesThisWeek.length}):**
+${deadlinesThisWeek.length > 0 ? 
+  deadlinesThisWeek.map(item => {
     const date = new Date(item.date);
-    const daysLeft = Math.ceil((date - new Date()) / (1000 * 60 * 60 * 24));
+    const daysLeft = Math.ceil((date - now) / (1000 * 60 * 60 * 24));
     const typeIcon = item.type === 'assignment' ? '📝' : '📋';
-    return `${typeIcon} **${item.title}**\n  Type: ${item.type === 'assignment' ? 'Assignment' : 'Exam'}\n  Date: ${date.toLocaleDateString()}\n  Time: ${formatTime(item.type === 'assignment' ? '23:59' : item.start_time?.split(' ')[0] || '09:00')}\n  Days left: ${daysLeft}`;
+    let urgency = '';
+    if (daysLeft <= 1) urgency = ' 🚨';
+    else if (daysLeft <= 3) urgency = ' ⚠️';
+    
+    return `${typeIcon} **${item.title}**${urgency}\n  Type: ${item.type === 'assignment' ? 'Assignment' : 'Exam'}\n  Date: ${date.toLocaleDateString()}\n  Time: ${formatTime(item.type === 'assignment' ? '23:59' : item.start_time?.split(' ')[0] || '09:00')}\n  Days left: ${daysLeft}`;
   }).join('\n\n') : 
-  'No upcoming deadlines! Well done!'}
+  'No deadlines this week! Well done!'}
 
-**Tip:** Start working on assignments at least 3 days before the deadline for best results!`;
+**All Deadlines (${allDeadlines.length}):**
+${allDeadlines.length > 0 ? 
+  allDeadlines.slice(0, 10).map(item => {
+    const date = new Date(item.date);
+    const daysLeft = Math.ceil((date - now) / (1000 * 60 * 60 * 24));
+    return `• ${item.type === 'assignment' ? '📝' : '📋'} **${item.title}** - ${date.toLocaleDateString()} (${daysLeft} days)`;
+  }).join('\n') : 
+  'No upcoming deadlines!'}
+
+**📅 Tip:** Start working on assignments at least 3 days before the deadline for best results!`;
     }
     
     // Exams query
     if (queryType === 'exams') {
       const upcomingExams = studentStats.exams.upcoming;
       const performance = studentStats.exams.performance;
+      
+      const now = new Date();
+      const examsThisWeek = upcomingExams.filter(e => {
+        const examDate = new Date(e.start_time);
+        const daysDiff = Math.ceil((examDate - now) / (1000 * 60 * 60 * 24));
+        return daysDiff <= 7;
+      });
       
       return `📋 **Your Exam Information:**
 
@@ -898,14 +1178,27 @@ ${allDeadlines.length > 0 ?
 • **Total Exams:** ${performance.totalExams}
 ${performance.grades && Object.keys(performance.grades).length > 0 ? `• **Grade Distribution:** ${Object.entries(performance.grades).map(([grade, count]) => `${grade}: ${count}`).join(', ')}` : ''}
 
-**Upcoming Exams:**
+**Exams This Week (${examsThisWeek.length}):**
+${examsThisWeek.length > 0 ? 
+  examsThisWeek.map(e => {
+    const examDate = new Date(e.start_time);
+    const daysLeft = Math.ceil((examDate - now) / (1000 * 60 * 60 * 24));
+    const time = formatTime(e.start_time?.split(' ')[0] || '09:00');
+    let urgency = '';
+    if (daysLeft <= 1) urgency = ' 🚨';
+    else if (daysLeft <= 3) urgency = ' ⚠️';
+    
+    return `• **${e.title}**${urgency}\n  Course: ${e.courses?.course_name || 'Unknown'}\n  Date: ${examDate.toLocaleDateString()} at ${time}\n  Location: ${e.location || 'TBA'}\n  Duration: ${e.duration || '2 hours'} (${daysLeft} day${daysLeft !== 1 ? 's' : ''} left)`;
+  }).join('\n\n') : 
+  'No exams this week!'}
+
+**All Upcoming Exams (${upcomingExams.length}):**
 ${upcomingExams.length > 0 ? 
   upcomingExams.map(e => {
     const examDate = new Date(e.start_time);
-    const daysLeft = Math.ceil((examDate - new Date()) / (1000 * 60 * 60 * 24));
-    const time = formatTime(e.start_time?.split(' ')[0] || '09:00');
-    return `• **${e.title}**\n  Course: ${e.courses?.course_name || 'Unknown'}\n  Date: ${examDate.toLocaleDateString()} at ${time}\n  Location: ${e.location || 'TBA'}\n  Duration: ${e.duration || '2 hours'} (${daysLeft} day${daysLeft !== 1 ? 's' : ''} left)\n  Type: ${e.exam_type || 'Written'}`;
-  }).join('\n\n') : 
+    const daysLeft = Math.ceil((examDate - now) / (1000 * 60 * 60 * 24));
+    return `• ${daysLeft <= 7 ? '📅' : '📋'} **${e.title}** - ${examDate.toLocaleDateString()} (${daysLeft} days)`;
+  }).join('\n') : 
   'No upcoming exams scheduled'}
 
 **Exam Preparation Tips:**
@@ -918,22 +1211,27 @@ ${upcomingExams.length > 0 ?
     
     // Today's schedule query
     if (queryType === 'today') {
+      const today = new Date();
+      const dayOfWeek = today.toLocaleDateString('en-US', { weekday: 'long' });
       const todayLectures = studentStats.lectures.filter(l => 
-        new Date(l.date).toDateString() === new Date().toDateString()
+        new Date(l.date).toDateString() === today.toDateString()
       );
       
       const currentClass = studentStats.timetable.currentClass;
       const nextClass = studentStats.timetable.today.find(slot => {
         const [hour, minute] = (slot.start_time || '00:00').split(':').map(Number);
-        const currentTime = new Date().getHours() * 60 + new Date().getMinutes();
+        const currentTime = today.getHours() * 60 + today.getMinutes();
         return hour * 60 + minute > currentTime;
       });
       
       const todayEvents = studentStats.events.today;
+      const todayAssignments = studentStats.assignments.upcoming.filter(a => 
+        new Date(a.due_date).toDateString() === today.toDateString()
+      );
       
-      return `📅 **Today's Schedule:**
+      return `📅 **Today's Schedule (${dayOfWeek}):**
 
-**Current Time:** ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+**Current Time:** ${today.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
 
 ${currentClass ? `**🟢 Currently In Class:**\n• **${currentClass.courses?.course_name}**\n  Time: ${formatTime(currentClass.start_time)} - ${formatTime(currentClass.end_time)}\n  Room: ${currentClass.room_number}\n  Lecturer: ${currentClass.lecturers?.full_name || 'TBA'}\n` : ''}
 
@@ -946,20 +1244,37 @@ ${todayLectures.length > 0 ?
   ).join('\n\n') : 
   'No lectures scheduled for today! 🎉'}
 
+${todayAssignments.length > 0 ? `**📝 Assignments Due Today (${todayAssignments.length}):**
+${todayAssignments.map(a => `• **${a.title}** - ${a.courses?.course_name || 'Unknown'}`).join('\n')}\n` : ''}
+
 ${todayEvents.length > 0 ? `**🎉 Campus Events Today:**\n${todayEvents.map(e => `• **${e.title}** at ${e.location} (${formatTime(e.time)})`).join('\n')}` : ''}`;
     }
     
     // This week's schedule
     if (queryType === 'week') {
-      const weekLectures = studentStats.lectures.slice(0, 15);
-      const upcomingEvents = studentStats.events.upcoming.slice(0, 5);
+      const now = new Date();
+      const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const weekLectures = studentStats.lectures.filter(l => 
+        new Date(l.date) <= nextWeek
+      );
+      const upcomingEvents = studentStats.events.upcoming.filter(e => 
+        new Date(e.date) <= nextWeek
+      );
+      
+      // Group lectures by day
+      const lecturesByDay = weekLectures.reduce((acc, lecture) => {
+        const date = new Date(lecture.date);
+        const dayKey = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+        if (!acc[dayKey]) acc[dayKey] = [];
+        acc[dayKey].push(lecture);
+        return acc;
+      }, {});
       
       return `📅 **This Week's Schedule:**
 
-**Upcoming Lectures (${weekLectures.length}):**
-${weekLectures.length > 0 ? 
-  weekLectures.map(lecture => 
-    `• **${formatDate(lecture.date)}** - ${lecture.courseCode}\n  ${lecture.title}\n  ${formatTime(lecture.time)} | ${lecture.lecturer}`
+${Object.keys(lecturesByDay).length > 0 ? 
+  Object.entries(lecturesByDay).map(([day, lectures]) => 
+    `**${day}:**\n${lectures.map(l => `• ${l.courseCode}: ${l.title} (${formatTime(l.time)})`).join('\n')}`
   ).join('\n\n') : 
   'No upcoming lectures scheduled for this week.'}
 
@@ -970,29 +1285,51 @@ ${Object.entries(studentStats.timetable.byDay).map(([day, slots]) =>
   ).join('\n')}`
 ).join('\n\n')}
 
-${upcomingEvents.length > 0 ? `**📢 Upcoming Events:**\n${upcomingEvents.map(e => `• **${formatDate(e.date)}**: ${e.title} at ${e.location}`).join('\n')}` : ''}`;
+${upcomingEvents.length > 0 ? `**📢 Events This Week:**\n${upcomingEvents.map(e => `• **${formatDate(e.date)}**: ${e.title} at ${e.location}`).join('\n')}` : ''}`;
     }
     
     // Finance query
     if (queryType === 'finance') {
       const finance = studentStats.finance;
+      const totalOutstanding = finance.totalPending + finance.totalPartial;
       
-      return `💰 **Your Financial Status:**
+      let statusMessage = '';
+      let statusIcon = '💰';
+      
+      if (finance.overdue > 0) {
+        statusMessage = `🚨 **URGENT:** You have ${finance.overdue} overdue payment${finance.overdue !== 1 ? 's' : ''}! Please settle immediately to avoid penalties.`;
+        statusIcon = '🚨';
+      } else if (totalOutstanding > 0) {
+        statusMessage = `⚠️ **REMINDER:** You have outstanding payments totaling $${totalOutstanding.toFixed(2)}.`;
+        statusIcon = '⚠️';
+      } else {
+        statusMessage = '✅ **GREAT:** All payments are up to date!';
+        statusIcon = '✅';
+      }
+      
+      return `${statusIcon} **Your Financial Status:**
 
 **Balance Summary:**
 • **Total Paid This Year:** $${finance.totalPaid.toFixed(2)}
 • **Pending Balance:** $${finance.totalPending.toFixed(2)}
 • **Partial Payments Outstanding:** $${finance.totalPartial.toFixed(2)}
-• **Total Outstanding:** $${(finance.totalPending + finance.totalPartial).toFixed(2)}
+• **Total Outstanding:** $${totalOutstanding.toFixed(2)}
 • **Overdue Payments:** ${finance.overdue}
 ${finance.scholarships > 0 ? `• **Scholarships Awarded:** $${finance.scholarships.toFixed(2)}` : ''}
 ${finance.fines > 0 ? `• **Fines/Charges:** $${finance.fines.toFixed(2)}` : ''}
+
+${statusMessage}
 
 **Recent Transactions:**
 ${finance.recent.length > 0 ? 
   finance.recent.map(f => {
     const date = f.payment_date ? new Date(f.payment_date) : f.due_date ? new Date(f.due_date) : null;
-    return `• **${f.description || 'Transaction'}**\n  Amount: $${f.amount.toFixed(2)} | Status: ${f.status}\n  Date: ${date ? date.toLocaleDateString() : 'N/A'}${f.balance_due > 0 ? `\n  Balance Due: $${f.balance_due.toFixed(2)}` : ''}`;
+    let statusIcon = '📄';
+    if (f.status === 'paid') statusIcon = '✅';
+    else if (f.status === 'overdue') statusIcon = '🚨';
+    else if (f.status === 'partial') statusIcon = '⚠️';
+    
+    return `${statusIcon} **${f.description || 'Transaction'}**\n  Amount: $${f.amount.toFixed(2)} | Status: ${f.status}\n  Date: ${date ? date.toLocaleDateString() : 'N/A'}${f.balance_due > 0 ? `\n  Balance Due: $${f.balance_due.toFixed(2)}` : ''}`;
   }).join('\n\n') : 
   'No recent transactions found'}
 
@@ -1002,7 +1339,7 @@ ${finance.recent.length > 0 ?
 • Mobile Money
 • Cash at Finance Office
 
-**Contact Finance Office:** finance@nleuniversity.edu | Ext: 1234`;
+**Contact Finance Office:** finance@university.edu | Ext: 1234`;
     }
     
     // Attendance query
@@ -1010,6 +1347,17 @@ ${finance.recent.length > 0 ?
       const attendance = studentStats.attendance;
       const trend = attendance.trend;
       const byCourse = attendance.byCourse;
+      const minimumRequired = 75;
+      const currentRate = parseFloat(attendance.rate);
+      
+      let statusMessage = '';
+      if (currentRate >= minimumRequired) {
+        statusMessage = `✅ **EXCELLENT:** Your attendance rate of ${currentRate}% meets the minimum requirement of ${minimumRequired}%!`;
+      } else if (currentRate >= minimumRequired - 10) {
+        statusMessage = `⚠️ **WARNING:** Your attendance rate of ${currentRate}% is below the required ${minimumRequired}%. Consider improving your attendance.`;
+      } else {
+        statusMessage = `🚨 **URGENT:** Your attendance rate of ${currentRate}% is significantly below the required ${minimumRequired}%. Immediate improvement is needed.`;
+      }
       
       return `📊 **Your Attendance Records:**
 
@@ -1020,11 +1368,18 @@ ${finance.recent.length > 0 ?
 • **Late:** ${attendance.late} times
 • **Trend:** ${trend === 'improving' ? '📈 Improving' : trend === 'declining' ? '📉 Declining' : '➡️ Stable'}
 
+${statusMessage}
+
 **Attendance by Course:**
 ${Object.keys(byCourse).length > 0 ? 
   Object.entries(byCourse).map(([course, stats]) => {
     const rate = ((stats.present / stats.total) * 100).toFixed(1);
-    return `• **${course}**: ${stats.present}/${stats.total} (${rate}%)`;
+    let icon = '📊';
+    if (rate >= 80) icon = '✅';
+    else if (rate >= 75) icon = '⚠️';
+    else icon = '🚨';
+    
+    return `${icon} **${course}**: ${stats.present}/${stats.total} (${rate}%)`;
   }).join('\n') : 
   'No course-specific attendance data'}
 
@@ -1035,12 +1390,17 @@ ${attendance.recent.length > 0 ?
   ).join('\n\n') : 
   'No recent attendance records'}
 
-**University Policy:** Minimum 75% attendance required in each course.`;
+**University Policy:** Minimum ${minimumRequired}% attendance required in each course.`;
     }
     
     // Library query
     if (queryType === 'library') {
       const library = studentStats.library;
+      
+      // Generate study session tips
+      const studyTips = [...knowledgeBase.studyTips]
+        .sort(() => Math.random() - 0.5)
+        .slice(0, 3);
       
       return `📚 **Library Resources:**
 
@@ -1062,23 +1422,57 @@ ${library.recommended.length > 0 ? `**Recommended for Your Program:**\n${library
 • Literature & Arts
 • Reference Materials
 
-**Contact Library:** library@nleuniversity.edu | Ext: 5678`;
+**Study Session Tips:**
+${studyTips.map((tip, i) => `${i + 1}. ${tip}`).join('\n')}
+
+**Contact Library:** library@university.edu | Ext: 5678`;
     }
     
     // Events query
     if (queryType === 'events') {
       const events = studentStats.events.upcoming;
+      const now = new Date();
+      
+      // Categorize events by time frame
+      const todayEvents = events.filter(e => 
+        new Date(e.date).toDateString() === now.toDateString()
+      );
+      const thisWeekEvents = events.filter(e => {
+        const eventDate = new Date(e.date);
+        const daysDiff = Math.ceil((eventDate - now) / (1000 * 60 * 60 * 24));
+        return daysDiff > 0 && daysDiff <= 7;
+      });
+      const futureEvents = events.filter(e => {
+        const eventDate = new Date(e.date);
+        const daysDiff = Math.ceil((eventDate - now) / (1000 * 60 * 60 * 24));
+        return daysDiff > 7;
+      });
       
       return `🎉 **Campus Events & Activities:**
 
-**Upcoming Events (${events.length}):**
-${events.length > 0 ? 
-  events.map(e => {
-    const date = new Date(e.date);
-    const daysLeft = Math.ceil((date - new Date()) / (1000 * 60 * 60 * 24));
-    return `• **${e.title}**\n  Date: ${date.toLocaleDateString()} at ${formatTime(e.time)}\n  Location: ${e.location}\n  Type: ${e.type || 'General'}\n  ${daysLeft > 0 ? `Starts in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}` : 'Today!'}\n  Description: ${e.description || 'No description available'}`;
+**Today's Events (${todayEvents.length}):**
+${todayEvents.length > 0 ? 
+  todayEvents.map(e => {
+    return `• **${e.title}**\n  Time: ${formatTime(e.time)}\n  Location: ${e.location}\n  Type: ${e.type || 'General'}\n  Description: ${e.description?.substring(0, 100) || 'No description available'}...`;
   }).join('\n\n') : 
-  'No upcoming campus events'}
+  'No events today'}
+
+**This Week's Events (${thisWeekEvents.length}):**
+${thisWeekEvents.length > 0 ? 
+  thisWeekEvents.map(e => {
+    const date = new Date(e.date);
+    const daysLeft = Math.ceil((date - now) / (1000 * 60 * 60 * 24));
+    return `• **${e.title}**\n  Date: ${date.toLocaleDateString()} at ${formatTime(e.time)}\n  Location: ${e.location}\n  Starts in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`;
+  }).join('\n\n') : 
+  'No events this week'}
+
+**Future Events (${futureEvents.length}):**
+${futureEvents.length > 0 ? 
+  futureEvents.slice(0, 5).map(e => {
+    const date = new Date(e.date);
+    return `• **${date.toLocaleDateString()}**: ${e.title} at ${e.location}`;
+  }).join('\n') : 
+  'No future events scheduled'}
 
 **Regular Activities:**
 • **Sports:** Football, Basketball, Swimming (Daily 4-6 PM)
@@ -1094,6 +1488,14 @@ ${events.length > 0 ?
     if (queryType === 'study') {
       const randomTips = [...knowledgeBase.studyTips]
         .sort(() => Math.random() - 0.5)
+        .slice(0, 7);
+      
+      const randomExamTips = [...knowledgeBase.examTips]
+        .sort(() => Math.random() - 0.5)
+        .slice(0, 5);
+      
+      const randomAssignmentTips = [...knowledgeBase.assignmentHelp]
+        .sort(() => Math.random() - 0.5)
         .slice(0, 5);
       
       return `🧠 **Study Tips & Strategies:**
@@ -1106,18 +1508,18 @@ ${randomTips.map((tip, i) => `${i + 1}. ${tip}`).join('\n')}
 • Prioritize difficult subjects during peak focus times
 • Use digital calendars with reminders
 • Break large tasks into smaller chunks
+• Set specific, achievable goals
 
 **Exam Preparation:**
-1. Start studying at least 2 weeks before exams
-2. Create summary sheets for each subject
-3. Practice with past exam papers
-4. Form study groups for difficult topics
-5. Get 7-8 hours of sleep before exam day
+${randomExamTips.map((tip, i) => `${i + 1}. ${tip}`).join('\n')}
+
+**Assignment Excellence:**
+${randomAssignmentTips.map((tip, i) => `${i + 1}. ${tip}`).join('\n')}
 
 **Resource Recommendations:**
-• **Online:** Khan Academy, Coursera, edX
-• **Apps:** Anki (flashcards), Forest (focus), Todoist (planning)
-• **Books:** "A Mind for Numbers", "Make It Stick", "Deep Work"
+• **Online:** Khan Academy, Coursera, edX, MIT OpenCourseWare
+• **Apps:** Anki (flashcards), Forest (focus), Todoist (planning), Notion (organization)
+• **Books:** "A Mind for Numbers", "Make It Stick", "Deep Work", "Atomic Habits"
 
 **Need help with a specific subject?** Tell me which course you're struggling with!`;
     }
@@ -1125,8 +1527,20 @@ ${randomTips.map((tip, i) => `${i + 1}. ${tip}`).join('\n')}
     // Progress report query
     if (queryType === 'progress') {
       const currentMonth = new Date().toLocaleString('default', { month: 'long' });
+      const currentYear = new Date().getFullYear();
+      const semester = studentData.semester || 1;
       
-      return `📈 **Comprehensive Academic Progress Report:**
+      // Calculate projected graduation
+      const programDuration = 4; // Default 4 years
+      const yearsCompleted = studentData.year_of_study - 1 + (semester / 2);
+      const progressPercentage = (yearsCompleted / programDuration) * 100;
+      const projectedGraduationYear = currentYear + (programDuration - Math.ceil(yearsCompleted));
+      
+      return `📈 **Comprehensive Academic Progress Report**
+
+**Academic Year:** ${currentYear}
+**Semester:** ${semester}
+**Report Date:** ${new Date().toLocaleDateString()}
 
 **Academic Performance:**
 • **CGPA:** ${studentStats.gpa.toFixed(2)} (from ${studentStats.courses.completed} completed courses)
@@ -1150,17 +1564,20 @@ ${studentStats.finance.overdue > 0 ? '3. **Clear overdue payments** - Financial 
 ${studentStats.lectures.length > 0 ? `4. **Attend ${studentStats.lectures[0]?.courseCode} lecture** - ${formatDate(studentStats.lectures[0]?.date)} at ${formatTime(studentStats.lectures[0]?.time)}` : '4. No lectures scheduled'}
 
 **Recommendations:**
-1. ${studentStats.attendance.rate >= 75 ? 'Maintain good attendance' : 'Improve attendance to meet 75% requirement'}
-2. ${studentStats.assignments.pending > 0 ? 'Complete pending assignments this week' : 'Great job staying on top of assignments'}
-3. ${studentStats.gpa < 3.0 ? 'Focus on improving grades in current courses' : 'Maintain strong academic performance'}
-4. ${studentStats.finance.overdue > 0 ? 'Clear overdue payments immediately' : 'Financial status is satisfactory'}
-5. ${studentStats.library.recommended.length > 0 ? 'Check out recommended library books' : 'Utilize library resources for better learning'}
+1. ${studentStats.attendance.rate >= 75 ? '✅ Maintain good attendance' : '📈 Improve attendance to meet 75% requirement'}
+2. ${studentStats.assignments.pending > 0 ? '📝 Complete pending assignments this week' : '✅ Great job staying on top of assignments'}
+3. ${studentStats.gpa < 3.0 ? '📊 Focus on improving grades in current courses' : '✅ Maintain strong academic performance'}
+4. ${studentStats.finance.overdue > 0 ? '💰 Clear overdue payments immediately' : '✅ Financial status is satisfactory'}
+5. ${studentStats.library.recommended.length > 0 ? '📚 Check out recommended library books' : '📚 Utilize library resources for better learning'}
 
-**Projected Graduation:** Based on current progress, you're on track to graduate as scheduled!`;
+**Projected Graduation:** ${progressPercentage.toFixed(1)}% complete | Projected: ${projectedGraduationYear}`;
     }
     
     // Profile query
     if (queryType === 'profile') {
+      const enrollmentDate = new Date(studentData.created_at);
+      const daysEnrolled = Math.floor((new Date() - enrollmentDate) / (1000 * 60 * 60 * 24));
+      
       return `👤 **Your Student Profile:**
 
 **Personal Information:**
@@ -1175,25 +1592,26 @@ ${studentStats.lectures.length > 0 ? `4. **Attend ${studentStats.lectures[0]?.co
 • **Intake:** ${studentData.intake || 'Not specified'}
 • **Academic Year:** ${studentData.academic_year || 'Current'}
 
+**Enrollment Details:**
+• **Enrollment Date:** ${enrollmentDate.toLocaleDateString()}
+• **Days Enrolled:** ${daysEnrolled} days
+• **Status:** Active Student
+
 **Contact Information:**
-• **Student Portal:** portal.nleuniversity.edu
+• **Student Portal:** portal.university.edu
 • **Email:** ${studentData.email}
 • **Phone:** ${studentData.phone || 'Not available'}
 • **Emergency Contact:** Update in Student Services
-
-**Important Dates:**
-• **Enrollment Date:** ${new Date(studentData.created_at).toLocaleDateString()}
-• **Expected Graduation:** Calculate based on program duration
 
 **Need to update your information?** Visit the Student Affairs office or update through the portal.`;
     }
     
     // University info query
     if (queryType === 'university') {
-      return `🏛️ **NLE University Information:**
+      return `🏛️ **University Information:**
 
-**About NLE University:**
-NLE University is a premier institution dedicated to academic excellence and innovation in education. We provide world-class education across various disciplines.
+**About Our University:**
+We are a premier institution dedicated to academic excellence and innovation in education. We provide world-class education across various disciplines.
 
 **Key Departments:**
 • **Computer Science & Engineering**
@@ -1217,9 +1635,9 @@ NLE University is a premier institution dedicated to academic excellence and inn
 
 **Contact Information:**
 • **Main Office:** +1 (555) 123-4567
-• **Email:** info@nleuniversity.edu
+• **Email:** info@university.edu
 • **Address:** 123 Education Street, Knowledge City
-• **Website:** www.nleuniversity.edu
+• **Website:** www.university.edu
 
 **Vision:** To be a globally recognized center of excellence in education and research.`;
     }
@@ -1278,6 +1696,12 @@ NLE University is a premier institution dedicated to academic excellence and inn
 • Contact information for departments
 • Campus news and updates
 
+**💬 General Chat:**
+• Greetings and casual conversation
+• Motivational quotes and encouragement
+• Study tips and learning strategies
+• General academic advice
+
 **Try These Sample Questions:**
 • "What's my current GPA?"
 • "Show me assignments due this week"
@@ -1294,16 +1718,22 @@ NLE University is a premier institution dedicated to academic excellence and inn
 • "Check my financial balance"
 • "How many credits have I completed?"
 • "What's my academic standing?"
+• "Give me some motivation"
+• "How are you doing?"
+• "What can you help me with?"
 
-**Pro Tip:** Be specific in your questions for more detailed answers!`;
+**Pro Tip:** Be specific in your questions for more detailed answers! I understand natural language, so feel free to chat naturally!`;
     }
     
-    // Default response
+    // Default response for unknown queries
     const randomEncouragement = knowledgeBase.encouragement[
       Math.floor(Math.random() * knowledgeBase.encouragement.length)
     ];
+    const randomTip = knowledgeBase.advice[
+      Math.floor(Math.random() * knowledgeBase.advice.length)
+    ];
     
-    return `🤔 **I'm not sure I understood your question.**
+    return `🤔 **I'm not sure I understood your question completely.**
 
 ${randomEncouragement}
 
@@ -1318,6 +1748,9 @@ ${randomEncouragement}
 • **Campus Life** - Events, activities, clubs
 • **Study Help** - Tips, strategies, resources
 • **University Info** - Policies, contacts, facilities
+• **General Chat** - Motivation, encouragement, advice
+
+**Tip:** ${randomTip}
 
 **Try asking me one of these:**
 "What's my current GPA?"
@@ -1327,7 +1760,9 @@ ${randomEncouragement}
 "What lectures do I have today?"
 "Recommend study tips for exams"
 "Check my academic progress"
-"What library books are available?"`;
+"What library books are available?"
+"Give me some motivation"
+"How are you doing today?"`;
   };
 
   // Handle chat scroll
@@ -1353,6 +1788,7 @@ ${randomEncouragement}
     setInputText('');
     setIsLoading(true);
 
+    // Simulate AI thinking time
     setTimeout(() => {
       const aiResponse = generateAIResponse(inputText);
       
@@ -1386,6 +1822,7 @@ ${randomEncouragement}
     }
   };
 
+  // Enhanced quick questions
   const quickQuestions = [
     "What's my GPA?",
     "Assignments due?",
@@ -1396,7 +1833,9 @@ ${randomEncouragement}
     "Exam schedule",
     "Library books",
     "Campus events",
-    "Progress report"
+    "Progress report",
+    "Motivation",
+    "How are you?"
   ];
 
   // Scroll to bottom
@@ -1553,7 +1992,7 @@ ${randomEncouragement}
         </div>
       </div>
 
-      {/* Main Chat Interface - With increased height */}
+      {/* Main Chat Interface */}
       <div style={{
         backgroundColor: 'white',
         borderRadius: '12px',
@@ -1638,7 +2077,7 @@ ${randomEncouragement}
           </button>
         </div>
 
-        {/* Messages Container - Increased height and better scrolling */}
+        {/* Messages Container */}
         <div 
           ref={chatContainerRef}
           style={{
@@ -1792,7 +2231,7 @@ ${randomEncouragement}
           </div>
         </div>
 
-        {/* Quick Questions - FIXED with proper spacing */}
+        {/* Quick Questions */}
         <div 
           ref={quickQuestionsRef}
           style={{
@@ -1800,7 +2239,7 @@ ${randomEncouragement}
             borderTop: '1px solid #e9ecef',
             background: '#f8f9fa',
             flexShrink: 0,
-            minHeight: '80px', // Ensure minimum height
+            minHeight: '80px',
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'center'
@@ -1820,10 +2259,10 @@ ${randomEncouragement}
             gap: isMobile ? '0.5rem' : '0.6rem',
             flexWrap: 'wrap',
             overflowX: 'auto',
-            paddingBottom: '8px', // Extra padding for scrollbar
+            paddingBottom: '8px',
             WebkitOverflowScrolling: 'touch',
             alignItems: 'center',
-            minHeight: '36px' // Minimum height for buttons area
+            minHeight: '36px'
           }}>
             {quickQuestions.map((question, index) => (
               <button
@@ -1864,7 +2303,7 @@ ${randomEncouragement}
           </div>
         </div>
 
-        {/* Input Area - Responsive */}
+        {/* Input Area */}
         <div style={{
           padding: isMobile ? '1rem' : '1.5rem',
           borderTop: '1px solid #e9ecef',
@@ -1980,14 +2419,14 @@ ${randomEncouragement}
         padding: '0.5rem'
       }}>
         <p style={{ margin: 0 }}>
-          AI Assistant • Connected to your academic database • Data updates in real-time
+          AI Student Assistant • Connected to your academic database • Data updates in real-time
         </p>
         <p style={{ 
           margin: '0.25rem 0 0 0', 
           fontSize: isMobile ? '0.7rem' : '0.75rem',
           opacity: 0.7
         }}>
-          Last updated: {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          Last updated: {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • Ask me anything!
         </p>
       </div>
 
@@ -2054,7 +2493,7 @@ ${randomEncouragement}
           }
           
           .message-input textarea {
-            font-size: 16px !important; /* Prevents zoom on iOS */
+            font-size: 16px !important;
           }
           
           .quick-question-button {
@@ -2075,69 +2514,291 @@ ${randomEncouragement}
         }
         
         /* Large screen optimizations */
+            /* Large screen optimizations */
         @media (min-width: 1200px) {
           .chat-container {
             height: 75vh !important;
           }
         }
         
-        /* Improve touch targets */
-        button, 
-        .quick-question-button,
-        .send-button {
-          min-height: 44px;
-          min-width: 44px;
-        }
-        
-        /* Focus styles for accessibility */
-        button:focus,
-        textarea:focus {
-          outline: 2px solid #4361ee;
-          outline-offset: 2px;
-        }
-        
-        /* Smooth transitions */
-        * {
-          transition: background-color 0.2s ease, transform 0.2s ease;
+        /* Accessibility improvements */
+        @media (prefers-reduced-motion: reduce) {
+          * {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+          }
         }
         
         /* Print styles */
         @media print {
           .chat-container {
             height: auto !important;
-            box-shadow: none !important;
+            overflow: visible !important;
           }
           
-          .input-area,
           .quick-questions,
-          .clear-button {
+          .message-input,
+          .chat-header {
             display: none !important;
           }
         }
         
-        /* Fix for scrollbar in Firefox */
-        .quick-questions-container {
-          scrollbar-width: thin;
-          scrollbar-color: #c1c1c1 #f1f1f1;
+        /* High contrast mode support */
+        @media (prefers-contrast: high) {
+          .chat-message {
+            border: 2px solid #000 !important;
+          }
+          
+          .quick-question-button {
+            border: 2px solid #4361ee !important;
+          }
         }
         
-        /* Ensure quick questions are always visible */
-        .quick-questions-section {
+        /* Dark mode support */
+        @media (prefers-color-scheme: dark) {
+          .chat-window {
+            background-color: #1a1a1a !important;
+            color: #ffffff !important;
+          }
+          
+          .chat-header {
+            background-color: #2d2d2d !important;
+            border-bottom: 1px solid #404040 !important;
+          }
+          
+          .message-input textarea {
+            background-color: #2d2d2d !important;
+            color: #ffffff !important;
+            border-color: #404040 !important;
+          }
+          
+          .quick-questions {
+            background-color: #2d2d2d !important;
+            border-top: 1px solid #404040 !important;
+          }
+          
+          .quick-question-button {
+            background-color: #3a3a3a !important;
+            color: #4361ee !important;
+            border-color: #404040 !important;
+          }
+        }
+        
+        /* Touch device optimizations */
+        @media (hover: none) and (pointer: coarse) {
+          .quick-question-button {
+            padding: 0.8rem 1.2rem !important;
+            min-height: 44px !important;
+          }
+          
+          .send-button {
+            min-height: 44px !important;
+            padding-top: 0.8rem !important;
+            padding-bottom: 0.8rem !important;
+          }
+          
+          .clear-button {
+            padding: 0.6rem 1rem !important;
+          }
+        }
+        
+        /* Performance optimizations */
+        .chat-message {
+          will-change: transform, opacity;
+          transform: translateZ(0);
+        }
+        
+        /* Focus styles for accessibility */
+        .message-input textarea:focus,
+        .quick-question-button:focus,
+        .send-button:focus,
+        .clear-button:focus {
+          outline: 2px solid #4361ee !important;
+          outline-offset: 2px !important;
+          box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.2) !important;
+        }
+        
+        /* Loading state animations */
+        .typing-indicator span {
+          display: inline-block;
+          animation: typing 1.4s infinite ease-in-out;
+        }
+        
+        .typing-indicator span:nth-child(2) {
+          animation-delay: 0.1s;
+        }
+        
+        .typing-indicator span:nth-child(3) {
+          animation-delay: 0.2s;
+        }
+        
+        @keyframes typing {
+          0%, 60%, 100% {
+            transform: translateY(0);
+          }
+          30% {
+            transform: translateY(-8px);
+          }
+        }
+        
+        /* Smooth transitions */
+        .chat-message,
+        .quick-question-button,
+        .send-button,
+        .clear-button {
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        /* Card hover effects */
+        .stat-card:hover {
+          transform: translateY(-4px);
+          box-shadow: 0 8px 25px rgba(0,0,0,0.15) !important;
+        }
+        
+        /* Gradient text effect */
+        .gradient-text {
+          background: linear-gradient(135deg, #4361ee 0%, #3a0ca3 100%);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
+        }
+        
+        /* Shimmer loading effect */
+        .shimmer {
+          background: linear-gradient(90deg, 
+            rgba(255,255,255,0) 0%, 
+            rgba(255,255,255,0.2) 50%, 
+            rgba(255,255,255,0) 100%);
+          background-size: 200% 100%;
+          animation: shimmer 2s infinite;
+        }
+        
+        @keyframes shimmer {
+          0% {
+            background-position: -200% 0;
+          }
+          100% {
+            background-position: 200% 0;
+          }
+        }
+        
+        /* Pulse animation for notifications */
+        @keyframes pulse {
+          0%, 100% {
+            opacity: 1;
+            transform: scale(1);
+          }
+          50% {
+            opacity: 0.7;
+            transform: scale(1.05);
+          }
+        }
+        
+        .pulse {
+          animation: pulse 2s infinite;
+        }
+        
+        /* Slide-in animation for new messages */
+        @keyframes slideIn {
+          from {
+            opacity: 0;
+            transform: translateY(20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        
+        .slide-in {
+          animation: slideIn 0.3s ease-out;
+        }
+        
+        /* Fade-in animation for chat */
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+          }
+          to {
+            opacity: 1;
+          }
+        }
+        
+        .fade-in {
+          animation: fadeIn 0.5s ease-in;
+        }
+        
+        /* Ripple effect for buttons */
+        .ripple {
           position: relative;
-          z-index: 1;
-          background: #f8f9fa;
+          overflow: hidden;
         }
         
-        /* Add subtle gradient fade to indicate more questions */
-        .quick-questions-container::after {
+        .ripple:after {
           content: '';
           position: absolute;
-          right: 0;
-          top: 0;
-          bottom: 0;
-          width: 30px;
-          background: linear-gradient(to right, transparent, #f8f9fa);
-          pointer-events: none;
+          top: 50%;
+          left: 50%;
+          width: 5px;
+          height: 5px;
+          background: rgba(255, 255, 255, 0.5);
+          opacity: 0;
+          border-radius: 100%;
+          transform: scale(1, 1) translate(-50%);
+          transform-origin: 50% 50%;
+        }
+        
+        .ripple:focus:not(:active)::after {
+          animation: ripple 1s ease-out;
+        }
+        
+        @keyframes ripple {
+          0% {
+            transform: scale(0, 0);
+            opacity: 0.5;
+          }
+          20% {
+            transform: scale(25, 25);
+            opacity: 0.3;
+          }
+          100% {
+            opacity: 0;
+            transform: scale(40, 40);
+          }
+        }
+        
+        /* Smooth scrolling */
+        .smooth-scroll {
+          scroll-behavior: smooth;
+        }
+        
+        /* Custom selection color */
+        ::selection {
+          background-color: rgba(67, 97, 238, 0.3);
+          color: inherit;
+        }
+        
+        /* Scroll snap for mobile */
+        @media (max-width: 768px) {
+          .chat-container {
+            scroll-snap-type: y proximity;
+          }
+          
+          .chat-message:last-child {
+            scroll-snap-align: end;
+          }
+        }
+        
+        /* Optimize for reduced data mode */
+        @media (prefers-reduced-data: reduce) {
+          .gradient-bg {
+            background: #4361ee !important;
+          }
+          
+          .shimmer {
+            animation: none;
+          }
         }
       `}</style>
     </div>

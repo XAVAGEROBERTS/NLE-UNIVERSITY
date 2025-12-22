@@ -22,11 +22,33 @@ const Tutorials = () => {
   const hoverVideoRefs = useRef({});
   const { user } = useStudentAuth();
 
+  const [thumbnails, setThumbnails] = useState({});
+
   useEffect(() => {
     if (user?.email) {
       fetchTutorials();
     }
   }, [user]);
+
+  useEffect(() => {
+  const loadThumbnails = async () => {
+    for (const tutorial of tutorials) {
+      if (!thumbnails[tutorial.id] && tutorial.videoSrc) {
+        const thumb = await generateThumbnail(tutorial.videoSrc);
+        if (thumb) {
+          setThumbnails(prev => ({
+            ...prev,
+            [tutorial.id]: thumb
+          }));
+        }
+      }
+    }
+  };
+
+  if (tutorials.length > 0) {
+    loadThumbnails();
+  }
+}, [tutorials]);
 
   // Clean up hover videos on unmount
   useEffect(() => {
@@ -244,6 +266,38 @@ if (enrollError) {
   } finally {
     setLoading(false);
   }
+  };
+  
+const generateThumbnail = (videoSrc) => {
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    const canvas = document.createElement('canvas');
+    video.src = videoSrc;
+    video.crossOrigin = 'anonymous';
+    video.muted = true; // Helps with autoplay policies
+    video.preload = 'metadata'; // Load metadata first (includes duration)
+
+    video.onloadedmetadata = () => {
+      // Calculate middle point: prefer 25% in, but fallback to 1s if duration unknown/short
+      let seekTime = 1;
+      if (video.duration && !isNaN(video.duration) && video.duration > 4) {
+        seekTime = Math.min(video.duration * 0.25, video.duration - 1); // 25% or near end
+      }
+      video.currentTime = seekTime;
+    };
+
+    video.onseeked = () => {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', 0.8)); // 80% quality for smaller size
+    };
+
+    video.onerror = () => {
+      resolve(null); // Fallback to gradient if error
+    };
+  });
 };
 
   const openVideoPlayer = async (tutorial) => {
@@ -307,68 +361,40 @@ if (enrollError) {
     fetchTutorials();
   };
 
-  // Enhanced download function with fetch and blob
-  const downloadVideo = async (videoUrl, videoTitle) => {
-    try {
-      if (!videoUrl) {
-        alert('No download URL available');
-        return;
-      }
+const downloadVideo = (videoUrl, videoTitle) => {
+  if (!videoUrl) {
+    alert('No download URL available');
+    return;
+  }
 
-      // Sanitize filename
-      const safeTitle = videoTitle.replace(/[^a-z0-9]/gi, '_').substring(0, 100);
-      const fileName = `${safeTitle}.mp4`;
+  // Sanitize filename
+  const safeTitle = videoTitle
+    .replace(/[^a-z0-9]/gi, '_')
+    .substring(0, 100)
+    .trim();
+  const fileName = safeTitle ? `${safeTitle}.mp4` : 'tutorial_video.mp4';
 
-      // Create download link
-      const link = document.createElement('a');
-      link.href = videoUrl;
-      link.download = fileName;
-      link.target = '_blank';
-      
-      // Force download
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+  // Append ?download=filename to force direct download
+  const downloadUrl = `${videoUrl}?download=${encodeURIComponent(fileName)}`;
 
-      // Show toast notification
-      setDownloadFileName(fileName);
-      setShowDownloadToast(true);
-      
-      console.log('Download started:', fileName);
-    } catch (error) {
-      console.error('Error downloading video:', error);
-      alert('Failed to download video. Please try again.');
-    }
-  };
+  
 
-  // Alternative download method using fetch and blob
-  const downloadVideoWithFetch = async (videoUrl, videoTitle) => {
-    try {
-      setIsVideoLoading(true);
-      const response = await fetch(videoUrl);
-      const blob = await response.blob();
-      
-      // Create download link
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${videoTitle.replace(/[^a-z0-9]/gi, '_')}.mp4`;
-      document.body.appendChild(link);
-      link.click();
-      
-      // Cleanup
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(link);
-      
-      setIsVideoLoading(false);
-      setDownloadFileName(videoTitle);
-      setShowDownloadToast(true);
-    } catch (error) {
-      console.error('Error downloading video:', error);
-      setIsVideoLoading(false);
-      alert('Failed to download video. Please try again.');
-    }
-  };
+  // Create hidden link and click it
+  const link = document.createElement('a');
+  link.href = downloadUrl;
+  link.download = fileName; // Extra safety
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+
+  // Toast notification
+  setDownloadFileName(fileName);
+  setShowDownloadToast(true);
+
+  console.log('Direct download started:', fileName);
+};
+
 
   const downloadFile = async (fileUrl, fileName) => {
     try {
@@ -410,6 +436,8 @@ if (enrollError) {
       video.currentTime = 0;
     }
   };
+
+
 
   // Loading state
   if (loading) {
@@ -585,11 +613,7 @@ if (enrollError) {
                 onClick={() => openVideoPlayer(tutorial)}
               >
                 <div className="thumbnail-content">
-                  <div className="thumbnail-overlay">
-                    <div className="play-icon">
-                      <i className="fas fa-play"></i>
-                    </div>
-                  </div>
+                
                   
                   {/* Video Preview (hidden) */}
                   <div 
@@ -604,11 +628,13 @@ if (enrollError) {
                   {/* Fallback image or first frame */}
                   <div 
                     className="thumbnail-fallback"
-                    style={{
-                      backgroundImage: tutorial.thumbnailUrl 
-                        ? `url(${tutorial.thumbnailUrl})` 
-                        : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-                    }}
+                   style={{
+  backgroundImage: thumbnails[tutorial.id]
+    ? `url(${thumbnails[tutorial.id]})`
+    : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+  backgroundSize: 'cover',
+  backgroundPosition: 'center'
+}}
                   />
                   
                   <div className="difficulty-badge" style={{ display:'none',
@@ -702,14 +728,19 @@ if (enrollError) {
       >
         {activeVideo && (
           <div className="modal-container">
-            {/* Modal Header */}
+            {/* Modal Header - Made more compact */}
             <div className="modal-header">
               <div className="modal-title-section">
                 <h2 className="modal-title">{activeVideo.title}</h2>
-                <p className="modal-subtitle">
-                  <i className="fas fa-chalkboard-teacher"></i> {activeVideo.lecturer} • 
-                  <i className="fas fa-book"></i> {activeVideo.courseCode}
-                </p>
+                <div className="modal-subtitle">
+                  <span className="subtitle-item">
+                    <i className="fas fa-chalkboard-teacher"></i> {activeVideo.lecturer}
+                  </span>
+                  <span className="subtitle-divider">•</span>
+                  <span className="subtitle-item">
+                    <i className="fas fa-book"></i> {activeVideo.courseCode}
+                  </span>
+                </div>
               </div>
               <div className="modal-actions">
                 <button
@@ -729,7 +760,7 @@ if (enrollError) {
               </div>
             </div>
 
-            {/* Video Player */}
+            {/* Video Player - Made smaller */}
             <div className="video-container">
               {isVideoLoading && (
                 <div className="video-loading">
@@ -771,16 +802,24 @@ if (enrollError) {
               )}
             </div>
 
-            {/* Video Description */}
+            {/* Video Description - Made more prominent */}
             <div className="video-description">
-              <h4 className="description-title">
-                <i className="fas fa-info-circle"></i> Description
-              </h4>
-              <p className="description-text">
-                {activeVideo.description || 'No description available.'}
-              </p>
+              <div className="description-header">
+                <h4 className="description-title">
+                  <i className="fas fa-info-circle"></i> Description from Lecturer
+                </h4>
+                <div className="description-badge">
+                  Tutorial Material
+                </div>
+              </div>
+              
+              <div className="description-content">
+                <p className="description-text">
+                  {activeVideo.description || 'No description available.'}
+                </p>
+              </div>
 
-              {/* Materials Section */}
+              {/* Materials Section - Only show if there are materials */}
               {activeVideo.fileUrls && activeVideo.fileUrls.length > 0 && (
                 <div className="materials-section">
                   <h5 className="materials-title">
@@ -857,29 +896,29 @@ if (enrollError) {
           color: #007bff;
         }
 
-      .page-subtitle {
-    font-size: 14px;
-    color: #475569;
-    margin: 0.5rem 0 0 0;
-    padding: 0.5rem 1rem;
-    background: #f8fafc;
-    border-radius: 8px;
-    display: inline-block;
-    font-weight: 500;
-    border: 1px solid #e2e8f0;
-    position: relative;
-    padding-left: 2.5rem;
-    marglin-left: 20px;
-  }
+        .page-subtitle {
+          font-size: 14px;
+          color: #475569;
+          margin: 0.5rem 0 0 0;
+          padding: 0.5rem 1rem;
+          background: #f8fafc;
+          border-radius: 8px;
+          display: inline-block;
+          font-weight: 500;
+          border: 1px solid #e2e8f0;
+          position: relative;
+          padding-left: 2.5rem;
+          margin-left: 20px;
+        }
 
-  .page-subtitle:before {
-    content: '📚';
-    position: absolute;
-    left: 0.75rem;
-    top: 50%;
-    transform: translateY(-50%);
-    font-size: 16px;
-  }
+        .page-subtitle:before {
+          content: '📚';
+          position: absolute;
+          left: 0.75rem;
+          top: 50%;
+          transform: translateY(-50%);
+          font-size: 16px;
+        }
 
         /* Button Styles */
         .primary-button {
@@ -1279,16 +1318,17 @@ if (enrollError) {
           margin: 0;
         }
 
-        /* Modal Styles */
+        /* ===== IMPROVED MODAL STYLES ===== */
         .video-modal {
           position: relative;
           background: transparent;
           border: none;
           outline: none;
           width: 90%;
-          max-width: 1000px;
-          max-height: 100vh;
+          max-width: 800px; /* Reduced from 1000px */
+          max-height: 85vh; /* Reduced from 100vh */
           margin: 40px auto;
+          overflow: visible;
         }
 
         .video-modal-overlay {
@@ -1303,6 +1343,7 @@ if (enrollError) {
           justify-content: center;
           z-index: 1000;
           padding: 20px;
+          overflow: auto;
         }
 
         .modal-container {
@@ -1311,84 +1352,122 @@ if (enrollError) {
           overflow: hidden;
           display: flex;
           flex-direction: column;
-          max-height: 100vh;
+          max-height: 85vh; /* Reduced from 100vh */
+          height: auto;
+          box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+          animation: modalSlideIn 0.3s ease;
         }
 
-        /* Modal Header */
+        @keyframes modalSlideIn {
+          from {
+            transform: translateY(20px);
+            opacity: 0;
+          }
+          to {
+            transform: translateY(0);
+            opacity: 1;
+          }
+        }
+
+        /* Modal Header - Made more compact */
         .modal-header {
-          padding: 6px 12px;
+          padding: 16px 24px; /* Reduced padding */
           background: #f8f9fa;
-          border-bottom: 1px solid #dee2e6;
+          border-bottom: 1px solid #e9ecef;
           display: flex;
           justify-content: space-between;
           align-items: flex-start;
           flex-shrink: 0;
+          min-height: auto;
         }
 
         .modal-title-section {
           flex: 1;
           margin-right: 20px;
+          min-width: 0; /* Allows text truncation */
         }
 
         .modal-title {
-          font-size: 20px;
+          font-size: 18px; /* Reduced from 20px */
           font-weight: 700;
           color: #1a1a1a;
-          margin: 0 0 8px 0;
+          margin: 0 0 6px 0; /* Reduced margin */
           line-height: 1.4;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+          word-break: break-word;
         }
 
         .modal-subtitle {
-          font-size: 14px;
+          font-size: 13px; /* Reduced from 14px */
           color: #666;
           margin: 0;
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: 8px; /* Reduced gap */
+          flex-wrap: wrap;
+        }
+
+        .subtitle-item {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
+
+        .subtitle-divider {
+          color: #adb5bd;
+          font-size: 12px;
         }
 
         .modal-subtitle i {
           color: #007bff;
+          font-size: 12px; /* Reduced icon size */
         }
 
         .modal-actions {
           display: flex;
-          gap: 12px;
+          gap: 8px; /* Reduced gap */
           align-items: center;
+          flex-shrink: 0;
         }
 
         .modal-download-btn {
-          padding: 8px 16px;
+          padding: 6px 12px; /* Reduced padding */
           background: #28a745;
           color: white;
           border: none;
           border-radius: 6px;
-          font-size: 14px;
+          font-size: 13px; /* Reduced font size */
           font-weight: 600;
           cursor: pointer;
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: 6px;
           transition: all 0.2s ease;
+          white-space: nowrap;
         }
 
         .modal-download-btn:hover {
           background: #218838;
+          transform: translateY(-1px);
         }
 
         .modal-close-btn {
-          width: 40px;
-          height: 40px;
+          width: 32px; /* Reduced from 40px */
+          height: 32px; /* Reduced from 40px */
           background: none;
           border: none;
           color: #6c757d;
-          font-size: 20px;
+          font-size: 16px; /* Reduced from 20px */
           cursor: pointer;
           display: flex;
           align-items: center;
           justify-content: center;
           border-radius: 6px;
           transition: all 0.2s ease;
+          flex-shrink: 0;
         }
 
         .modal-close-btn:hover {
@@ -1396,11 +1475,11 @@ if (enrollError) {
           color: #495057;
         }
 
-        /* Video Container */
+        /* Video Container - Made smaller */
         .video-container {
           position: relative;
           background: #000;
-          padding-top: 56.25%; /* 16:9 Aspect Ratio */
+          padding-top: 45%; /* Reduced from 56.25% (16:9 to 20:9) */
           flex-shrink: 0;
         }
 
@@ -1426,13 +1505,13 @@ if (enrollError) {
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          gap: 16px;
+          gap: 12px;
           z-index: 2;
         }
 
         .video-loading p {
           color: white;
-          font-size: 16px;
+          font-size: 14px;
           margin: 0;
         }
 
@@ -1448,7 +1527,7 @@ if (enrollError) {
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          gap: 20px;
+          gap: 16px;
           padding: 20px;
           text-align: center;
           z-index: 2;
@@ -1456,7 +1535,7 @@ if (enrollError) {
 
         .video-error h3 {
           color: white;
-          font-size: 20px;
+          font-size: 18px;
           margin: 0;
         }
 
@@ -1464,80 +1543,112 @@ if (enrollError) {
           color: #adb5bd;
           margin: 0;
           max-width: 400px;
+          font-size: 14px;
         }
 
-        /* Video Description */
+        /* Video Description - Improved visibility */
         .video-description {
-          padding: 24px;
+          padding: 20px; /* Reduced from 24px */
           overflow-y: auto;
           flex: 1;
+          max-height: calc(85vh - 200px); /* Ensures it fits */
+          background: #ffffff;
+          border-top: 1px solid #f1f3f4;
+        }
+
+        .description-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 16px;
         }
 
         .description-title {
-          font-size: 18px;
+          font-size: 16px; /* Reduced from 18px */
           font-weight: 600;
           color: #1a1a1a;
-          margin: 0 0 16px 0;
+          margin: 0;
           display: flex;
           align-items: center;
-          gap: 10px;
+          gap: 8px;
         }
 
         .description-title i {
           color: #007bff;
+          font-size: 16px;
+        }
+
+        .description-badge {
+          background: #e3f2fd;
+          color: #1976d2;
+          padding: 4px 12px;
+          border-radius: 16px;
+          font-size: 12px;
+          font-weight: 600;
+        }
+
+        .description-content {
+          background: #f8fafc;
+          border-radius: 8px;
+          padding: 16px;
+          border: 1px solid #e2e8f0;
+          margin-bottom: 20px;
         }
 
         .description-text {
-          font-size: 15px;
-          color: #666;
+          font-size: 14px;
+          color: #2d3748;
           line-height: 1.6;
-          margin: 0 0 32px 0;
+          margin: 0;
           white-space: pre-line;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
 
         /* Materials Section */
         .materials-section {
-          padding-top: 24px;
+          padding: 16px 0 0 0;
           border-top: 1px solid #e9ecef;
         }
 
         .materials-title {
-          font-size: 16px;
+          font-size: 15px;
           font-weight: 600;
           color: #1a1a1a;
-          margin: 0 0 16px 0;
+          margin: 0 0 12px 0;
           display: flex;
           align-items: center;
-          gap: 10px;
+          gap: 8px;
         }
 
         .materials-title i {
           color: #17a2b8;
+          font-size: 14px;
         }
 
         .materials-list {
           display: flex;
-          gap: 12px;
+          gap: 8px;
           flex-wrap: wrap;
         }
 
         .material-btn {
-          padding: 10px 16px;
+          padding: 8px 12px;
           background: #e9ecef;
           border: 1px solid #dee2e6;
           border-radius: 6px;
-          font-size: 14px;
+          font-size: 13px;
           color: #495057;
           cursor: pointer;
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: 6px;
           transition: all 0.2s ease;
         }
 
         .material-btn:hover {
           background: #dee2e6;
           border-color: #ced4da;
+          transform: translateY(-1px);
         }
 
         /* Download Toast */
@@ -1547,7 +1658,7 @@ if (enrollError) {
           right: 24px;
           background: #28a745;
           color: white;
-          padding: 16px 20px;
+          padding: 12px 16px;
           border-radius: 8px;
           box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
           z-index: 1001;
@@ -1558,12 +1669,12 @@ if (enrollError) {
         .toast-content {
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: 8px;
           font-size: 14px;
         }
 
         .toast-content i {
-          font-size: 20px;
+          font-size: 18px;
           flex-shrink: 0;
         }
 
@@ -1575,15 +1686,6 @@ if (enrollError) {
           to {
             transform: translateX(0);
             opacity: 1;
-          }
-        }
-
-        @keyframes fadeOut {
-          from {
-            opacity: 1;
-          }
-          to {
-            opacity: 0;
           }
         }
 
@@ -1616,17 +1718,6 @@ if (enrollError) {
           backdrop-filter: blur(10px);
         }
 
-        .video-player::-webkit-media-controls-play-button,
-        .video-player::-webkit-media-controls-volume-slider,
-        .video-player::-webkit-media-controls-mute-button,
-        .video-player::-webkit-media-controls-timeline,
-        .video-player::-webkit-media-controls-current-time-display,
-        .video-player::-webkit-media-controls-time-remaining-display,
-        .video-player::-webkit-media-controls-fullscreen-button {
-          color: white;
-          filter: brightness(1.2);
-        }
-
         /* Responsive Design */
         @media (max-width: 768px) {
           .tutorials-container {
@@ -1647,6 +1738,7 @@ if (enrollError) {
             width: 100%;
             margin: 0;
             max-height: 100vh;
+            max-width: 100%;
           }
 
           .video-modal-overlay {
@@ -1661,13 +1753,22 @@ if (enrollError) {
 
           .modal-header {
             flex-direction: column;
-            gap: 16px;
-            padding: 16px;
+            gap: 12px;
+            padding: 12px 16px;
           }
 
           .modal-actions {
             width: 100%;
             justify-content: space-between;
+          }
+
+          .modal-title {
+            font-size: 16px;
+            -webkit-line-clamp: 1;
+          }
+
+          .video-container {
+            padding-top: 56.25%; /* Back to 16:9 on mobile */
           }
 
           .action-buttons {
@@ -1696,6 +1797,10 @@ if (enrollError) {
             left: 16px;
             max-width: none;
           }
+
+          .description-content {
+            padding: 12px;
+          }
         }
 
         /* Improve accessibility */
@@ -1711,17 +1816,17 @@ if (enrollError) {
 
         /* Scrollbar styling for modal */
         .video-description::-webkit-scrollbar {
-          width: 8px;
+          width: 6px;
         }
 
         .video-description::-webkit-scrollbar-track {
           background: #f1f1f1;
-          border-radius: 4px;
+          border-radius: 3px;
         }
 
         .video-description::-webkit-scrollbar-thumb {
           background: #c1c1c1;
-          border-radius: 4px;
+          border-radius: 3px;
         }
 
         .video-description::-webkit-scrollbar-thumb:hover {
