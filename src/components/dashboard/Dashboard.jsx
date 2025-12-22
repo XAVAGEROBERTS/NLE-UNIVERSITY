@@ -1149,7 +1149,7 @@ const Dashboard = () => {
                 <i className="fas fa-user-check" style={{ color: '#2ecc71', fontSize: 'clamp(16px, 3vw, 20px)' }}></i>
               </div>
             </div>
-            <button 
+            {/* <button 
               className="btn btn-sm btn-warning" 
               onClick={() => setShowAdminControls(!showAdminControls)}
               style={{
@@ -1165,11 +1165,10 @@ const Dashboard = () => {
                 gap: '5px',
                 whiteSpace: 'nowrap',
                 flexShrink: '0',
-                display: showAdminControls ? 'flex' : 'none'
               }}
             >
               <i className="fas fa-edit"></i> {showAdminControls ? 'Hide Controls' : 'Edit'}
-            </button>
+            </button> */}
           </div>
           <div className="card-content" style={{ flex: '1' }}>
             <p id="attendanceSummary" style={{ 
