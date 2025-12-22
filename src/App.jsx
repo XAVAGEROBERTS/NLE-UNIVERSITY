@@ -1,4 +1,4 @@
-// src/App.jsx - FINAL
+// src/App.jsx - FINAL with new route
 import React, { Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { StudentAuthProvider, useStudentAuth } from './context/StudentAuthContext';
@@ -17,6 +17,7 @@ const Finance = React.lazy(() => import('./components/dashboard/Finance'));
 const Tutorials = React.lazy(() => import('./components/dashboard/Tutorials'));
 const Settings = React.lazy(() => import('./components/dashboard/Settings'));
 const Chatbot = React.lazy(() => import('./components/dashboard/Chatbot'));
+const TakeExam = React.lazy(() => import('./components/dashboard/TakeExam')); // NEW COMPONENT
 
 const AuthGate = ({ children, requireAuth = true }) => {
   const { user, loading } = useStudentAuth();
@@ -66,9 +67,28 @@ const AppContent = () => (
       <div className="spinner" style={{ borderTopColor: '#2ecc71' }}></div>
       <p>Loading Student Portal...</p>
       <style>{`
-        .loading-screen { /* same as above */ }
-        .spinner { /* same */ }
-        @keyframes spin { /* same */ }
+        .loading-screen {
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          align-items: center;
+          height: 100vh;
+          background: #f5f7fb;
+          gap: 20px;
+          font-family: system-ui, sans-serif;
+        }
+        .spinner {
+          width: 60px;
+          height: 60px;
+          border: 5px solid #f3f3f3;
+          border-top: 5px solid #2ecc71;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
       `}</style>
     </div>
   }>
@@ -83,6 +103,7 @@ const AppContent = () => (
         <Route path="timetable" element={<Timetable />} />
         <Route path="coursework" element={<Coursework />} />
         <Route path="examinations" element={<Examinations />} />
+        <Route path="examinations/take/:examId" element={<TakeExam />} /> {/* NEW ROUTE */}
         <Route path="results" element={<Results />} />
         <Route path="finance" element={<Finance />} />
         <Route path="tutorials" element={<Tutorials />} />
