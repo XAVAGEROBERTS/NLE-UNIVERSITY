@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
 import { useStudentAuth } from '../../context/StudentAuthContext';
 import jsPDF from 'jspdf';
@@ -8,6 +8,7 @@ import autoTable from 'jspdf-autotable';
 const Results = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { examId } = useParams();
   const [activeYear, setActiveYear] = useState('year1');
   const [resultsData, setResultsData] = useState({});
   const [cgpa, setCgpa] = useState(0.0);
@@ -16,10 +17,13 @@ const Results = () => {
   const [studentInfo, setStudentInfo] = useState(null);
   const [specificExam, setSpecificExam] = useState(null);
   const [examDetails, setExamDetails] = useState(null);
+  const [examSubmission, setExamSubmission] = useState(null);
   const { user } = useStudentAuth();
 
   useEffect(() => {
-    if (location.state?.examId) {
+    if (examId) {
+      fetchSpecificExamData();
+    } else if (location.state?.examId) {
       setSpecificExam({
         examId: location.state.examId,
         courseCode: location.state.courseCode,
@@ -29,7 +33,62 @@ const Results = () => {
       });
       fetchSpecificExamDetails(location.state.examId);
     }
-  }, [location]);
+  }, [examId, location]);
+
+  const fetchSpecificExamData = async () => {
+    try {
+      setLoading(true);
+      
+      // Get student data
+      const { data: student, error: studentError } = await supabase
+        .from('students')
+        .select('id, full_name, student_id, program, year_of_study, academic_year, semester')
+        .eq('email', user.email)
+        .single();
+
+      if (studentError) throw studentError;
+      setStudentInfo(student);
+
+      // Fetch exam details
+      const { data: exam, error: examError } = await supabase
+        .from('examinations')
+        .select(`
+          *,
+          courses (id, course_code, course_name, credits)
+        `)
+        .eq('id', examId)
+        .single();
+
+      if (examError) throw examError;
+      setExamDetails(exam);
+
+      // Fetch submission data
+      const { data: submission, error: subError } = await supabase
+        .from('exam_submissions')
+        .select('*')
+        .eq('exam_id', examId)
+        .eq('student_id', student.id)
+        .single();
+
+      if (subError && subError.code !== 'PGRST116') throw subError;
+      setExamSubmission(submission || null);
+
+      if (exam && submission) {
+        setSpecificExam({
+          examId: exam.id,
+          courseCode: exam.courses?.course_code || 'N/A',
+          courseName: exam.courses?.course_name || 'N/A',
+          examTitle: exam.title || 'Exam',
+          submission: submission
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching specific exam data:', error);
+      setError(`Failed to load exam results: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const fetchSpecificExamDetails = async (examId) => {
     try {
@@ -50,10 +109,10 @@ const Results = () => {
   };
 
   useEffect(() => {
-    if (user?.email) {
+    if (user?.email && !examId) {
       fetchResults();
     }
-  }, [user]);
+  }, [user, examId]);
 
   const fetchResults = async () => {
     try {
@@ -71,6 +130,17 @@ const Results = () => {
 
       setStudentInfo(student);
 
+      // Fetch exam submissions that are graded
+      const { data: examSubmissions, error: subError } = await supabase
+        .from('exam_submissions')
+        .select('*')
+        .eq('student_id', student.id)
+        .eq('status', 'graded')
+        .not('total_marks_obtained', 'is', null);
+
+      if (subError) throw new Error(`Exam submissions error: ${subError.message}`);
+
+      // Also fetch student courses for academic results
       const { data: studentCourses, error: scError } = await supabase
         .from('student_courses')
         .select('*')
@@ -80,101 +150,138 @@ const Results = () => {
 
       if (scError) throw new Error(`Student courses error: ${scError.message}`);
 
-      if (!studentCourses || studentCourses.length === 0) {
+      if ((!examSubmissions || examSubmissions.length === 0) && 
+          (!studentCourses || studentCourses.length === 0)) {
         setResultsData({});
         setCgpa(0.0);
         setLoading(false);
         return;
       }
 
-      const courseIds = studentCourses.map(sc => sc.course_id);
-      const { data: courses, error: coursesError } = await supabase
-        .from('courses')
-        .select('*')
-        .in('id', courseIds)
-        .order('year', { ascending: true })
-        .order('semester', { ascending: true });
+      // Organize exam results
+      if (examSubmissions && examSubmissions.length > 0) {
+        // Fetch exam details for graded submissions
+        const examIds = examSubmissions.map(sub => sub.exam_id);
+        const { data: exams, error: examsError } = await supabase
+          .from('examinations')
+          .select(`
+            *,
+            courses (id, course_code, course_name, credits, year, semester)
+          `)
+          .in('id', examIds);
 
-      if (coursesError) throw new Error(`Courses error: ${coursesError.message}`);
+        if (examsError) throw new Error(`Exams error: ${examsError.message}`);
 
-      const courseMap = {};
-      courses.forEach(course => {
-        courseMap[course.id] = course;
-      });
+        const examMap = {};
+        exams.forEach(exam => {
+          examMap[exam.id] = exam;
+        });
 
-      const organizedData = {};
-      let totalPoints = 0;
-      let totalCredits = 0;
+        const organizedExamResults = {};
+        
+        examSubmissions.forEach(sub => {
+          const exam = examMap[sub.exam_id];
+          if (!exam || !exam.courses) return;
 
-      studentCourses.forEach(sc => {
-        const course = courseMap[sc.course_id];
-        if (!course) return;
+          const yearKey = `year${exam.courses.year}`;
+          if (!organizedExamResults[yearKey]) {
+            organizedExamResults[yearKey] = {
+              year: exam.courses.year,
+              semester1: [],
+              semester2: [],
+              totalCredits: 0,
+              totalPoints: 0,
+              gpa: 0
+            };
+          }
 
-        const yearKey = `year${course.year}`;
-        if (!organizedData[yearKey]) {
-          organizedData[yearKey] = {
-            year: course.year,
-            semester1: [],
-            semester2: [],
-            totalCredits: 0,
-            totalPoints: 0,
-            gpa: 0
+          const gradePoints = sub.grade_points || getGradePoints(sub.grade);
+          const result = {
+            id: sub.id,
+            examId: exam.id,
+            courseId: exam.course_id,
+            courseCode: exam.courses.course_code,
+            courseName: exam.courses.course_name,
+            examTitle: exam.title,
+            grade: sub.grade || getGradeFromMarks(sub.total_marks_obtained),
+            gradeLetter: sub.grade || getGradeFromMarks(sub.total_marks_obtained),
+            credits: exam.courses.credits || 3,
+            score: sub.total_marks_obtained || 0,
+            totalMarks: exam.total_marks,
+            percentage: sub.percentage || (sub.total_marks_obtained && exam.total_marks 
+              ? (sub.total_marks_obtained / exam.total_marks * 100).toFixed(2)
+              : 0),
+            gpa: gradePoints,
+            isCore: exam.courses.is_core,
+            semester: exam.courses.semester,
+            academicYear: exam.academic_year,
+            submissionDate: sub.submitted_at,
+            gradedDate: sub.graded_at,
+            feedback: sub.feedback
           };
-        }
 
-        const gradePoints = sc.grade_points || getGradePoints(sc.grade);
-        const result = {
-          id: sc.id,
-          courseId: course.id,
-          courseCode: course.course_code,
-          courseName: course.course_name,
-          grade: sc.grade || getGradeFromMarks(sc.marks),
-          gradeLetter: sc.grade || getGradeFromMarks(sc.marks),
-          credits: course.credits || 3,
-          score: sc.marks || 0,
-          gpa: gradePoints,
-          isCore: course.is_core,
-          semester: course.semester,
-          academicYear: course.academic_year
-        };
+          if (exam.courses.semester === 1) {
+            organizedExamResults[yearKey].semester1.push(result);
+          } else if (exam.courses.semester === 2) {
+            organizedExamResults[yearKey].semester2.push(result);
+          }
 
-        if (course.semester === 1) {
-          organizedData[yearKey].semester1.push(result);
-        } else if (course.semester === 2) {
-          organizedData[yearKey].semester2.push(result);
-        }
+          if (gradePoints && exam.courses.credits) {
+            organizedExamResults[yearKey].totalPoints += gradePoints * exam.courses.credits;
+            organizedExamResults[yearKey].totalCredits += exam.courses.credits;
+          }
+        });
 
-        if (gradePoints && course.credits) {
-          organizedData[yearKey].totalPoints += gradePoints * course.credits;
-          organizedData[yearKey].totalCredits += course.credits;
-          totalPoints += gradePoints * course.credits;
-          totalCredits += course.credits;
-        }
-      });
+        // Calculate GPA for each year
+        Object.keys(organizedExamResults).forEach(yearKey => {
+          const yearData = organizedExamResults[yearKey];
+          yearData.semester1.sort((a, b) => a.courseCode.localeCompare(b.courseCode));
+          yearData.semester2.sort((a, b) => a.courseCode.localeCompare(b.courseCode));
+          if (yearData.totalCredits > 0) {
+            yearData.gpa = parseFloat((yearData.totalPoints / yearData.totalCredits).toFixed(2));
+          }
+        });
 
-      Object.keys(organizedData).forEach(yearKey => {
-        const yearData = organizedData[yearKey];
-        yearData.semester1.sort((a, b) => a.courseCode.localeCompare(b.courseCode));
-        yearData.semester2.sort((a, b) => a.courseCode.localeCompare(b.courseCode));
-        if (yearData.totalCredits > 0) {
-          yearData.gpa = parseFloat((yearData.totalPoints / yearData.totalCredits).toFixed(2));
-        }
-      });
+        setResultsData(organizedExamResults);
+        
+        // Calculate overall CGPA from exam results
+        let totalPoints = 0;
+        let totalCredits = 0;
+        
+        Object.values(organizedExamResults).forEach(yearData => {
+          totalPoints += yearData.totalPoints;
+          totalCredits += yearData.totalCredits;
+        });
+        
+        const weightedGPA = totalCredits > 0 ? totalPoints / totalCredits : 0.0;
+        setCgpa(parseFloat(weightedGPA.toFixed(2)));
 
-      const weightedGPA = totalCredits > 0 ? totalPoints / totalCredits : 0.0;
-      setCgpa(parseFloat(weightedGPA.toFixed(2)));
-      setResultsData(organizedData);
-
-      if (studentInfo?.year_of_study) {
-        const currentYearKey = `year${studentInfo.year_of_study}`;
-        if (organizedData[currentYearKey]) {
-          setActiveYear(currentYearKey);
-        } else if (Object.keys(organizedData).length > 0) {
-          const years = Object.keys(organizedData).map(key => organizedData[key].year);
-          const maxYear = Math.max(...years);
-          setActiveYear(`year${maxYear}`);
+        if (studentInfo?.year_of_study) {
+          const currentYearKey = `year${studentInfo.year_of_study}`;
+          if (organizedExamResults[currentYearKey]) {
+            setActiveYear(currentYearKey);
+          } else if (Object.keys(organizedExamResults).length > 0) {
+            const years = Object.keys(organizedExamResults).map(key => organizedExamResults[key].year);
+            const maxYear = Math.max(...years);
+            setActiveYear(`year${maxYear}`);
+          }
         }
       }
+
+      // Also handle student courses for academic records
+      if (studentCourses && studentCourses.length > 0) {
+        // This is for academic courses, not exam-specific
+        const courseIds = studentCourses.map(sc => sc.course_id);
+        const { data: courses, error: coursesError } = await supabase
+          .from('courses')
+          .select('*')
+          .in('id', courseIds);
+
+        if (coursesError) throw new Error(`Courses error: ${coursesError.message}`);
+
+        // You can combine this data with exam results if needed
+      }
+
     } catch (error) {
       console.error('Error fetching results:', error);
       setError(`Failed to load results: ${error.message}`);
@@ -298,7 +405,7 @@ const Results = () => {
         // Year header
         doc.setFontSize(14);
         doc.setTextColor(52, 152, 219);
-        doc.text(`YEAR ${yearData.year} RESULTS`, 20, yPos);
+        doc.text(`YEAR ${yearData.year} EXAM RESULTS`, 20, yPos);
         yPos += 10;
         
         // Semester 1 results
@@ -312,14 +419,15 @@ const Results = () => {
             course.courseCode,
             course.courseName,
             course.credits.toString(),
-            course.score + '%',
+            course.score + '/' + course.totalMarks,
+            course.percentage + '%',
             course.grade,
             course.gpa.toFixed(2)
           ]);
           
           autoTable(doc, {
             startY: yPos,
-            head: [['Code', 'Course Name', 'Credits', 'Score', 'Grade', 'Points']],
+            head: [['Code', 'Course', 'Credits', 'Score', 'Percentage', 'Grade', 'Points']],
             body: semester1Data,
             theme: 'striped',
             headStyles: { fillColor: [52, 152, 219], textColor: 255 },
@@ -341,14 +449,15 @@ const Results = () => {
             course.courseCode,
             course.courseName,
             course.credits.toString(),
-            course.score + '%',
+            course.score + '/' + course.totalMarks,
+            course.percentage + '%',
             course.grade,
             course.gpa.toFixed(2)
           ]);
           
           autoTable(doc, {
             startY: yPos,
-            head: [['Code', 'Course Name', 'Credits', 'Score', 'Grade', 'Points']],
+            head: [['Code', 'Course', 'Credits', 'Score', 'Percentage', 'Grade', 'Points']],
             body: semester2Data,
             theme: 'striped',
             headStyles: { fillColor: [52, 152, 219], textColor: 255 },
@@ -426,6 +535,12 @@ const Results = () => {
   const renderSpecificExamResults = () => {
     if (!specificExam || !examDetails) return null;
 
+    const submission = specificExam.submission || examSubmission;
+    const totalMarks = examDetails.total_marks || 100;
+    const marksObtained = submission?.total_marks_obtained || 0;
+    const percentage = submission?.percentage || (marksObtained && totalMarks ? (marksObtained / totalMarks * 100).toFixed(2) : 0);
+    const grade = submission?.grade || getGradeFromMarks(marksObtained);
+
     return (
       <div className="specific-exam-container">
         {/* Header */}
@@ -435,8 +550,8 @@ const Results = () => {
             <p className="page-subtitle">{specificExam.courseCode} - {specificExam.examTitle}</p>
           </div>
           <div className="action-buttons">
-            <button className="btn btn-secondary" onClick={() => setSpecificExam(null)}>
-              <i className="fas fa-list"></i> <span className="btn-text">All Results</span>
+            <button className="btn btn-secondary" onClick={() => navigate('/examinations')}>
+              <i className="fas fa-list"></i> <span className="btn-text">All Exams</span>
             </button>
             <button id="export-pdf" className="btn btn-danger" onClick={exportToPDF}>
               <i className="fas fa-file-pdf"></i> <span className="btn-text">Export Transcript</span>
@@ -453,27 +568,24 @@ const Results = () => {
           <div className="stats-grid">
             <div className="stat-item">
               <div className="stat-label">Total Marks</div>
-              <div className="stat-value">{examDetails.total_marks}</div>
+              <div className="stat-value">{totalMarks}</div>
             </div>
             <div className="stat-item">
               <div className="stat-label">Marks Obtained</div>
               <div className="stat-value text-success">
-                {specificExam.submission?.total_marks_obtained || 'N/A'}
+                {marksObtained}
               </div>
             </div>
             <div className="stat-item">
               <div className="stat-label">Percentage</div>
               <div className="stat-value text-primary">
-                {specificExam.submission?.percentage || 
-                  (specificExam.submission?.total_marks_obtained && examDetails.total_marks 
-                    ? ((specificExam.submission.total_marks_obtained / examDetails.total_marks) * 100).toFixed(2) + '%'
-                    : 'N/A')}
+                {percentage}%
               </div>
             </div>
             <div className="stat-item">
               <div className="stat-label">Grade</div>
-              <div className="stat-value" style={{color: getGradeColor(specificExam.submission?.grade)}}>
-                {specificExam.submission?.grade || 'N/A'}
+              <div className="stat-value" style={{color: getGradeColor(grade)}}>
+                {grade}
               </div>
             </div>
           </div>
@@ -483,24 +595,15 @@ const Results = () => {
             <div className="progress-header">
               <span className="progress-label">Performance</span>
               <span className="progress-percentage">
-                {specificExam.submission?.percentage || 
-                  (specificExam.submission?.total_marks_obtained && examDetails.total_marks 
-                    ? ((specificExam.submission.total_marks_obtained / examDetails.total_marks) * 100).toFixed(2) + '%'
-                    : '0%')}
+                {percentage}%
               </span>
             </div>
             <div className="progress-bar">
               <div 
                 className="progress-fill"
                 style={{
-                  width: `${specificExam.submission?.percentage || 
-                    (specificExam.submission?.total_marks_obtained && examDetails.total_marks 
-                      ? ((specificExam.submission.total_marks_obtained / examDetails.total_marks) * 100).toFixed(2)
-                      : 0)}%`,
-                  backgroundColor: (specificExam.submission?.percentage || 
-                    (specificExam.submission?.total_marks_obtained && examDetails.total_marks 
-                      ? (specificExam.submission.total_marks_obtained / examDetails.total_marks) * 100
-                      : 0)) >= 50 ? '#28a745' : '#dc3545'
+                  width: `${percentage}%`,
+                  backgroundColor: percentage >= 50 ? '#28a745' : '#dc3545'
                 }}
               ></div>
             </div>
@@ -547,28 +650,32 @@ const Results = () => {
               <div className="detail-item">
                 <span className="detail-label">Submitted:</span>
                 <span className="detail-value">
-                  {specificExam.submission?.submitted_at 
-                    ? new Date(specificExam.submission.submitted_at).toLocaleString()
+                  {submission?.submitted_at 
+                    ? new Date(submission.submitted_at).toLocaleString()
                     : 'N/A'}
                 </span>
               </div>
               <div className="detail-item">
-                <span className="detail-label">Time Spent:</span>
-                <span className="detail-value">{specificExam.submission?.time_spent_minutes || 'N/A'} minutes</span>
+                <span className="detail-label">Graded:</span>
+                <span className="detail-value">
+                  {submission?.graded_at 
+                    ? new Date(submission.graded_at).toLocaleString()
+                    : 'N/A'}
+                </span>
               </div>
               <div className="detail-item">
                 <span className="detail-label">Status:</span>
-                <span className={`status-badge ${specificExam.submission?.status === 'graded' ? 'graded' : 'pending'}`}>
-                  {specificExam.submission?.status?.toUpperCase() || 'N/A'}
+                <span className={`status-badge ${submission?.status === 'graded' ? 'graded' : 'pending'}`}>
+                  {submission?.status?.toUpperCase() || 'N/A'}
                 </span>
               </div>
             </div>
           </div>
 
-          {specificExam.submission?.feedback && (
+          {submission?.feedback && (
             <div className="feedback-section">
               <h5><i className="fas fa-comment"></i> Lecturer Feedback</h5>
-              <p className="feedback-text">{specificExam.submission.feedback}</p>
+              <p className="feedback-text">{submission.feedback}</p>
             </div>
           )}
 
@@ -678,7 +785,7 @@ const Results = () => {
                 <span className="stat-value">{resultsData[activeYear].gpa.toFixed(2)}</span>
               </div>
               <div className="summary-stat">
-                <span className="stat-label">Courses:</span>
+                <span className="stat-label">Exams:</span>
                 <span className="stat-value">
                   {resultsData[activeYear].semester1.length + resultsData[activeYear].semester2.length}
                 </span>
@@ -690,7 +797,7 @@ const Results = () => {
         {/* Semester 1 Results */}
         <div className="semester-results">
           <h3 className="semester-title">
-            <i className="fas fa-calendar"></i> Semester 1 Results
+            <i className="fas fa-calendar"></i> Semester 1 Exam Results
           </h3>
           
           {resultsData[activeYear]?.semester1?.length > 0 ? (
@@ -703,6 +810,7 @@ const Results = () => {
                       <th>Course Name</th>
                       <th>Credits</th>
                       <th>Score</th>
+                      <th>Percentage</th>
                       <th>Grade</th>
                       <th>Points</th>
                     </tr>
@@ -719,8 +827,13 @@ const Results = () => {
                         <td className="course-name">{course.courseName}</td>
                         <td className="credits">{course.credits}</td>
                         <td className="score">
-                          <span className={`score-badge ${course.score >= 50 ? 'pass' : 'fail'}`}>
-                            {course.score}%
+                          <span className={`score-badge ${course.score >= (course.totalMarks/2) ? 'pass' : 'fail'}`}>
+                            {course.score}/{course.totalMarks}
+                          </span>
+                        </td>
+                        <td className="percentage">
+                          <span className="percentage-value">
+                            {course.percentage}%
                           </span>
                         </td>
                         <td className="grade">
@@ -747,7 +860,7 @@ const Results = () => {
           ) : (
             <div className="no-results-message">
               <i className="fas fa-clipboard-list"></i>
-              <p>No results available for Semester 1</p>
+              <p>No exam results available for Semester 1</p>
             </div>
           )}
         </div>
@@ -755,7 +868,7 @@ const Results = () => {
         {/* Semester 2 Results */}
         <div className="semester-results">
           <h3 className="semester-title">
-            <i className="fas fa-calendar-alt"></i> Semester 2 Results
+            <i className="fas fa-calendar-alt"></i> Semester 2 Exam Results
           </h3>
           
           {resultsData[activeYear]?.semester2?.length > 0 ? (
@@ -768,6 +881,7 @@ const Results = () => {
                       <th>Course Name</th>
                       <th>Credits</th>
                       <th>Score</th>
+                      <th>Percentage</th>
                       <th>Grade</th>
                       <th>Points</th>
                     </tr>
@@ -784,8 +898,13 @@ const Results = () => {
                         <td className="course-name">{course.courseName}</td>
                         <td className="credits">{course.credits}</td>
                         <td className="score">
-                          <span className={`score-badge ${course.score >= 50 ? 'pass' : 'fail'}`}>
-                            {course.score}%
+                          <span className={`score-badge ${course.score >= (course.totalMarks/2) ? 'pass' : 'fail'}`}>
+                            {course.score}/{course.totalMarks}
+                          </span>
+                        </td>
+                        <td className="percentage">
+                          <span className="percentage-value">
+                            {course.percentage}%
                           </span>
                         </td>
                         <td className="grade">
@@ -812,7 +931,7 @@ const Results = () => {
           ) : (
             <div className="no-results-message">
               <i className="fas fa-clipboard-list"></i>
-              <p>No results available for Semester 2</p>
+              <p>No exam results available for Semester 2</p>
             </div>
           )}
         </div>
@@ -821,13 +940,13 @@ const Results = () => {
           <div className="empty-state">
             <i className="fas fa-graduation-cap"></i>
             <h3>No Examination Results Available</h3>
-            <p>Your examination results will appear here once they have been processed and published.</p>
+            <p>Your examination results will appear here once they have been graded and published.</p>
             <div className="empty-state-actions">
               <button className="btn btn-primary" onClick={refreshResults}>
                 <i className="fas fa-sync-alt"></i> <span className="btn-text">Check Again</span>
               </button>
-              <button className="btn btn-secondary" onClick={() => navigate('/courses')}>
-                <i className="fas fa-book"></i> <span className="btn-text">View Courses</span>
+              <button className="btn btn-secondary" onClick={() => navigate('/examinations')}>
+                <i className="fas fa-clipboard-check"></i> <span className="btn-text">View Examinations</span>
               </button>
             </div>
           </div>
@@ -1258,6 +1377,11 @@ const Results = () => {
           color: #742a2a;
         }
 
+        .percentage-value {
+          font-weight: 500;
+          color: #2d3748;
+        }
+
         .grade-badge {
           display: inline-block;
           padding: 0.375rem 0.75rem;
@@ -1617,11 +1741,11 @@ const Results = () => {
             align-items: center;
             gap: 0.75rem;
             flex: 1;
-            min-width: 0; /* Prevents flex item overflow */
+            min-width: 0;
           }
 
           .year-selector label {
-            flex-shrink: 0; /* Prevents label from shrinking */
+            flex-shrink: 0;
           }
 
           .select-wrapper {
@@ -1761,7 +1885,7 @@ const Results = () => {
           }
 
           table {
-                break-inside: avoid;
+            break-inside: avoid;
           }
 
           h2, h3, h4 {
