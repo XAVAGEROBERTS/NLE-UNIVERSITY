@@ -103,8 +103,9 @@ const AppContent = () => (
         <Route path="timetable" element={<Timetable />} />
         <Route path="coursework" element={<Coursework />} />
         <Route path="examinations" element={<Examinations />} />
-        <Route path="examinations/take/:examId" element={<TakeExam />} /> {/* NEW ROUTE */}
-        <Route path="results" element={<Results />} />
+        <Route path="examinations/take/:examId" element={<TakeExam />} /> {/* Exam taking route */}
+        <Route path="examinations/results/:examId" element={<Results />} /> {/* NEW: Specific exam results route */}
+        <Route path="results" element={<Results />} /> {/* Existing general results route */}
         <Route path="finance" element={<Finance />} />
         <Route path="tutorials" element={<Tutorials />} />
         <Route path="chatbot" element={<Chatbot />} />
