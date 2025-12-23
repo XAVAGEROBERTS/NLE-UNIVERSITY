@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
 import { useStudentAuth } from '../../context/StudentAuthContext';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
-import ExamModel from './TakeExam'; // Import the ExamModel component
 
 const Examinations = () => {
   const navigate = useNavigate();
@@ -14,14 +13,6 @@ const Examinations = () => {
   const [studentInfo, setStudentInfo] = useState(null);
   const { user } = useStudentAuth();
   const [isMobile, setIsMobile] = useState(false);
-  
-  // Exam taking states
-  const [selectedExam, setSelectedExam] = useState(null);
-  const [showExamModel, setShowExamModel] = useState(false);
-  const [examFileUrls, setExamFileUrls] = useState([]);
-  const [downloadingExamFile, setDownloadingExamFile] = useState(false);
-  const [viewingExamPaper, setViewingExamPaper] = useState(false);
-  const [currentExam, setCurrentExam] = useState(null);
   
   // Check screen size
   useEffect(() => {
@@ -119,187 +110,99 @@ const Examinations = () => {
       const { data: examsData, error: examsError } = await query;
       if (examsError) throw new Error(`Exams error: ${examsError.message}`);
 
-    // Fetch student's exam submissions
-const { data: submissionsData, error: submissionsError } = await supabase
-  .from('exam_submissions')
-  .select('*')
-  .eq('student_id', student.id);
+      // Fetch student's exam submissions
+      const { data: submissionsData, error: submissionsError } = await supabase
+        .from('exam_submissions')
+        .select('*')
+        .eq('student_id', student.id);
 
-if (submissionsError) throw new Error(`Submissions error: ${submissionsError.message}`);
+      if (submissionsError) throw new Error(`Submissions error: ${submissionsError.message}`);
 
-// Process exams
-const processedExams = examsData ? examsData.map(exam => {
-  const studentSubmission = submissionsData?.find(sub => sub.exam_id === exam.id);
-const now = new Date();
-const startTime = new Date(exam.start_time);
-const endTime = new Date(exam.end_time);
+      // Process exams
+      const processedExams = examsData ? examsData.map(exam => {
+        const studentSubmission = submissionsData?.find(sub => sub.exam_id === exam.id);
+        const now = new Date();
+        const startTime = new Date(exam.start_time);
+        const endTime = new Date(exam.end_time);
 
-// Correct direct comparison (both dates are in UTC internally)
-const isActiveByTime = now >= startTime && now <= endTime;
-const isUpcoming = now < startTime;
-const isEndedByTime = now > endTime;
-  
-  // Determine if it's an online exam
-  const isOnlineExam = exam.exam_type === 'online' || exam.exam_type === 'written_online';
-  
-  // Submission status - CORRECTED LOGIC
-  const hasSubmission = !!studentSubmission;
-  
-  // Check if exam is submitted - SIMPLIFIED AND CORRECTED
-  let isSubmitted = false;
-  if (studentSubmission) {
-    const status = studentSubmission.status?.toLowerCase();
-    
-    // LOGIC: Submitted if status is 'submitted' OR has submitted_at timestamp
-    isSubmitted = status === 'submitted' || studentSubmission.submitted_at !== null;
-    
-    // Debug for this specific exam
-    if (studentSubmission.exam_id === exam.id) {
-      console.log(`Exam ${exam.id} submission check:`, {
-        status: studentSubmission.status,
-        submitted_at: studentSubmission.submitted_at,
-        isSubmittedResult: isSubmitted
-      });
-    }
-  }
-  
-  const isStartedButNotSubmitted = studentSubmission && studentSubmission.status === 'started' && !isSubmitted;
-  
-  // For resumed exams: If exam was started but not submitted
-  const canResume = isStartedButNotSubmitted && (isActiveByTime || !isEndedByTime);
-  
-  // Can start only if: no submission AND exam is active AND it's online
-  const canStart = !hasSubmission && isActiveByTime && isOnlineExam;
-  
-  // Final status determination
-  let finalStatus = 'upcoming';
-  let showAsActive = false;
-  
-  if (isSubmitted) {
-    finalStatus = 'submitted';
-  } else if (canResume) {
-    finalStatus = 'active'; // Show as active for resume
-    showAsActive = true;
-  } else if (isActiveByTime) {
-    finalStatus = 'active';
-    showAsActive = true;
-  } else if (isUpcoming) {
-    finalStatus = 'upcoming';
-  } else if (isEndedByTime) {
-    finalStatus = 'ended';
-  }
+        const isActiveByTime = now >= startTime && now <= endTime;
+        const isUpcoming = now < startTime;
+        const isEndedByTime = now > endTime;
+        
+        // Determine if it's an online exam
+        const isOnlineExam = exam.exam_type === 'online' || exam.exam_type === 'written_online';
+        
+        // Submission status
+        const hasSubmission = !!studentSubmission;
+        
+        // Check submission status
+        let isSubmitted = false;
+        let isGraded = false;
+        
+        if (studentSubmission) {
+          const status = studentSubmission.status?.toLowerCase();
+          
+          isSubmitted = status === 'submitted' || studentSubmission.submitted_at !== null;
+          isGraded = status === 'graded' || studentSubmission.graded_at !== null;
+        }
+        
+        const isStartedButNotSubmitted = studentSubmission && studentSubmission.status === 'started' && !isSubmitted;
+        
+        // For resumed exams: If exam was started but not submitted
+        const canResume = isStartedButNotSubmitted && (isActiveByTime || !isEndedByTime);
+        
+        // Can start only if: no submission AND exam is active AND it's online
+        const canStart = !hasSubmission && isActiveByTime && isOnlineExam;
+        
+        // Final status determination
+        let finalStatus = 'upcoming';
+        let showAsActive = false;
+        
+        if (isGraded) {
+          finalStatus = 'graded';
+        } else if (isSubmitted) {
+          finalStatus = 'submitted';
+        } else if (canResume) {
+          finalStatus = 'active';
+          showAsActive = true;
+        } else if (isActiveByTime) {
+          finalStatus = 'active';
+          showAsActive = true;
+        } else if (isUpcoming) {
+          finalStatus = 'upcoming';
+        } else if (isEndedByTime) {
+          finalStatus = 'ended';
+        }
 
-  return {
-    id: exam.id,
-    title: exam.title === 'NA' ? `${exam.courses?.course_code || 'Exam'} Final` : exam.title,
-    description: exam.description === 'NA' ? 'Final examination for the course' : exam.description,
-    courseId: exam.course_id,
-    courseCode: exam.courses?.course_code || 'N/A',
-    courseName: exam.courses?.course_name || 'N/A',
-    examType: exam.exam_type,
-    startTime: exam.start_time,
-    endTime: exam.end_time,
-    duration: exam.duration_minutes,
-    totalMarks: exam.total_marks,
-    passingMarks: exam.passing_marks,
-    location: exam.location || exam.venue || 'TBA',
-    supervisor: exam.supervisor,
-    instructions: exam.instructions === 'NA' ? 'Complete all questions within the given time frame.' : exam.instructions,
-    status: finalStatus,
-    submitted: isSubmitted,
-    submission: studentSubmission || null,
-    isActive: showAsActive,
-    isUpcoming: isUpcoming,
-    isEnded: isEndedByTime,
-    canStart: canStart,
-    canResume: canResume,
-    hasIncompleteSubmission: isStartedButNotSubmitted,
-    isOnline: isOnlineExam,
-    examFiles: exam.exam_files || [],
-    materialsUrl: exam.materials_url || []
-  };
-}) : [];
-
-// ENHANCED Debug logging
-console.log('=== DEBUG: Exam Submission Analysis ===');
-console.log('Total submissions found:', submissionsData?.length || 0);
-console.log('Total exams to process:', examsData?.length || 0);
-
-// Count submissions by status
-if (submissionsData) {
-  const statusCount = {};
-  submissionsData.forEach(sub => {
-    const status = sub.status || 'unknown';
-    statusCount[status] = (statusCount[status] || 0) + 1;
-  });
-  console.log('Submission status counts:', statusCount);
-  
-  // Log detailed submission info
-  submissionsData.forEach((sub, idx) => {
-    console.log(`📝 Submission ${idx + 1}:`, {
-      exam_id: sub.exam_id,
-      status: sub.status,
-      submitted_at: sub.submitted_at,
-      started_at: sub.started_at,
-      isSubmitted: sub.status === 'submitted' || sub.submitted_at !== null
-    });
-  });
-}
-
-// Check each exam's submission status
-console.log('=== DEBUG: Exam Submission Matching ===');
-processedExams.forEach((exam, idx) => {
-  const submission = submissionsData?.find(sub => sub.exam_id === exam.id);
-  console.log(`📊 Exam ${idx + 1}: ${exam.title}`, {
-    exam_id: exam.id,
-    hasSubmission: !!submission,
-    submissionStatus: submission?.status || 'none',
-    submitted_at: submission?.submitted_at || 'none',
-    isMarkedAsSubmitted: exam.submitted,
-    finalStatus: exam.status
-  });
-});
-
-// Debug logging - ENHANCED
-console.log('=== DEBUG: Exam Submission Data ===');
-console.log('Submissions found:', submissionsData?.length || 0);
-if (submissionsData) {
-  submissionsData.forEach((sub, idx) => {
-    console.log(`Submission ${idx + 1}:`, {
-      exam_id: sub.exam_id,
-      status: sub.status,
-      submitted_at: sub.submitted_at,
-      hasAnswers: !!(sub.answers && Object.keys(sub.answers).length > 0),
-      hasAnswerText: !!sub.answer_text,
-      hasAnswerFiles: !!(sub.answer_files && sub.answer_files.length > 0)
-    });
-  });
-}
-
-console.log('=== DEBUG: Processed Exams ===');
-processedExams.forEach((exam, idx) => {
-  console.log(`Exam ${idx + 1}:`, {
-    id: exam.id,
-    title: exam.title,
-    status: exam.status,
-    submitted: exam.submitted,
-    submission: exam.submission ? {
-      status: exam.submission.status,
-      submitted_at: exam.submission.submitted_at
-    } : null
-  });
-});
-
-// Debug logging
-console.log('Processed exams:', processedExams.map(e => ({
-  id: e.id,
-  title: e.title,
-  status: e.status,
-  submitted: e.submitted,
-  canResume: e.canResume,
-  isActive: e.isActive,
-  submission: e.submission
-})));
+        return {
+          id: exam.id,
+          title: exam.title === 'NA' ? `${exam.courses?.course_code || 'Exam'} Final` : exam.title,
+          description: exam.description === 'NA' ? 'Final examination for the course' : exam.description,
+          courseId: exam.course_id,
+          courseCode: exam.courses?.course_code || 'N/A',
+          courseName: exam.courses?.course_name || 'N/A',
+          examType: exam.exam_type,
+          startTime: exam.start_time,
+          endTime: exam.end_time,
+          duration: exam.duration_minutes,
+          totalMarks: exam.total_marks,
+          passingMarks: exam.passing_marks,
+          location: exam.location || exam.venue || 'TBA',
+          supervisor: exam.supervisor,
+          instructions: exam.instructions === 'NA' ? 'Complete all questions within the given time frame.' : exam.instructions,
+          status: finalStatus,
+          submitted: isSubmitted,
+          graded: isGraded,
+          submission: studentSubmission || null,
+          isActive: showAsActive,
+          isUpcoming: isUpcoming,
+          isEnded: isEndedByTime,
+          canStart: canStart,
+          canResume: canResume,
+          hasIncompleteSubmission: isStartedButNotSubmitted,
+          isOnline: isOnlineExam
+        };
+      }) : [];
 
       setExams(processedExams);
     } catch (error) {
@@ -312,97 +215,17 @@ console.log('Processed exams:', processedExams.map(e => ({
   };
 
   // Start/resume exam function
-// Change the handleStartExam function to navigate to the new route
-const handleStartExam = (exam) => {
-  // Check if exam is online
-  const isOnlineExam = exam.examType === 'online' || exam.examType === 'written_online';
-  
-  if (!isOnlineExam) {
-    // For physical exams, only allow downloading exam paper
-    if (exam.examFiles && exam.examFiles.length > 0) {
-      handleDownloadExamPaper(exam);
-    } else {
+  const handleStartExam = (exam) => {
+    // Check if exam is online
+    const isOnlineExam = exam.isOnline;
+    
+    if (!isOnlineExam) {
       alert('This is a physical exam. Please attend at the specified venue.');
+      return;
     }
-    return;
-  }
 
-  // Navigate to the exam taking page
-  navigate(`/examinations/take/${exam.id}`);
-};
-
-  // Load exam files from bucket
-  const loadExamFiles = async (exam) => {
-    try {
-      const files = [];
-      
-      // Check if exam has file references
-      if (exam.examFiles && exam.examFiles.length > 0) {
-        for (const filePath of exam.examFiles) {
-          const { data: publicUrlData } = supabase.storage
-            .from('exam_papers')
-            .getPublicUrl(filePath);
-          
-          if (publicUrlData?.publicUrl) {
-            files.push({
-              name: filePath.split('/').pop(),
-              url: publicUrlData.publicUrl,
-              type: getFileType(filePath)
-            });
-          }
-        }
-      }
-      
-      setExamFileUrls(files);
-    } catch (error) {
-      console.error('Error loading exam files:', error);
-    }
-  };
-
-  // Download exam paper
-  const handleDownloadExamPaper = async (exam) => {
-    try {
-      setDownloadingExamFile(true);
-      
-      if (!exam.examFiles || exam.examFiles.length === 0) {
-        alert('No exam paper available for download.');
-        return;
-      }
-
-      // For multiple files, let user choose
-      if (exam.examFiles.length > 1) {
-        setViewingExamPaper(true);
-        setCurrentExam(exam);
-        await loadExamFiles(exam);
-        return;
-      }
-
-      // For single file, download directly
-      const filePath = exam.examFiles[0];
-      const { data: publicUrlData } = supabase.storage
-        .from('exam_papers')
-        .getPublicUrl(filePath);
-      
-      if (!publicUrlData?.publicUrl) {
-        alert('Exam paper not found.');
-        return;
-      }
-
-      // Create download link
-      const a = document.createElement('a');
-      a.href = publicUrlData.publicUrl;
-      a.download = `${exam.title.replace(/[^a-z0-9]/gi, '_')}_Exam.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      
-      alert('Exam paper downloaded successfully!');
-    } catch (error) {
-      console.error('Error downloading exam paper:', error);
-      alert('Failed to download exam paper.');
-    } finally {
-      setDownloadingExamFile(false);
-    }
+    // Navigate to the exam taking page
+    navigate(`/examinations/take/${exam.id}`);
   };
 
   // Format date
@@ -417,25 +240,31 @@ const handleStartExam = (exam) => {
       hour12: true
     }) + ' EAT';
   };
-// Get exam status
-const getExamStatus = (exam) => {
-  // First, check if it's submitted (using the submitted property we calculated)
-  if (exam.submitted) return 'submitted';
-  
-  // Then check status from exam object
-  if (exam.status) return exam.status;
-  
-  // Fallback logic
-  if (exam.hasIncompleteSubmission) return 'active';
-  if (exam.isActive) return 'active';
-  if (exam.isUpcoming) return 'upcoming';
-  if (exam.isEnded) return 'ended';
-  
-  return 'upcoming';
-};
+
+  // Get exam status
+  const getExamStatus = (exam) => {
+    // First, check if it's graded
+    if (exam.graded) return 'graded';
+    
+    // Then check if it's submitted
+    if (exam.submitted) return 'submitted';
+    
+    // Then check status from exam object
+    if (exam.status) return exam.status;
+    
+    // Fallback logic
+    if (exam.hasIncompleteSubmission) return 'active';
+    if (exam.isActive) return 'active';
+    if (exam.isUpcoming) return 'upcoming';
+    if (exam.isEnded) return 'ended';
+    
+    return 'upcoming';
+  };
+
   // Get status color
   const getStatusColor = (status) => {
     switch(status) {
+      case 'graded': return '#6f42c1';
       case 'submitted': return '#28a745';
       case 'incomplete': return '#ffc107';
       case 'active': return '#dc3545';
@@ -458,24 +287,17 @@ const getExamStatus = (exam) => {
     return `${hours}h ${minutes}m`;
   };
 
-  // Get file type from extension
-  const getFileType = (filename) => {
-    const ext = filename.split('.').pop().toLowerCase();
-    if (['pdf'].includes(ext)) return 'pdf';
-    if (['doc', 'docx'].includes(ext)) return 'document';
-    if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) return 'image';
-    return 'file';
-  };
-
-  // Get file icon
-  const getFileIcon = (filename) => {
-    const type = getFileType(filename);
-    switch(type) {
-      case 'pdf': return '📕';
-      case 'document': return '📝';
-      case 'image': return '🖼️';
-      default: return '📄';
-    }
+  // Navigate to results page
+  const navigateToResults = (exam) => {
+    navigate(`/examinations/results/${exam.id}`, {
+      state: {
+        examId: exam.id,
+        courseCode: exam.courseCode,
+        courseName: exam.courseName,
+        examTitle: exam.title,
+        submission: exam.submission
+      }
+    });
   };
 
   // Download exam permit
@@ -646,77 +468,6 @@ const getExamStatus = (exam) => {
     fetchExams();
   };
 
-  // =================== EXAM PAPER VIEWER MODAL ===================
-  const ExamPaperViewerModal = () => {
-    if (!viewingExamPaper || !currentExam) return null;
-
-    return (
-      <div style={styles.modalOverlay}>
-        <div style={styles.paperViewerContainer}>
-          <div style={styles.paperViewerHeader}>
-            <h3 style={styles.paperViewerTitle}>
-              <i className="fas fa-file-pdf" style={{ marginRight: '10px' }}></i>
-              {currentExam.title} - Exam Papers
-            </h3>
-            <button
-              onClick={() => setViewingExamPaper(false)}
-              style={styles.paperCloseButton}
-            >
-              ×
-            </button>
-          </div>
-          
-          <div style={styles.paperGrid}>
-            {examFileUrls.map((file, index) => (
-              <div key={index} style={styles.paperCard}>
-                <div style={styles.paperCardHeader}>
-                  <div style={styles.paperIcon}>
-                    {getFileIcon(file.name)}
-                  </div>
-                  <div style={styles.paperName}>
-                    {file.name}
-                  </div>
-                  <div style={styles.paperType}>
-                    {file.type.toUpperCase()}
-                  </div>
-                </div>
-                
-                <div style={styles.paperCardBody}>
-                  <div style={styles.paperButtons}>
-                    <a
-                      href={file.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={styles.viewButton}
-                    >
-                      <i className="fas fa-eye"></i>
-                      View in Browser
-                    </a>
-                    
-                    <button
-                      onClick={() => {
-                        const a = document.createElement('a');
-                        a.href = file.url;
-                        a.download = file.name;
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                      }}
-                      style={styles.downloadButton}
-                    >
-                      <i className="fas fa-download"></i>
-                      Download
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   // =================== RENDER EXAM CARDS ===================
   const renderMobileExamCard = (exam, index) => {
     const status = getExamStatus(exam);
@@ -738,12 +489,6 @@ const getExamStatus = (exam) => {
             <span style={styles.typeBadge}>
               {exam.examType.toUpperCase()}
             </span>
-            {exam.examFiles && exam.examFiles.length > 0 && (
-              <span style={styles.filesBadge}>
-                <i className="fas fa-file-pdf" style={{ marginRight: '4px' }}></i>
-                {exam.examFiles.length} file{exam.examFiles.length !== 1 ? 's' : ''}
-              </span>
-            )}
           </div>
           
           <h4 style={styles.mobileCardTitle}>
@@ -795,60 +540,56 @@ const getExamStatus = (exam) => {
 
           {/* Action Buttons */}
           <div style={styles.mobileButtonGroup}>
-            {/* Exam Paper Download Button */}
-            {exam.examFiles && exam.examFiles.length > 0 && (
+            {/* Main Action Button */}
+            {exam.graded ? (
               <button 
-                onClick={() => handleDownloadExamPaper(exam)}
-                disabled={downloadingExamFile}
-                style={styles.downloadPaperButton}
+                onClick={() => navigateToResults(exam)}
+                style={styles.viewResultsButton}
               >
-                <i className="fas fa-download"></i>
-                {downloadingExamFile ? 'Downloading...' : `Download Exam Paper`}
+                <i className="fas fa-chart-line"></i>
+                View Results
+              </button>
+            ) : exam.submitted ? (
+              <button 
+                disabled
+                style={styles.disabledButton}
+              >
+                <i className="fas fa-check-circle"></i>
+                Awaiting Grading
+              </button>
+            ) : exam.canResume ? (
+              <button 
+                onClick={() => handleStartExam(exam)}
+                style={styles.resumeExamButton}
+              >
+                <i className="fas fa-history"></i>
+                RESUME EXAM
+              </button>
+            ) : exam.canStart && isOnlineExam ? (
+              <button 
+                onClick={() => handleStartExam(exam)}
+                style={styles.startExamButton}
+              >
+                <i className="fas fa-play"></i>
+                START ONLINE EXAM
+              </button>
+            ) : status === 'upcoming' ? (
+              <button 
+                disabled
+                style={styles.disabledButton}
+              >
+                <i className="fas fa-clock"></i>
+                Starts in {timeUntilStart}
+              </button>
+            ) : (
+              <button 
+                disabled
+                style={styles.disabledButton}
+              >
+                <i className="fas fa-times-circle"></i>
+                Exam {isOnlineExam ? 'Closed' : 'Physical'}
               </button>
             )}
-
-            {/* Main Action Button */}
-         {exam.submitted ? (
-  <button 
-    onClick={() => navigate(`/examinations/results/${exam.id}`)}
-    style={styles.viewResultsButton}
-  >
-    <i className="fas fa-chart-line"></i>
-    View Results
-  </button>
-) : exam.canResume ? (
-  <button 
-    onClick={() => handleStartExam(exam)}
-    style={styles.resumeExamButton}
-  >
-    <i className="fas fa-history"></i>
-    RESUME EXAM
-  </button>
-) : exam.canStart && isOnlineExam ? (
-  <button 
-    onClick={() => handleStartExam(exam)}
-    style={styles.startExamButton}
-  >
-    <i className="fas fa-play"></i>
-    START ONLINE EXAM
-  </button>
-) : status === 'upcoming' ? (
-  <button 
-    disabled
-    style={styles.disabledButton}
-  >
-    <i className="fas fa-clock"></i>
-    Starts in {timeUntilStart}
-  </button>
-) : (
-  <button 
-    disabled
-    style={styles.disabledButton}
-  >
-    <i className="fas fa-times-circle"></i>
-    Exam {isOnlineExam ? 'Closed' : 'Physical'}
-  </button>
-)}
           </div>
         </div>
       </div>
@@ -868,10 +609,10 @@ const getExamStatus = (exam) => {
         style={{
           ...styles.desktopCard,
           borderLeft: `5px solid ${statusColor}`,
-          cursor: ((exam.canStart || exam.canResume) && isOnlineExam) || exam.submitted ? 'pointer' : 'default',
+          cursor: (exam.canStart || exam.canResume || exam.graded) && isOnlineExam ? 'pointer' : 'default',
         }}
         onMouseEnter={(e) => {
-          if (((exam.canStart || exam.canResume) && isOnlineExam) || exam.submitted) {
+          if (((exam.canStart || exam.canResume) && isOnlineExam) || exam.graded) {
             e.currentTarget.style.transform = 'translateY(-4px)';
             e.currentTarget.style.boxShadow = '0 8px 25px rgba(0,0,0,0.1)';
           }
@@ -891,12 +632,6 @@ const getExamStatus = (exam) => {
               <span style={styles.desktopTypeBadge}>
                 {exam.examType.toUpperCase()}
               </span>
-              {exam.examFiles && exam.examFiles.length > 0 && (
-                <span style={styles.desktopFilesBadge}>
-                  <i className="fas fa-file-pdf"></i>
-                  {exam.examFiles.length} file{exam.examFiles.length !== 1 ? 's' : ''}
-                </span>
-              )}
             </div>
             <h4 style={styles.desktopCardTitle}>
               {exam.title}
@@ -974,88 +709,110 @@ const getExamStatus = (exam) => {
 
           {/* Action Area */}
           <div style={styles.desktopActionArea}>
-            <div style={styles.leftActions}>
-           
-            </div>
-            
             <div style={styles.rightActions}>
-      {exam.submitted ? (
-  <>
-    <div style={styles.submittedInfo}>
-      <i className="fas fa-check-circle" style={{ fontSize: '20px', color: '#28a745' }}></i>
-      <div>
-        <div style={{ fontWeight: 'bold' }}>
-          Submitted {exam.submission?.submitted_at ? 
-            `on ${new Date(exam.submission.submitted_at).toLocaleDateString()}` : 
-            'successfully'}
-        </div>
-      </div>
-    </div>
-    <button 
-      onClick={() => navigate(`/examinations/results/${exam.id}`)}
-      style={styles.viewResultsButtonDesktop}
-    >
-      <i className="fas fa-chart-line"></i>
-      View Results
-    </button>
-  </>
-) : exam.canResume ? (
-  <>
-    <div style={styles.resumeInfo}>
-      <i className="fas fa-history"></i>
-      Exam Incomplete - Resume Available
-    </div>
-    <button 
-      onClick={() => handleStartExam(exam)}
-      style={styles.resumeExamButtonDesktop}
-    >
-      <i className="fas fa-history"></i>
-      RESUME EXAM
-    </button>
-  </>
-) : exam.canStart && isOnlineExam ? (
-  <>
-    <div style={styles.activeInfo}>
-      <i className="fas fa-exclamation-triangle"></i>
-      Exam is ACTIVE
-    </div>
-    <button 
-      onClick={() => handleStartExam(exam)}
-      style={styles.startExamButtonDesktop}
-    >
-      <i className="fas fa-play"></i>
-      START ONLINE EXAM
-    </button>
-  </>
-) : status === 'upcoming' ? (
-  <>
-    <div style={styles.upcomingInfo}>
-      <i className="fas fa-clock"></i>
-      Starts in {timeUntilStart}
-    </div>
-    <button 
-      disabled
-      style={styles.disabledButtonDesktop}
-    >
-      <i className="fas fa-lock"></i>
-      {isOnlineExam ? 'Not Available Yet' : 'Physical Exam'}
-    </button>
-  </>
-) : (
-  <>
-    <div style={styles.endedInfo}>
-      <i className="fas fa-ban"></i>
-      {isOnlineExam ? 'Exam period has ended' : 'Physical Exam - Attend at Venue'}
-    </div>
-    <button 
-      disabled
-      style={styles.disabledButtonDesktop}
-    >
-      <i className="fas fa-times-circle"></i>
-      {isOnlineExam ? 'Closed' : 'Physical'}
-    </button>
-  </>
-)}
+              {exam.graded ? (
+                <>
+                  <div style={styles.gradedInfo}>
+                    <i className="fas fa-check-double" style={{ fontSize: '20px', color: '#6f42c1' }}></i>
+                    <div>
+                      <div style={{ fontWeight: 'bold', color: '#6f42c1' }}>
+                        Graded {exam.submission?.graded_at ? 
+                          `on ${new Date(exam.submission.graded_at).toLocaleDateString()}` : 
+                          'and ready to view'}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#28a745' }}>
+                        Score: {exam.submission?.total_marks_obtained || 'N/A'} / {exam.totalMarks}
+                      </div>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => navigateToResults(exam)}
+                    style={styles.viewResultsButtonDesktop}
+                  >
+                    <i className="fas fa-chart-line"></i>
+                    View Results
+                  </button>
+                </>
+              ) : exam.submitted ? (
+                <>
+                  <div style={styles.submittedInfo}>
+                    <i className="fas fa-check-circle" style={{ fontSize: '20px', color: '#28a745' }}></i>
+                    <div>
+                      <div style={{ fontWeight: 'bold' }}>
+                        Submitted {exam.submission?.submitted_at ? 
+                          `on ${new Date(exam.submission.submitted_at).toLocaleDateString()}` : 
+                          'successfully'}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#666' }}>
+                        Awaiting grading
+                      </div>
+                    </div>
+                  </div>
+                  <button 
+                    disabled
+                    style={styles.disabledButtonDesktop}
+                  >
+                    <i className="fas fa-hourglass-half"></i>
+                    Awaiting Grading
+                  </button>
+                </>
+              ) : exam.canResume ? (
+                <>
+                  <div style={styles.resumeInfo}>
+                    <i className="fas fa-history"></i>
+                    Exam Incomplete - Resume Available
+                  </div>
+                  <button 
+                    onClick={() => handleStartExam(exam)}
+                    style={styles.resumeExamButtonDesktop}
+                  >
+                    <i className="fas fa-history"></i>
+                    RESUME EXAM
+                  </button>
+                </>
+              ) : exam.canStart && isOnlineExam ? (
+                <>
+                  <div style={styles.activeInfo}>
+                    <i className="fas fa-exclamation-triangle"></i>
+                    Exam is ACTIVE
+                  </div>
+                  <button 
+                    onClick={() => handleStartExam(exam)}
+                    style={styles.startExamButtonDesktop}
+                  >
+                    <i className="fas fa-play"></i>
+                    START ONLINE EXAM
+                  </button>
+                </>
+              ) : status === 'upcoming' ? (
+                <>
+                  <div style={styles.upcomingInfo}>
+                    <i className="fas fa-clock"></i>
+                    Starts in {timeUntilStart}
+                  </div>
+                  <button 
+                    disabled
+                    style={styles.disabledButtonDesktop}
+                  >
+                    <i className="fas fa-lock"></i>
+                    {isOnlineExam ? 'Not Available Yet' : 'Physical Exam'}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div style={styles.endedInfo}>
+                    <i className="fas fa-ban"></i>
+                    {isOnlineExam ? 'Exam period has ended' : 'Physical Exam - Attend at Venue'}
+                  </div>
+                  <button 
+                    disabled
+                    style={styles.disabledButtonDesktop}
+                  >
+                    <i className="fas fa-times-circle"></i>
+                    {isOnlineExam ? 'Closed' : 'Physical'}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -1157,51 +914,51 @@ const getExamStatus = (exam) => {
 
       {/* Stats Overview */}
       <div style={styles.statsGrid}>
-       {[
-  { 
-    label: 'Upcoming Exams', 
-    value: exams.filter(e => e.status === 'upcoming').length,
-    icon: 'fas fa-calendar-alt',
-    color: '#007bff'
-  },
-  { 
-    label: 'Active Now', 
-    value: exams.filter(e => e.status === 'active').length,
-    icon: 'fas fa-play-circle',
-    color: '#dc3545'
-  },
-{ 
-  label: 'Submitted', 
-  value: exams.filter(e => e.submitted === true).length, // Explicit check for true
-  icon: 'fas fa-check-circle',
-  color: '#28a745'
-},
-  { 
-    label: 'Incomplete', 
-    value: exams.filter(e => e.hasIncompleteSubmission && !e.submitted).length,
-    icon: 'fas fa-history',
-    color: '#ffc107'
-  },
-  { 
-    label: 'Online Exams', 
-    value: exams.filter(e => e.isOnline).length,
-    icon: 'fas fa-laptop',
-    color: '#17a2b8'
-  }
-].map((stat, index) => (
-  <div 
-    key={index}
-    style={styles.statCard}
-  >
-    <div style={{...styles.statValue, color: stat.color}}>
-      {stat.value}
-    </div>
-    <div style={styles.statLabel}>
-      <i className={stat.icon} style={{ color: stat.color }}></i>
-      {stat.label}
-    </div>
-  </div>
-))}
+        {[
+          { 
+            label: 'Upcoming Exams', 
+            value: exams.filter(e => e.status === 'upcoming').length,
+            icon: 'fas fa-calendar-alt',
+            color: '#007bff'
+          },
+          { 
+            label: 'Active Now', 
+            value: exams.filter(e => e.status === 'active').length,
+            icon: 'fas fa-play-circle',
+            color: '#dc3545'
+          },
+          { 
+            label: 'Graded', 
+            value: exams.filter(e => e.graded === true).length,
+            icon: 'fas fa-check-double',
+            color: '#6f42c1'
+          },
+          { 
+            label: 'Submitted', 
+            value: exams.filter(e => e.submitted === true && !e.graded).length,
+            icon: 'fas fa-check-circle',
+            color: '#28a745'
+          },
+          { 
+            label: 'Incomplete', 
+            value: exams.filter(e => e.hasIncompleteSubmission && !e.submitted).length,
+            icon: 'fas fa-history',
+            color: '#ffc107'
+          }
+        ].map((stat, index) => (
+          <div 
+            key={index}
+            style={styles.statCard}
+          >
+            <div style={{...styles.statValue, color: stat.color}}>
+              {stat.value}
+            </div>
+            <div style={styles.statLabel}>
+              <i className={stat.icon} style={{ color: stat.color }}></i>
+              {stat.label}
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Exams List */}
@@ -1243,26 +1000,6 @@ const getExamStatus = (exam) => {
           </div>
         )}
       </div>
-
-      {/* Exam Model Component */}
-      {showExamModel && selectedExam && (
-        <ExamModel
-          exam={selectedExam}
-          onClose={() => {
-            setShowExamModel(false);
-            setSelectedExam(null);
-            fetchExams(); // Refresh to update status
-          }}
-          onComplete={() => {
-            fetchExams(); // Refresh the exam list
-            setShowExamModel(false);
-            setSelectedExam(null);
-          }}
-        />
-      )}
-
-      {/* Exam Paper Viewer Modal */}
-      <ExamPaperViewerModal />
 
       <style>{`
         @keyframes spin {
@@ -1571,15 +1308,6 @@ const styles = {
     color: '#495057',
     flexShrink: '0'
   },
-  filesBadge: {
-    padding: '4px 10px',
-    backgroundColor: '#d4edda',
-    borderRadius: '20px',
-    fontSize: '11px',
-    fontWeight: '500',
-    color: '#155724',
-    flexShrink: '0'
-  },
   mobileCardTitle: {
     margin: '0 0 6px 0',
     fontSize: '16px',
@@ -1618,25 +1346,10 @@ const styles = {
     flexDirection: 'column',
     gap: '10px'
   },
-  downloadPaperButton: {
-    width: '100%',
-    padding: '10px',
-    backgroundColor: '#17a2b8',
-    color: 'white',
-    border: 'none',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: '500',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '8px'
-  },
   viewResultsButton: {
     width: '100%',
     padding: '12px',
-    backgroundColor: '#007bff',
+    backgroundColor: '#6f42c1',
     color: 'white',
     border: 'none',
     borderRadius: '8px',
@@ -1726,17 +1439,6 @@ const styles = {
     fontWeight: '500',
     color: '#495057'
   },
-  desktopFilesBadge: {
-    padding: '4px 12px',
-    backgroundColor: '#d4edda',
-    borderRadius: '20px',
-    fontSize: '12px',
-    fontWeight: '500',
-    color: '#155724',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '5px'
-  },
   desktopCardTitle: {
     margin: 0,
     fontSize: '18px',
@@ -1784,28 +1486,16 @@ const styles = {
     paddingTop: '20px',
     borderTop: '1px solid #dee2e6'
   },
-  leftActions: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '15px'
-  },
-  downloadPaperButtonDesktop: {
-    padding: '8px 20px',
-    backgroundColor: '#17a2b8',
-    color: 'white',
-    border: 'none',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    fontSize: '14px',
-    fontWeight: '500'
-  },
   rightActions: {
     display: 'flex',
     alignItems: 'center',
     gap: '15px'
+  },
+  gradedInfo: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    color: '#6f42c1'
   },
   submittedInfo: {
     display: 'flex',
@@ -1815,7 +1505,7 @@ const styles = {
   },
   viewResultsButtonDesktop: {
     padding: '8px 20px',
-    backgroundColor: '#007bff',
+    backgroundColor: '#6f42c1',
     color: 'white',
     border: 'none',
     borderRadius: '6px',
@@ -1887,123 +1577,6 @@ const styles = {
     alignItems: 'center',
     gap: '8px',
     color: '#6c757d'
-  },
-  // Modal Styles
-  modalOverlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.9)',
-    zIndex: 9999,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '20px'
-  },
-  paperViewerContainer: {
-    width: '90%',
-    maxWidth: '1200px',
-    height: '90%',
-    backgroundColor: 'white',
-    borderRadius: '12px',
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden'
-  },
-  paperViewerHeader: {
-    backgroundColor: '#2c3e50',
-    color: 'white',
-    padding: '20px',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center'
-  },
-  paperViewerTitle: {
-    margin: 0
-  },
-  paperCloseButton: {
-    backgroundColor: 'transparent',
-    border: 'none',
-    color: 'white',
-    fontSize: '24px',
-    cursor: 'pointer',
-    width: '40px',
-    height: '40px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: '50%'
-  },
-  paperGrid: {
-    flex: 1,
-    padding: '30px',
-    overflowY: 'auto',
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-    gap: '20px'
-  },
-  paperCard: {
-    border: '1px solid #dee2e6',
-    borderRadius: '12px',
-    overflow: 'hidden',
-    backgroundColor: 'white',
-    transition: 'transform 0.2s',
-    cursor: 'pointer'
-  },
-  paperCardHeader: {
-    backgroundColor: '#f8f9fa',
-    padding: '20px',
-    textAlign: 'center',
-    borderBottom: '1px solid #dee2e6'
-  },
-  paperIcon: {
-    fontSize: '48px',
-    marginBottom: '10px'
-  },
-  paperName: {
-    fontWeight: 'bold',
-    color: '#2c3e50',
-    marginBottom: '5px'
-  },
-  paperType: {
-    fontSize: '12px',
-    color: '#666'
-  },
-  paperCardBody: {
-    padding: '20px'
-  },
-  paperButtons: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '10px'
-  },
-  viewButton: {
-    padding: '12px',
-    backgroundColor: '#3498db',
-    color: 'white',
-    textDecoration: 'none',
-    borderRadius: '8px',
-    textAlign: 'center',
-    fontWeight: 'bold',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '10px'
-  },
-  downloadButton: {
-    padding: '12px',
-    backgroundColor: '#28a745',
-    color: 'white',
-    border: 'none',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    fontWeight: 'bold',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '10px'
   }
 };
 

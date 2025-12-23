@@ -1,6 +1,6 @@
 // components/dashboard/TakeExam.jsx
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
 import { useStudentAuth } from '../../context/StudentAuthContext';
 
@@ -26,12 +26,13 @@ const TakeExam = () => {
   const [isExamActive, setIsExamActive] = useState(false);
   const [downloadedPapers, setDownloadedPapers] = useState([]);
   const [showDownloadDropdown, setShowDownloadDropdown] = useState(false);
+  const [studentInfo, setStudentInfo] = useState(null);
   
   const fileInputRef = useRef(null);
   
   useEffect(() => {
     if (examId && user) {
-      fetchExamData();
+      fetchStudentInfo();
     }
   }, [examId, user]);
 
@@ -47,21 +48,40 @@ const TakeExam = () => {
     };
   }, [timerInterval]);
 
-  const fetchExamData = async () => {
+  const fetchStudentInfo = async () => {
+    try {
+      // Use the auth user's ID as student_id (matches your CSV)
+      const studentId = user?.id;
+      
+      if (!studentId) {
+        throw new Error('User not authenticated');
+      }
+      
+      // Create student info from auth user
+      const studentData = {
+        student_id: studentId,
+        email: user?.email || 'unknown@example.com',
+        name: user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Student'
+      };
+      
+      setStudentInfo(studentData);
+      fetchExamData(studentData);
+    } catch (error) {
+      console.error('Error fetching student info:', error);
+      const fallbackStudent = {
+        student_id: user?.id || 'unknown',
+        email: user?.email || 'unknown@example.com',
+        name: user?.user_metadata?.full_name || 'Student'
+      };
+      setStudentInfo(fallbackStudent);
+      fetchExamData(fallbackStudent);
+    }
+  };
+
+  const fetchExamData = async (student) => {
     try {
       setLoading(true);
       setError(null);
-
-      // Get student data
-      const { data: student, error: studentError } = await supabase
-        .from('students')
-        .select('id')
-        .eq('email', user.email)
-        .single();
-
-      if (studentError || !student) {
-        throw new Error('Student not found');
-      }
 
       // Fetch exam details
       const { data: examData, error: examError } = await supabase
@@ -101,7 +121,7 @@ const TakeExam = () => {
           .from('exam_submissions')
           .select('*')
           .eq('exam_id', examId)
-          .eq('student_id', student.id)
+          .eq('student_id', student.student_id)
           .maybeSingle();
         
         submission = submissionData;
@@ -206,6 +226,10 @@ const TakeExam = () => {
 
   const handleStartExam = async () => {
     try {
+      if (!studentInfo) {
+        throw new Error('Student information not available');
+      }
+      
       // Check if student has confirmed they started the exam
       const hasConfirmed = localStorage.getItem(`exam_confirmed_${examId}`);
       
@@ -235,20 +259,10 @@ const TakeExam = () => {
       
       if (!confirmed) return;
 
-      const { data: student } = await supabase
-        .from('students')
-        .select('id')
-        .eq('email', user.email)
-        .single();
-
-      if (!student) {
-        throw new Error('Student not found');
-      }
-
-      // Prepare submission data with only basic columns
+      // Prepare submission data - NO registration_number
       const submissionData = {
         exam_id: exam.id,
-        student_id: student.id,
+        student_id: studentInfo.student_id,
         status: 'started',
         started_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -269,13 +283,13 @@ const TakeExam = () => {
         setExamSubmission(data);
         submissionId = data.id;
       } else {
-        // Create new submission - try minimal data first
+        // Create new submission - NO registration_number
         try {
           const { data, error } = await supabase
             .from('exam_submissions')
             .insert({
               exam_id: exam.id,
-              student_id: student.id,
+              student_id: studentInfo.student_id,
               status: 'started',
               started_at: new Date().toISOString(),
               updated_at: new Date().toISOString()
@@ -290,12 +304,12 @@ const TakeExam = () => {
         } catch (insertError) {
           console.error('Insert failed:', insertError);
           
-          // Try even simpler insert
+          // Try simpler insert - NO registration_number
           const { data, error } = await supabase
             .from('exam_submissions')
             .insert({
               exam_id: exam.id,
-              student_id: student.id,
+              student_id: studentInfo.student_id,
               status: 'started'
             })
             .select()
@@ -323,7 +337,7 @@ const TakeExam = () => {
   };
 
   const handleSubmitExam = async () => {
-    if (!exam) return;
+    if (!exam || !studentInfo) return;
     
     const confirmed = window.confirm(
       'Are you sure you want to submit the exam?\n\n' +
@@ -336,34 +350,28 @@ const TakeExam = () => {
   };
 
   const handleAutoSubmit = async () => {
-    if (!exam) return;
+    if (!exam || !studentInfo) return;
     
     alert('Time is up! Your exam is being submitted automatically.');
     await submitExamToServer();
   };
 
   const submitExamToServer = async () => {
+    if (!studentInfo) {
+      alert('Student information not available. Please try again.');
+      return;
+    }
+    
     setSubmittingExam(true);
     
     try {
-      const { data: student } = await supabase
-        .from('students')
-        .select('id')
-        .eq('email', user.email)
-        .single();
-
-      if (!student) {
-        throw new Error('Student not found');
-      }
-
-      // Upload answer files if any to "Student exam" bucket
+      // Upload answer files if any - they will return FULL PUBLIC URLs
       let answerFileUrls = [];
       if (examFiles.length > 0) {
         try {
-          answerFileUrls = await uploadExamFiles(exam.id, student.id);
+          answerFileUrls = await uploadExamFiles(exam.id, studentInfo.student_id);
         } catch (uploadError) {
           console.error('File upload error:', uploadError);
-          // Continue without files
         }
       }
 
@@ -378,15 +386,14 @@ const TakeExam = () => {
       if (exam.examType === 'online' && examQuestions.length > 0) {
         submissionData.answers = examAnswers;
       } else if (exam.examType === 'written_online') {
-        // Only include answer_text if the column exists
         if (answerText) {
           submissionData.answer_text = answerText;
         }
       }
 
-      // Add files if any
+      // Add FULL PUBLIC URLs to answer_files (like assignment submissions)
       if (answerFileUrls.length > 0) {
-        submissionData.answer_files = answerFileUrls;
+        submissionData.answer_files = answerFileUrls; // Array of full URLs
       }
 
       // Update submission record
@@ -394,18 +401,17 @@ const TakeExam = () => {
         .from('exam_submissions')
         .update(submissionData)
         .eq('exam_id', exam.id)
-        .eq('student_id', student.id);
+        .eq('student_id', studentInfo.student_id);
 
       if (error) {
         console.error('Submission update error:', error);
-        // Try without answer_text if column doesn't exist
         if (error.message.includes('answer_text')) {
           delete submissionData.answer_text;
           const { error: retryError } = await supabase
             .from('exam_submissions')
             .update(submissionData)
             .eq('exam_id', exam.id)
-            .eq('student_id', student.id);
+            .eq('student_id', studentInfo.student_id);
           
           if (retryError) throw retryError;
         } else {
@@ -440,7 +446,7 @@ const TakeExam = () => {
   };
 
   const uploadExamFiles = async (examId, studentId) => {
-    const uploadedPaths = [];
+    const uploadedUrls = [];
     
     for (let i = 0; i < examFiles.length; i++) {
       const file = examFiles[i];
@@ -448,33 +454,42 @@ const TakeExam = () => {
       const randomStr = Math.random().toString(36).substring(2, 8);
       const safeName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
       const fileName = `${timestamp}_${randomStr}_${safeName}`;
-      const filePath = `${examId}/${studentId}/${fileName}`;
+      
+      // Create the path structure: student_id/exam_id/filename
+      const filePath = `${studentId}/${examId}/${fileName}`;
       
       setUploadProgress(Math.round(((i + 1) / examFiles.length) * 100));
 
       try {
-        // Upload to "Student exam" bucket (exact spelling and format)
-        const { error } = await supabase.storage
-          .from('Student exam')
+        // Upload to 'exam_files' bucket
+        const bucketName = 'Student exam'; // Adjust to your bucket name
+        const { error: uploadError } = await supabase.storage
+          .from(bucketName)
           .upload(filePath, file, { upsert: false });
 
-        if (error) {
-          console.error('File upload error:', error);
+        if (uploadError) {
+          console.error('File upload error:', uploadError);
           continue;
         }
 
-        uploadedPaths.push(filePath);
+        // Generate FULL PUBLIC URL like assignment submissions
+        const { data: { publicUrl } } = supabase.storage
+          .from(bucketName)
+          .getPublicUrl(filePath);
+
+        // Store the full URL
+        uploadedUrls.push(publicUrl);
       } catch (uploadError) {
         console.error('Upload failed:', uploadError);
       }
     }
 
-    return uploadedPaths;
+    return uploadedUrls;
   };
 
   const downloadExamPaper = async (filePath) => {
     try {
-      // Download from "Lecturer exam" bucket (exact spelling and format)
+      // Download from storage
       const { data, error } = await supabase.storage
         .from('Lecturer exam')
         .download(filePath);
@@ -542,7 +557,7 @@ const TakeExam = () => {
   };
 
   const saveProgress = async (showAlert = false) => {
-    if (!examSubmission || !isExamActive) return;
+    if (!examSubmission || !isExamActive || !studentInfo) return;
     
     try {
       const submissionData = {
@@ -652,6 +667,14 @@ const TakeExam = () => {
           <i className="fas fa-exclamation-triangle" style={styles.errorIcon}></i>
           <h3>Unable to Load Exam</h3>
           <p>{error || 'Exam not found'}</p>
+          <div style={styles.studentInfo}>
+            {studentInfo && (
+              <div style={styles.studentDetails}>
+                <p>Logged in as: {studentInfo.email}</p>
+                <p>Student ID: {studentInfo.student_id}</p>
+              </div>
+            )}
+          </div>
           <button onClick={() => navigate('/examinations')} style={styles.backButton}>
             <i className="fas fa-arrow-left"></i>
             Back to Examinations
@@ -671,6 +694,11 @@ const TakeExam = () => {
             <p style={styles.startSubtitle}>
               <i className="fas fa-book"></i> {exam.courseCode}: {exam.courseName}
             </p>
+            {studentInfo && (
+              <div style={styles.studentBadge}>
+                <i className="fas fa-user"></i> {studentInfo.name} ({studentInfo.student_id.slice(0, 8)}...)
+              </div>
+            )}
           </div>
 
           <div style={styles.startContent}>
@@ -708,7 +736,7 @@ const TakeExam = () => {
                     <li>Your progress is auto-saved every 30 seconds</li>
                     <li>Make sure you have a stable internet connection</li>
                     <li>The exam will auto-submit when time expires</li>
-                    <li>Submit files will be uploaded to "Student exam" bucket</li>
+                    <li>Submit files will be stored as full public URLs</li>
                   </ul>
                 </div>
 
@@ -732,12 +760,8 @@ const TakeExam = () => {
                     <span>Type: {exam.examType === 'written_online' ? 'Written' : 'Online'} Exam</span>
                   </div>
                   <div style={styles.infoRow}>
-                    <i className="fas fa-database"></i>
-                    <span>Download from: "Lecturer exam" bucket</span>
-                  </div>
-                  <div style={styles.infoRow}>
-                    <i className="fas fa-cloud-upload"></i>
-                    <span>Upload to: "Student exam" bucket</span>
+                    <i className="fas fa-user"></i>
+                    <span>Student: {studentInfo?.name || 'Unknown'}</span>
                   </div>
                 </div>
 
@@ -780,7 +804,7 @@ const TakeExam = () => {
                 <i className="fas fa-chart-bar"></i> {exam.totalMarks} marks
               </span>
               <span style={styles.metaItem}>
-                <i className="fas fa-cloud-upload"></i> Uploading to: "Student exam"
+                <i className="fas fa-user"></i> {studentInfo?.name || 'Student'}
               </span>
             </div>
           </div>
@@ -804,9 +828,6 @@ const TakeExam = () => {
                   <div style={styles.dropdownHeader}>
                     <i className="fas fa-file-pdf"></i>
                     <span style={styles.dropdownTitle}>Exam Papers</span>
-                  </div>
-                  <div style={styles.dropdownNote}>
-                    From: "Lecturer exam" bucket
                   </div>
                   <div style={styles.dropdownFiles}>
                     {exam.examFiles.map((filePath, index) => {
@@ -1034,7 +1055,7 @@ const TakeExam = () => {
                   {exam.instructions || 'Please write your answers below. You can also upload files if needed.'}
                   <div style={styles.bucketNote}>
                     <i className="fas fa-info-circle"></i>
-                    Your submitted files will be uploaded to the "Student exam" bucket
+                    Your submitted files will be stored as full public URLs
                   </div>
                 </div>
                 
@@ -1049,7 +1070,7 @@ const TakeExam = () => {
                 <div>
                   <h4 style={styles.uploadTitle}>
                     <i className="fas fa-paperclip"></i>
-                    Upload Supporting Files (to "Student exam" bucket)
+                    Upload Supporting Files
                   </h4>
                   
                   <div 
@@ -1064,7 +1085,7 @@ const TakeExam = () => {
                       PDF, DOC, DOCX, JPG, PNG (Max 10MB each)
                     </div>
                     <div style={styles.bucketSubtext}>
-                      Files will be uploaded to: "Student exam" bucket
+                      Files stored as full public URLs
                     </div>
                     <input
                       ref={fileInputRef}
@@ -1080,7 +1101,7 @@ const TakeExam = () => {
                   {examFiles.length > 0 && (
                     <div style={styles.uploadedFiles}>
                       <h5 style={styles.uploadedTitle}>
-                        Uploaded Files ({examFiles.length}/5) - Will be saved to "Student exam"
+                        Uploaded Files ({examFiles.length}/5)
                       </h5>
                       {examFiles.map((file, index) => (
                         <div key={index} style={styles.fileItem}>
@@ -1156,7 +1177,7 @@ const TakeExam = () => {
             ) : (
               <>
                 <i className="fas fa-paper-plane"></i>
-                Submit Exam (to "Student exam")
+                Submit Exam
               </>
             )}
           </button>
@@ -1215,6 +1236,17 @@ const styles = {
     color: '#dc3545',
     marginBottom: '10px'
   },
+  studentInfo: {
+    backgroundColor: '#f8f9fa',
+    padding: '15px',
+    borderRadius: '8px',
+    margin: '15px 0',
+    textAlign: 'left'
+  },
+  studentDetails: {
+    fontSize: '14px',
+    color: '#6c757d'
+  },
   backButton: {
     padding: '12px 24px',
     backgroundColor: '#007bff',
@@ -1259,6 +1291,16 @@ const styles = {
     margin: '0',
     opacity: '0.9',
     fontSize: '16px'
+  },
+  studentBadge: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    padding: '8px 16px',
+    borderRadius: '20px',
+    fontSize: '14px',
+    marginTop: '15px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '8px'
   },
   startContent: {
     backgroundColor: 'white',
@@ -1463,16 +1505,6 @@ const styles = {
     fontWeight: '600',
     color: '#2c3e50',
     fontSize: '16px'
-  },
-  dropdownNote: {
-    padding: '10px 15px',
-    backgroundColor: '#e8f4fc',
-    fontSize: '12px',
-    color: '#0066cc',
-    borderBottom: '1px solid #dee2e6',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '5px'
   },
   dropdownFiles: {
     maxHeight: '300px',
