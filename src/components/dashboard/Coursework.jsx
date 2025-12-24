@@ -542,7 +542,7 @@ const handleDownloadSubmittedFiles = async (assignment) => {
                   </div>
                 </div>
               )}
-              
+{/*               
               {selectedAssignment.fileUrls && selectedAssignment.fileUrls.length > 0 && (
                 <div className="coursework-submitted-files">
                   <h5>Your Submitted Files (assignments bucket)</h5>
@@ -571,7 +571,7 @@ const handleDownloadSubmittedFiles = async (assignment) => {
                     ))}
                   </div>
                 </div>
-              )}
+              )} */}
             </div>
           </div>
           

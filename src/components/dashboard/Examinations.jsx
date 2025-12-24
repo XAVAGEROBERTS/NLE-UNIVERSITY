@@ -966,7 +966,7 @@ const Examinations = () => {
         <div style={styles.examsListHeader}>
           <h3 style={styles.examsListTitle}>
             <i className="fas fa-list-alt" style={{ marginRight: '10px', color: '#dc3545' }}></i>
-            Available Examinations (Newest First)
+            Available Examinations
           </h3>
           <div style={styles.examsCount}>
             Showing {exams.length} exam{exams.length !== 1 ? 's' : ''}

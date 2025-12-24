@@ -1,4 +1,4 @@
-// src/context/StudentAuthContext.jsx - 100% FIXED: NO MORE STUCK LOADING
+// src/context/StudentAuthContext.jsx - 100% FIXED: WITH PASSWORD CHANGE FUNCTION
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../services/supabase';
 import { useNavigate } from 'react-router-dom';
@@ -10,7 +10,7 @@ export const useStudentAuth = () => useContext(StudentAuthContext);
 export const StudentAuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [authUser, setAuthUser] = useState(null);
-  const [loading, setLoading] = useState(true); // This controls the spinner
+  const [loading, setLoading] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
   const navigate = useNavigate();
 
@@ -28,7 +28,7 @@ export const StudentAuthProvider = ({ children }) => {
         .select('*')
         .eq('email', authUser.email.toLowerCase().trim())
         .eq('status', 'active')
-        .single(); // Use .single() — we'll handle error properly
+        .single();
 
       if (error) {
         console.error('Profile fetch error:', error.message);
@@ -154,6 +154,84 @@ export const StudentAuthProvider = ({ children }) => {
     }
   };
 
+  // ADD THIS FUNCTION - Password Change Functionality
+  const changePassword = async (currentPassword, newPassword, confirmPassword) => {
+    setAuthLoading(true);
+    
+    try {
+      // 1. Validate inputs
+      if (!currentPassword || !newPassword || !confirmPassword) {
+        return { 
+          success: false, 
+          message: 'All password fields are required' 
+        };
+      }
+
+      if (newPassword.length < 6) {
+        return { 
+          success: false, 
+          message: 'New password must be at least 6 characters long' 
+        };
+      }
+
+      if (newPassword !== confirmPassword) {
+        return { 
+          success: false, 
+          message: 'New passwords do not match' 
+        };
+      }
+
+      if (currentPassword === newPassword) {
+        return { 
+          success: false, 
+          message: 'New password must be different from current password' 
+        };
+      }
+
+      // 2. Verify current password by re-authenticating
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: authUser?.email || user?.email,
+        password: currentPassword
+      });
+      
+      if (authError) {
+        console.error('Current password verification failed:', authError);
+        return {
+          success: false,
+          message: 'Current password is incorrect'
+        };
+      }
+      
+      // 3. Update password
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: newPassword
+      });
+      
+      if (updateError) {
+        console.error('Password update failed:', updateError);
+        return {
+          success: false,
+          message: updateError.message || 'Failed to update password'
+        };
+      }
+      
+      // 4. Show success message
+      return {
+        success: true,
+        message: 'Password changed successfully!'
+      };
+      
+    } catch (error) {
+      console.error('Change password error:', error);
+      return {
+        success: false,
+        message: error.message || 'An unexpected error occurred'
+      };
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
   const value = {
     user,
     authUser,
@@ -162,6 +240,7 @@ export const StudentAuthProvider = ({ children }) => {
     isAuthenticated: !!user,
     signIn,
     signOut,
+    changePassword, // ADD THIS LINE
     getCurrentUser: () => user,
   };
 
