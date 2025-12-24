@@ -292,30 +292,38 @@ const Results = () => {
     }
   };
 
-  const getGradePoints = (grade) => {
-    if (!grade) return 0.0;
-    const gradeMap = {
-      'A': 5.0, 'B+': 4.5, 'B': 4.0, 'C+': 3.5,
-      'C': 3.0, 'D+': 2.5, 'D': 2.0, 'E': 1.0, 'F': 0.0
-    };
-    return gradeMap[grade.toUpperCase()] || 0.0;
-  };
 
-  const getGradeFromMarks = (marks) => {
-    if (!marks && marks !== 0) return 'N/A';
-    const numericMarks = parseFloat(marks);
-    if (isNaN(numericMarks)) return 'N/A';
-    
-    if (numericMarks >= 70) return 'A';
-    if (numericMarks >= 60) return 'B+';
-    if (numericMarks >= 50) return 'B';
-    if (numericMarks >= 45) return 'C+';
-    if (numericMarks >= 40) return 'C';
-    if (numericMarks >= 35) return 'D+';
-    if (numericMarks >= 30) return 'D';
-    if (numericMarks >= 20) return 'E';
-    return 'F';
+const getGradeFromMarks = (marks) => {
+  if (!marks && marks !== 0) return 'N/A';
+  const numericMarks = parseFloat(marks);
+  if (isNaN(numericMarks)) return 'N/A';
+
+  if (numericMarks >= 90) return 'A+';
+  if (numericMarks >= 80) return 'A';
+  if (numericMarks >= 75) return 'B+';
+  if (numericMarks >= 70) return 'B';
+  if (numericMarks >= 65) return 'C+';
+  if (numericMarks >= 60) return 'C';
+  if (numericMarks >= 55) return 'D+';
+  if (numericMarks >= 50) return 'D';
+  return 'F';  // Below 50%
+};
+
+const getGradePoints = (grade) => {
+  if (!grade) return 0.0;
+  const gradeMap = {
+    'A+': 5.0,
+    'A': 5.0,
+    'B+': 4.5,
+    'B': 4.0,
+    'C+': 3.5,
+    'C': 3.0,
+    'D+': 2.5,
+    'D': 2.0,
+    'F': 0.0
   };
+  return gradeMap[grade.toUpperCase()] || 0.0;
+};
 
   const calculateSemesterGPA = (semesterResults) => {
     if (!semesterResults || semesterResults.length === 0) return 0.0;
