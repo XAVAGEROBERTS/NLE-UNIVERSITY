@@ -11,18 +11,27 @@ const Chatbot = () => {
   const [studentData, setStudentData] = useState(null);
   const [studentStats, setStudentStats] = useState(null);
   const [isMobile, setIsMobile] = useState(false);
-  const [greetingTypes, setGreetingTypes] = useState([]);
-  const [isScrolledToBottom, setIsScrolledToBottom] = useState(true);
-  const [activeCourseIds, setActiveCourseIds] = useState([]);
+  const [showQuickQuestions, setShowQuickQuestions] = useState(true);
+  const [gpaData, setGpaData] = useState({
+    gpa: 0.0,
+    cgpa: 0.0,
+    examBasedGpa: 0.0,
+    examBasedCgpa: 0.0
+  });
   
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
   const quickQuestionsRef = useRef(null);
+  const inputRef = useRef(null);
 
   // Check screen size
   useEffect(() => {
     const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768);
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (mobile) {
+        setShowQuickQuestions(false); // Hide quick questions by default on mobile
+      }
     };
     
     checkMobile();
@@ -151,200 +160,173 @@ const Chatbot = () => {
     ]
   };
 
-  // CORRECTED GPA CALCULATION (Matches Results and Dashboard)
-  const getGradePoints = (grade) => {
-    if (!grade) return 0.0;
-    const gradeMap = {
-      'A': 5.0, 'B+': 4.5, 'B': 4.0, 'C+': 3.5,
-      'C': 3.0, 'D+': 2.5, 'D': 2.0, 'E': 1.0, 'F': 0.0
-    };
-    return gradeMap[grade.toUpperCase()] || 0.0;
-  };
-
   const getGradeFromMarks = (marks) => {
     if (!marks && marks !== 0) return 'N/A';
     const numericMarks = parseFloat(marks);
     if (isNaN(numericMarks)) return 'N/A';
-    
-    if (numericMarks >= 70) return 'A';
-    if (numericMarks >= 60) return 'B+';
-    if (numericMarks >= 50) return 'B';
-    if (numericMarks >= 45) return 'C+';
-    if (numericMarks >= 40) return 'C';
-    if (numericMarks >= 35) return 'D+';
-    if (numericMarks >= 30) return 'D';
-    if (numericMarks >= 20) return 'E';
-    return 'F';
+
+    if (numericMarks >= 90) return 'A+';
+    if (numericMarks >= 80) return 'A';
+    if (numericMarks >= 75) return 'B+';
+    if (numericMarks >= 70) return 'B';
+    if (numericMarks >= 65) return 'C+';
+    if (numericMarks >= 60) return 'C';
+    if (numericMarks >= 55) return 'D+';
+    if (numericMarks >= 50) return 'D';
+    return 'F';  // Below 50%
   };
 
-  const calculateGPA = (studentCourses) => {
-    if (!studentCourses || studentCourses.length === 0) return 0.0;
-    
-    // Filter completed courses with grades
-    const completedCourses = studentCourses.filter(
-      course => course.status === 'completed' && (course.grade || course.marks)
-    );
-    
-    if (completedCourses.length === 0) return 0.0;
-    
-    let totalPoints = 0;
-    let totalCredits = 0;
-    
-    completedCourses.forEach(course => {
-      const grade = course.grade || getGradeFromMarks(course.marks);
-      const gradePoints = course.grade_points || getGradePoints(grade);
-      const credits = course.credits || 3;
-      
-      if (gradePoints && credits) {
-        totalPoints += gradePoints * credits;
-        totalCredits += credits;
-      }
-    });
-    
-    return totalCredits > 0 ? parseFloat((totalPoints / totalCredits).toFixed(2)) : 0.0;
+  const getGradePoints = (grade) => {
+    if (!grade) return 0.0;
+    const gradeMap = {
+      'A+': 5.0,
+      'A': 5.0,
+      'B+': 4.5,
+      'B': 4.0,
+      'C+': 3.5,
+      'C': 3.0,
+      'D+': 2.5,
+      'D': 2.0,
+      'F': 0.0
+    };
+    return gradeMap[grade.toUpperCase()] || 0.0;
   };
 
-  // Format time like Dashboard
-  const formatTime = (timeString) => {
-    if (!timeString) return 'TBD';
-    const [hours, minutes] = timeString.split(':');
-    const hour = parseInt(hours);
-    const ampm = hour >= 12 ? 'PM' : 'AM';
-    const hour12 = hour % 12 || 12;
-    return `${hour12}:${minutes} ${ampm}`;
-  };
-
-  // Format date like Dashboard
-  const formatDate = (dateString) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric'
-    });
-  };
-
-  // CORRECTED: Fetch upcoming lectures (filtered for active courses only)
-  const fetchUpcomingLectures = async (activeCourseIds) => {
+  // NEW FUNCTION: Fetch GPA and CGPA from exam results
+  const fetchExamBasedGPA = async (studentId) => {
     try {
-      const today = new Date();
-      const nextWeek = new Date();
-      nextWeek.setDate(today.getDate() + 7);
-
-      const { data: lectures, error } = await supabase
-        .from('lectures')
+      // Fetch all graded exam submissions
+      const { data: examSubmissions, error: subError } = await supabase
+        .from('exam_submissions')
         .select(`
           *,
-          courses (course_code, course_name),
-          lecturers (full_name)
+          examinations (
+            id,
+            total_marks,
+            course_id,
+            courses (
+              id,
+              credits
+            )
+          )
         `)
-        .gte('scheduled_date', today.toISOString().split('T')[0])
-        .lte('scheduled_date', nextWeek.toISOString().split('T')[0])
-        .in('status', ['scheduled', 'ongoing'])
-        .order('scheduled_date', { ascending: true })
-        .order('start_time', { ascending: true });
+        .eq('student_id', studentId)
+        .eq('status', 'graded')
+        .not('total_marks_obtained', 'is', null);
 
-      if (error) throw error;
+      if (subError) throw subError;
+      if (!examSubmissions || examSubmissions.length === 0) {
+        return { gpa: 0.0, cgpa: 0.0 };
+      }
 
-      // Filter lectures for active courses only
-      const filteredLectures = lectures?.filter(lecture => 
-        activeCourseIds.includes(lecture.course_id)
-      ) || [];
+      // Organize by semester/year for GPA calculation
+      const semesterResults = {};
+      let totalCredits = 0;
+      let totalPoints = 0;
 
-      return filteredLectures.map(lecture => {
-        const startTime = lecture.start_time || '09:00';
-        const endTime = lecture.end_time || '11:00';
-        const startDate = new Date(`2000-01-01T${startTime}`);
-        const endDate = new Date(`2000-01-01T${endTime}`);
-        const duration = Math.round((endDate - startDate) / 60000);
-        
-        return {
-          id: lecture.id,
-          title: lecture.courses?.course_name || lecture.title || 'Untitled Lecture',
-          date: lecture.scheduled_date,
-          time: startTime,
-          endTime: endTime,
-          lecturer: lecture.lecturers?.full_name || 'Unknown Lecturer',
-          duration: duration,
-          courseCode: lecture.courses?.course_code || 'N/A',
-          google_meet_link: lecture.google_meet_link,
-          status: lecture.status
-        };
+      // Fetch course details for each exam
+      const examIds = examSubmissions.map(sub => sub.exam_id);
+      const { data: exams, error: examError } = await supabase
+        .from('examinations')
+        .select(`
+          *,
+          courses (
+            id,
+            credits,
+            year,
+            semester
+          )
+        `)
+        .in('id', examIds);
+
+      if (examError) throw examError;
+
+      // Create exam map for quick access
+      const examMap = {};
+      exams.forEach(exam => {
+        examMap[exam.id] = exam;
       });
+
+      // Process each graded exam
+      examSubmissions.forEach(submission => {
+        const exam = examMap[submission.exam_id];
+        if (!exam || !exam.courses) return;
+
+        const course = exam.courses;
+        const credits = course.credits || 3;
+        const grade = getGradeFromMarks(submission.total_marks_obtained);
+        const gradePoints = getGradePoints(grade);
+        
+        // Calculate semester key
+        const semesterKey = `year${course.year}_sem${course.semester}`;
+        if (!semesterResults[semesterKey]) {
+          semesterResults[semesterKey] = {
+            year: course.year,
+            semester: course.semester,
+            totalCredits: 0,
+            totalPoints: 0,
+            courses: []
+          };
+        }
+
+        // Add to semester results
+        semesterResults[semesterKey].courses.push({
+          examId: exam.id,
+          courseId: course.id,
+          credits: credits,
+          grade: grade,
+          gradePoints: gradePoints,
+          marks: submission.total_marks_obtained,
+          totalMarks: exam.total_marks,
+          percentage: submission.percentage
+        });
+
+        semesterResults[semesterKey].totalCredits += credits;
+        semesterResults[semesterKey].totalPoints += gradePoints * credits;
+
+        // Add to overall totals
+        totalCredits += credits;
+        totalPoints += gradePoints * credits;
+      });
+
+      // Calculate semester GPAs
+      Object.keys(semesterResults).forEach(key => {
+        const semester = semesterResults[key];
+        if (semester.totalCredits > 0) {
+          semester.gpa = parseFloat((semester.totalPoints / semester.totalCredits).toFixed(2));
+        }
+      });
+
+      // Calculate CGPA (overall average)
+      const cgpa = totalCredits > 0 ? parseFloat((totalPoints / totalCredits).toFixed(2)) : 0.0;
+
+      // Get current semester GPA
+      let currentGPA = 0.0;
+      const currentYear = studentData?.year_of_study;
+      const currentSemester = studentData?.semester;
+      
+      if (currentYear && currentSemester) {
+        const currentSemesterKey = `year${currentYear}_sem${currentSemester}`;
+        if (semesterResults[currentSemesterKey]) {
+          currentGPA = semesterResults[currentSemesterKey].gpa;
+        }
+      }
+
+      return {
+        gpa: currentGPA,
+        cgpa: cgpa,
+        semesterResults: semesterResults,
+        totalExams: examSubmissions.length,
+        totalCredits: totalCredits
+      };
+
     } catch (error) {
-      console.error('Error fetching lectures:', error);
-      return [];
+      console.error('Error fetching exam-based GPA:', error);
+      return { gpa: 0.0, cgpa: 0.0, semesterResults: {} };
     }
   };
 
-  // CORRECTED: Fetch assignments for active courses only
-// CORRECTED: Fetch assignments for active courses only with student-specific submissions
-const fetchAssignments = async (activeCourseIds, studentId) => {
-  try {
-    if (!activeCourseIds.length) return [];
-    if (!studentId) return [];
-
-    const { data: assignments, error } = await supabase
-      .from('assignments')
-      .select(`
-        *,
-        courses (*),
-        assignment_submissions (
-          *
-        ).filter(student_id.eq.${studentId})
-      `)
-      .in('course_id', activeCourseIds)
-      .eq('status', 'published')
-      .order('due_date', { ascending: true });
-
-    if (error) throw error;
-
-    // Process assignments data
-    return assignments?.map(assignment => ({
-      ...assignment,
-      submissions: assignment.assignment_submissions || []
-    })) || [];
-
-  } catch (error) {
-    console.error('Error fetching assignments:', error);
-    return [];
-  }
-};
-
-// CORRECTED: Fetch exams for active courses only with student-specific submissions
-const fetchExams = async (activeCourseIds, studentId) => {
-  try {
-    if (!activeCourseIds.length) return [];
-    if (!studentId) return [];
-
-    const { data: exams, error } = await supabase
-      .from('examinations')
-      .select(`
-        *,
-        courses (*),
-        exam_submissions (
-          *
-        ).filter(student_id.eq.${studentId})
-      `)
-      .in('course_id', activeCourseIds)
-      .eq('status', 'published')
-      .order('start_time', { ascending: true });
-
-    if (error) throw error;
-
-    // Process exams data
-    return exams?.map(exam => ({
-      ...exam,
-      submissions: exam.exam_submissions || []
-    })) || [];
-
-  } catch (error) {
-    console.error('Error fetching exams:', error);
-    return [];
-  }
-};
-
-  // Fetch all student data
+  // Updated fetchAllStudentData to include exam-based GPA
   const fetchAllStudentData = useCallback(async () => {
     if (!user?.email) return;
 
@@ -363,7 +345,7 @@ const fetchExams = async (activeCourseIds, studentId) => {
 
       setStudentData(student);
 
-      // 2. Fetch student's courses with credits for GPA calculation
+      // 2. Fetch student's courses with credits for course-based GPA calculation
       const { data: studentCourses, error: coursesError } = await supabase
         .from('student_courses')
         .select(`
@@ -381,7 +363,7 @@ const fetchExams = async (activeCourseIds, studentId) => {
 
       if (coursesError) throw coursesError;
 
-      // Process courses with credits
+      // Process courses with credits for course-based GPA
       const coursesWithGrades = (studentCourses || []).map(sc => {
         const grade = sc.grade || getGradeFromMarks(sc.marks);
         return {
@@ -395,20 +377,64 @@ const fetchExams = async (activeCourseIds, studentId) => {
         };
       });
 
-      // Calculate GPA using the updated method
-      const gpa = calculateGPA(coursesWithGrades);
+      // 3. Fetch exam-based GPA and CGPA
+      const examGpaData = await fetchExamBasedGPA(student.id);
+      
+      // 4. Calculate course-based GPA (for comparison)
+      const calculateCourseBasedGPA = (courses) => {
+        if (!courses || courses.length === 0) return 0.0;
+        
+        const completedCourses = courses.filter(
+          course => course.status === 'completed' && (course.grade || course.marks)
+        );
+        
+        if (completedCourses.length === 0) return 0.0;
+        
+        let totalPoints = 0;
+        let totalCredits = 0;
+        
+        completedCourses.forEach(course => {
+          const grade = course.grade || getGradeFromMarks(course.marks);
+          const gradePoints = course.grade_points || getGradePoints(grade);
+          const credits = course.credits || 3;
+          
+          if (gradePoints && credits) {
+            totalPoints += gradePoints * credits;
+            totalCredits += credits;
+          }
+        });
+        
+        return totalCredits > 0 ? parseFloat((totalPoints / totalCredits).toFixed(2)) : 0.0;
+      };
 
-      // 3. Get active courses (not completed)
+      const courseBasedGPA = calculateCourseBasedGPA(coursesWithGrades);
+      const courseBasedCGPA = calculateCourseBasedGPA(
+        coursesWithGrades.filter(c => c.status === 'completed')
+      );
+
+      // Set GPA data
+      setGpaData({
+        gpa: examGpaData.gpa || courseBasedGPA,
+        cgpa: examGpaData.cgpa || courseBasedCGPA,
+        examBasedGpa: examGpaData.gpa,
+        examBasedCgpa: examGpaData.cgpa,
+        courseBasedGpa: courseBasedGPA,
+        courseBasedCgpa: courseBasedCGPA,
+        semesterResults: examGpaData.semesterResults,
+        totalExams: examGpaData.totalExams || 0,
+        totalCredits: examGpaData.totalCredits || 0
+      });
+
+      // 5. Get active courses (not completed)
       const activeCourses = coursesWithGrades.filter(c => c.status !== 'completed') || [];
       const activeCourseIds = activeCourses.map(sc => sc.course_id).filter(Boolean);
-      setActiveCourseIds(activeCourseIds);
 
-      // 4. CORRECTED: Fetch data for active courses only
+      // 6. Fetch other student data (lectures, assignments, etc.)
       const lectures = await fetchUpcomingLectures(activeCourseIds);
       const assignments = await fetchAssignments(activeCourseIds, student.id);
       const exams = await fetchExams(activeCourseIds, student.id);
 
-      // 5. Fetch financial records
+      // 7. Fetch other student stats (finance, attendance, etc.)
       const { data: finance } = await supabase
         .from('financial_records')
         .select('*')
@@ -416,7 +442,6 @@ const fetchExams = async (activeCourseIds, studentId) => {
         .eq('academic_year', student.academic_year)
         .order('payment_date', { ascending: false });
 
-      // 6. Fetch attendance records
       const { data: attendance } = await supabase
         .from('attendance_records')
         .select(`
@@ -427,7 +452,6 @@ const fetchExams = async (activeCourseIds, studentId) => {
         .gte('date', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0])
         .order('date', { ascending: false });
 
-      // 7. Fetch timetable slots for active courses
       const { data: timetable } = activeCourseIds.length > 0 ? await supabase
         .from('timetable_slots')
         .select(`
@@ -438,24 +462,14 @@ const fetchExams = async (activeCourseIds, studentId) => {
         .in('course_id', activeCourseIds)
         .eq('is_active', true) : { data: [] };
 
-      // 8. Fetch library books
       const { data: libraryBooks } = await supabase
         .from('library_books')
         .select('*')
         .eq('status', 'available')
         .limit(5);
 
-      // 9. Fetch campus events
       const { data: events } = await supabase
         .from('campus_events')
-        .select('*')
-        .gte('date', new Date().toISOString().split('T')[0])
-        .order('date', { ascending: true })
-        .limit(5);
-
-      // 10. Fetch academic calendar
-      const { data: academicCalendar } = await supabase
-        .from('academic_calendar')
         .select('*')
         .gte('date', new Date().toISOString().split('T')[0])
         .order('date', { ascending: true })
@@ -473,6 +487,19 @@ const fetchExams = async (activeCourseIds, studentId) => {
           phone: student.phone,
           intake: student.intake,
           academicYear: student.academic_year
+        },
+
+        // GPA data
+        gpa: {
+          currentGPA: examGpaData.gpa || courseBasedGPA,
+          currentCGPA: examGpaData.cgpa || courseBasedCGPA,
+          examBasedGPA: examGpaData.gpa,
+          examBasedCGPA: examGpaData.cgpa,
+          courseBasedGPA: courseBasedGPA,
+          courseBasedCGPA: courseBasedCGPA,
+          semesterResults: examGpaData.semesterResults,
+          totalGradedExams: examGpaData.totalExams || 0,
+          totalCredits: examGpaData.totalCredits || 0
         },
 
         courses: {
@@ -493,13 +520,10 @@ const fetchExams = async (activeCourseIds, studentId) => {
           })) || []
         },
 
-        // GPA calculation (matches Dashboard and Results)
-        gpa: gpa,
-
         // Lectures for active courses only
         lectures: lectures,
 
-        // CORRECTED: Assignment statistics for active courses only
+        // Assignment statistics for active courses only
         assignments: {
           total: assignments?.length || 0,
           submitted: assignments?.filter(a => 
@@ -527,7 +551,7 @@ const fetchExams = async (activeCourseIds, studentId) => {
           }).sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)).slice(0, 3)
         },
 
-        // CORRECTED: Exam statistics for active courses only
+        // Exam statistics for active courses only
         exams: {
           total: exams?.length || 0,
           completed: exams?.filter(e => {
@@ -601,9 +625,7 @@ const fetchExams = async (activeCourseIds, studentId) => {
           today: events?.filter(e => 
             new Date(e.date).toDateString() === new Date().toDateString()
           ) || []
-        },
-
-        academicCalendar: academicCalendar || []
+        }
       };
 
       setStudentStats(processedStats);
@@ -631,7 +653,120 @@ const fetchExams = async (activeCourseIds, studentId) => {
     }
   }, [user?.email]);
 
-  // Enhanced Helper functions
+  // Helper functions (keep existing ones, add missing ones)
+  const fetchUpcomingLectures = async (activeCourseIds) => {
+    try {
+      const today = new Date();
+      const nextWeek = new Date();
+      nextWeek.setDate(today.getDate() + 7);
+
+      const { data: lectures, error } = await supabase
+        .from('lectures')
+        .select(`
+          *,
+          courses (course_code, course_name),
+          lecturers (full_name)
+        `)
+        .gte('scheduled_date', today.toISOString().split('T')[0])
+        .lte('scheduled_date', nextWeek.toISOString().split('T')[0])
+        .in('status', ['scheduled', 'ongoing'])
+        .order('scheduled_date', { ascending: true })
+        .order('start_time', { ascending: true });
+
+      if (error) throw error;
+
+      const filteredLectures = lectures?.filter(lecture => 
+        activeCourseIds.includes(lecture.course_id)
+      ) || [];
+
+      return filteredLectures.map(lecture => {
+        const startTime = lecture.start_time || '09:00';
+        const endTime = lecture.end_time || '11:00';
+        const startDate = new Date(`2000-01-01T${startTime}`);
+        const endDate = new Date(`2000-01-01T${endTime}`);
+        const duration = Math.round((endDate - startDate) / 60000);
+        
+        return {
+          id: lecture.id,
+          title: lecture.courses?.course_name || lecture.title || 'Untitled Lecture',
+          date: lecture.scheduled_date,
+          time: startTime,
+          endTime: endTime,
+          lecturer: lecture.lecturers?.full_name || 'Unknown Lecturer',
+          duration: duration,
+          courseCode: lecture.courses?.course_code || 'N/A',
+          google_meet_link: lecture.google_meet_link,
+          status: lecture.status
+        };
+      });
+    } catch (error) {
+      console.error('Error fetching lectures:', error);
+      return [];
+    }
+  };
+
+  const fetchAssignments = async (activeCourseIds, studentId) => {
+    try {
+      if (!activeCourseIds.length) return [];
+      if (!studentId) return [];
+
+      const { data: assignments, error } = await supabase
+        .from('assignments')
+        .select(`
+          *,
+          courses (*),
+          assignment_submissions (
+            *
+          ).filter(student_id.eq.${studentId})
+        `)
+        .in('course_id', activeCourseIds)
+        .eq('status', 'published')
+        .order('due_date', { ascending: true });
+
+      if (error) throw error;
+
+      return assignments?.map(assignment => ({
+        ...assignment,
+        submissions: assignment.assignment_submissions || []
+      })) || [];
+
+    } catch (error) {
+      console.error('Error fetching assignments:', error);
+      return [];
+    }
+  };
+
+  const fetchExams = async (activeCourseIds, studentId) => {
+    try {
+      if (!activeCourseIds.length) return [];
+      if (!studentId) return [];
+
+      const { data: exams, error } = await supabase
+        .from('examinations')
+        .select(`
+          *,
+          courses (*),
+          exam_submissions (
+            *
+          ).filter(student_id.eq.${studentId})
+        `)
+        .in('course_id', activeCourseIds)
+        .eq('status', 'published')
+        .order('start_time', { ascending: true });
+
+      if (error) throw error;
+
+      return exams?.map(exam => ({
+        ...exam,
+        submissions: exam.exam_submissions || []
+      })) || [];
+
+    } catch (error) {
+      console.error('Error fetching exams:', error);
+      return [];
+    }
+  };
+
   const calculateExamPerformance = (gradedExams) => {
     if (gradedExams.length === 0) return { average: 0, highest: 0, lowest: 0, grades: [] };
     
@@ -646,7 +781,6 @@ const fetchExams = async (activeCourseIds, studentId) => {
     const highest = Math.max(...percentages);
     const lowest = Math.min(...percentages);
     
-    // Calculate grade distribution
     const grades = percentages.map(p => {
       if (p >= 70) return 'A';
       if (p >= 60) return 'B+';
@@ -744,7 +878,7 @@ const fetchExams = async (activeCourseIds, studentId) => {
     return 'Good Evening';
   };
 
-  // Enhanced welcome message generator
+  // Enhanced welcome message generator with GPA/CGPA
   const generateWelcomeMessage = (student, stats) => {
     const currentClass = stats.timetable.currentClass;
     const nextAssignment = stats.assignments.upcoming[0];
@@ -752,7 +886,6 @@ const fetchExams = async (activeCourseIds, studentId) => {
     const today = new Date();
     const dayOfWeek = today.toLocaleDateString('en-US', { weekday: 'long' });
     
-    // Random motivational quote
     const randomQuote = knowledgeBase.motivational[
       Math.floor(Math.random() * knowledgeBase.motivational.length)
     ];
@@ -762,9 +895,11 @@ const fetchExams = async (activeCourseIds, studentId) => {
 I'm your AI Student Assistant, connected to your personal academic database. Happy ${dayOfWeek}! 😊
 
 **📚 Academic Summary:**
-• **CGPA:** ${stats.gpa.toFixed(2)} (calculated from ${stats.courses.completed} completed courses)
+• **Exam-Based CGPA:** ${stats.gpa.examBasedCGPA?.toFixed(2) || '0.00'} (from ${stats.gpa.totalGradedExams || 0} graded exams)
+• **Current Semester GPA:** ${stats.gpa.examBasedGPA?.toFixed(2) || '0.00'}
 • **Courses:** ${stats.courses.completed} completed, ${stats.courses.inProgress} in progress
 • **Year:** ${student.year_of_study || 'N/A'}.${student.semester || 'N/A'}
+• **Total Credits:** ${stats.gpa.totalCredits || 0}
 
 ${currentClass ? `**📅 Current Class:**\n• **${currentClass.courses?.course_name || 'Class'}** until ${formatTime(currentClass.end_time)} in ${currentClass.room_number}\n` : ''}
 
@@ -783,20 +918,39 @@ ${nextExam ? `**📋 Next Exam:**\n• **${nextExam.title}** on ${formatDate(nex
 
 **How can I help you today?** Here are some things you can ask:
 1. "How's my GPA looking?"
-2. "What assignments are due this week?"
-3. "Show me today's schedule"
-4. "What's my attendance status?"
-5. "Any upcoming exams?"
-6. "Check my financial balance"
-7. "Recommend study tips"
-8. "What library books are available?"
-9. "Any campus events this week?"
-10. "How can I improve my grades?"
+2. "What's my CGPA from exam results?"
+3. "What assignments are due this week?"
+4. "Show me today's schedule"
+5. "What's my attendance status?"
+6. "Any upcoming exams?"
+7. "Check my financial balance"
+8. "Recommend study tips"
+9. "What library books are available?"
+10. "Any campus events this week?"
+11. "How can I improve my grades?"
 
 Or just chat with me about anything academic! I'm here to help! 🤖`;
   };
 
-  // Enhanced query detection with more patterns
+  const formatTime = (timeString) => {
+    if (!timeString) return 'TBD';
+    const [hours, minutes] = timeString.split(':');
+    const hour = parseInt(hours);
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const hour12 = hour % 12 || 12;
+    return `${hour12}:${minutes} ${ampm}`;
+  };
+
+  const formatDate = (dateString) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric'
+    });
+  };
+
+  // Enhanced query detection with GPA/CGPA patterns
   const detectQueryType = (query) => {
     const q = query.toLowerCase();
     
@@ -810,11 +964,20 @@ Or just chat with me about anything academic! I'm here to help! 🤖`;
       return 'thanks';
     }
     
-    // Courses & GPA
-    if (/(gpa|cgpa|grade\s*point|academic\s*standing|cumulative|grades?|marks?|scores?|academic\s*performance)/.test(q)) {
-      return q.includes('gpa') || q.includes('cgpa') || q.includes('grade point') ? 'gpa' : 'grades';
+    // GPA & CGPA queries - ENHANCED
+    if (/(cgpa|cumulative\s*grade|cumulative\s*gpa|overall\s*gpa|total\s*gpa|exam\s*based|from\s*exam|exam\s*results)/.test(q)) {
+      return 'cgpa';
     }
     
+    if (/(gpa|grade\s*point|semester\s*gpa|current\s*gpa|this\s*semester)/.test(q)) {
+      return 'gpa';
+    }
+    
+    if (/(grade|marks?|scores?|academic\s*performance)/.test(q)) {
+      return 'grades';
+    }
+    
+    // Courses query
     if (/(course|subject|unit|module|class)/.test(q)) {
       return 'courses';
     }
@@ -913,7 +1076,7 @@ Or just chat with me about anything academic! I'm here to help! 🤖`;
     return 'unknown';
   };
 
-  // ENHANCED AI Response Generator with more intelligent responses
+  // ENHANCED AI Response Generator with real-time GPA/CGPA from exams
   const generateAIResponse = (userQuery) => {
     if (!studentStats || !studentData) {
       return "I'm still loading your data. Please wait a moment...";
@@ -989,29 +1152,90 @@ It was great chatting with you! Remember:
 Wishing you all the best in your studies! Come back anytime! 📚✨`;
     }
     
-    // GPA query
-    if (queryType === 'gpa') {
-      const topCourses = studentStats.courses.list
-        .filter(c => c.gradePoints && c.status === 'completed')
-        .sort((a, b) => b.gradePoints - a.gradePoints)
-        .slice(0, 5);
+    // ENHANCED CGPA query - From Exam Results
+    if (queryType === 'cgpa') {
+      const cgpaData = studentStats.gpa;
+      const examBasedCGPA = cgpaData.examBasedCGPA || cgpaData.currentCGPA;
+      const courseBasedCGPA = cgpaData.courseBasedCGPA;
       
-      const completedCourses = studentStats.courses.list.filter(c => c.status === 'completed');
-      const totalCredits = completedCourses.reduce((sum, c) => sum + c.credits, 0);
+      let sourceInfo = '';
+      if (cgpaData.totalGradedExams > 0) {
+        sourceInfo = `📊 **Calculated from ${cgpaData.totalGradedExams} graded exam results**`;
+      } else if (cgpaData.courseBasedCGPA > 0) {
+        sourceInfo = `📚 **Calculated from completed course grades**`;
+      }
+      
+      const classification = examBasedCGPA >= 4.5 ? 'First Class' :
+                           examBasedCGPA >= 3.5 ? 'Second Class Upper' :
+                           examBasedCGPA >= 2.5 ? 'Second Class Lower' :
+                           examBasedCGPA >= 1.5 ? 'Third Class' : 'Pass';
+      
+      let advice = '';
+      if (examBasedCGPA < 2.0) {
+        advice = "⚠️ **Consider meeting with an academic advisor** to discuss improvement strategies.";
+      } else if (examBasedCGPA < 3.0) {
+        advice = "📈 **Focus on current semester courses** to boost your overall performance.";
+      } else if (examBasedCGPA < 3.5) {
+        advice = "👍 **Good progress!** Aim for 3.5+ for better opportunities.";
+      } else if (examBasedCGPA < 4.0) {
+        advice = "🎯 **Excellent work!** Maintain this strong performance.";
+      } else {
+        advice = "🏆 **Outstanding achievement!** You're at the top of your class!";
+      }
+      
+      return `📊 **Your Cumulative GPA (CGPA) Analysis**
+
+**Exam-Based CGPA:** ${examBasedCGPA.toFixed(2)}
+**Academic Classification:** ${classification}
+${sourceInfo}
+
+**Key Statistics:**
+• **Total Graded Exams:** ${cgpaData.totalGradedExams || 0}
+• **Total Credits Earned:** ${cgpaData.totalCredits || 0}
+• **Current Semester GPA:** ${(cgpaData.examBasedGPA || cgpaData.currentGPA).toFixed(2)}
+
+${cgpaData.semesterResults && Object.keys(cgpaData.semesterResults).length > 0 ? `
+**Semester-wise Performance:**
+${Object.keys(cgpaData.semesterResults).map(key => {
+  const semester = cgpaData.semesterResults[key];
+  return `• **Year ${semester.year}, Semester ${semester.semester}:** GPA ${semester.gpa?.toFixed(2) || '0.00'} (${semester.courses.length} exams)`;
+}).join('\n')}\n` : ''}
+
+**💡 What is CGPA?**
+CGPA (Cumulative Grade Point Average) is calculated from **all your graded exam results** across all semesters. It represents your overall academic performance.
+
+**Advice:** ${advice}
+
+**Note:** CGPA = (Σ grade_points × credits) / (Σ credits) from all graded exams`;
+    }
+    
+    // ENHANCED GPA query - From Exam Results
+    if (queryType === 'gpa') {
+      const gpaData = studentStats.gpa;
+      const currentGPA = gpaData.examBasedGPA || gpaData.currentGPA;
+      const currentYear = studentData.year_of_study;
+      const currentSemester = studentData.semester;
+      
+      // Get current semester results
+      let currentSemesterResults = null;
+      if (gpaData.semesterResults) {
+        const currentSemesterKey = `year${currentYear}_sem${currentSemester}`;
+        currentSemesterResults = gpaData.semesterResults[currentSemesterKey];
+      }
       
       let advice = '';
       let icon = '📊';
       
-      if (studentStats.gpa < 2.0) {
+      if (currentGPA < 2.0) {
         advice = "You might want to speak with an academic advisor. Focus on passing current courses.";
         icon = "⚠️";
-      } else if (studentStats.gpa < 3.0) {
+      } else if (currentGPA < 3.0) {
         advice = "Consider focusing more on your current courses to improve your GPA.";
         icon = "📈";
-      } else if (studentStats.gpa < 3.5) {
+      } else if (currentGPA < 3.5) {
         advice = "Good work! Aim for a 3.5+ GPA for better opportunities.";
         icon = "👍";
-      } else if (studentStats.gpa < 4.0) {
+      } else if (currentGPA < 4.0) {
         advice = "Excellent! Maintain this strong academic performance.";
         icon = "🎯";
       } else {
@@ -1019,21 +1243,70 @@ Wishing you all the best in your studies! Come back anytime! 📚✨`;
         icon = "🏆";
       }
       
-      return `${icon} **Your Academic Performance:**
+      return `${icon} **Your Current Semester GPA Analysis**
 
-**Overall CGPA:** ${studentStats.gpa.toFixed(2)}
-**Completed Courses:** ${completedCourses.length} courses
-**Total Credits:** ${totalCredits} credits
-**Academic Standing:** ${studentStats.gpa >= 3.5 ? 'Excellent' : studentStats.gpa >= 3.0 ? 'Good' : studentStats.gpa >= 2.0 ? 'Satisfactory' : 'Needs Improvement'}
+**Current Semester GPA:** ${currentGPA.toFixed(2)}
+**Semester:** Year ${currentYear}, Semester ${currentSemester}
+**Based on:** ${currentSemesterResults?.courses?.length || 0} graded exams this semester
 
-${topCourses.length > 0 ? `**Top Performing Courses:**
-${topCourses.map(c => `• **${c.code}** - ${c.name}\n  Grade: ${c.grade || 'N/A'} | Points: ${c.gradePoints} | Credits: ${c.credits}`).join('\n\n')}\n` : ''}
+${currentSemesterResults ? `
+**Current Semester Details:**
+• **Total Credits:** ${currentSemesterResults.totalCredits || 0}
+• **Total Points:** ${currentSemesterResults.totalPoints?.toFixed(2) || '0.00'}
+• **Number of Courses:** ${currentSemesterResults.courses.length}
+
+**Current Semester Courses:**
+${currentSemesterResults.courses.slice(0, 5).map(course => {
+  const gradeEmoji = course.grade.startsWith('A') ? '🎯' : 
+                     course.grade.startsWith('B') ? '👍' : 
+                     course.grade.startsWith('C') ? '📊' : '📈';
+  return `• ${gradeEmoji} **${course.grade}** - ${course.marks}/${course.totalMarks} (${course.percentage || '0'}%) - ${course.credits} credits`;
+}).join('\n')}
+${currentSemesterResults.courses.length > 5 ? `\n...and ${currentSemesterResults.courses.length - 5} more courses` : ''}\n` : ''}
+
+**📈 GPA Improvement Tips:**
+1. **Focus on current assignments** - They affect your final grades
+2. **Attend all lectures** - Better understanding leads to better grades
+3. **Seek help early** - Don't wait until you're struggling
+4. **Review past exams** - Identify patterns and weak areas
+5. **Form study groups** - Collaborative learning improves retention
 
 **Advice:** ${advice}
 
-**Note:** CGPA = (Σ grade_points × credits) / (Σ credits)`;
+**Next Step:** Work on improving weak areas and maintain strong performance in current courses!`;
     }
     
+    // Handle grades query (general)
+    if (queryType === 'grades') {
+      const gpaData = studentStats.gpa;
+      
+      return `📊 **Your Academic Grades Overview**
+
+**Overall Performance:**
+• **Exam-Based CGPA:** ${(gpaData.examBasedCGPA || gpaData.currentCGPA).toFixed(2)}
+• **Current Semester GPA:** ${(gpaData.examBasedGPA || gpaData.currentGPA).toFixed(2)}
+• **Total Graded Exams:** ${gpaData.totalGradedExams || 0}
+• **Total Credits:** ${gpaData.totalCredits || 0}
+
+**Grade Distribution:**
+${gpaData.semesterResults && Object.keys(gpaData.semesterResults).length > 0 ? 
+  Object.keys(gpaData.semesterResults).map(key => {
+    const semester = gpaData.semesterResults[key];
+    return `• **Year ${semester.year}, Sem ${semester.semester}:** GPA ${semester.gpa?.toFixed(2) || '0.00'} (${semester.courses.length} exams)`;
+  }).join('\n') : 
+  'No detailed grade data available yet.'}
+
+**💡 Grade Interpretation:**
+• **A (90-100%)**: Excellent - Keep up the outstanding work!
+• **B (70-89%)**: Good - Solid understanding, room for improvement
+• **C (50-69%)**: Satisfactory - Focus on weaker areas
+• **D (40-49%)**: Passing - Significant improvement needed
+• **F (Below 40%)**: Failing - Immediate action required
+
+**Need specific grade advice?** Tell me which subject you're concerned about!`;
+    }
+    
+    // Rest of the response handlers remain the same...
     // Courses query
     if (queryType === 'courses') {
       const currentCourses = studentStats.courses.list
@@ -1041,9 +1314,6 @@ ${topCourses.map(c => `• **${c.code}** - ${c.name}\n  Grade: ${c.grade || 'N/A
       
       const completedCourses = studentStats.courses.list
         .filter(c => c.status === 'completed');
-      
-      const upcomingCourses = studentStats.courses.list
-        .filter(c => c.status === 'enrolled' || c.status === 'registered');
       
       return `📚 **Your Course Information:**
 
@@ -1056,9 +1326,6 @@ ${currentCourses.length > 0 ?
 ${completedCourses.length > 0 ? 
   completedCourses.slice(0, 5).map(c => `• **${c.code}** - ${c.name}\n  Grade: ${c.grade || 'N/A'} | Credits: ${c.credits}`).join('\n\n') : 
   'No courses completed yet'}
-
-${upcomingCourses.length > 0 ? `**Upcoming/Registered Courses (${upcomingCourses.length}):**
-${upcomingCourses.map(c => `• **${c.code}** - ${c.name}`).join('\n')}\n` : ''}
 
 **Total Credits This Semester:** ${currentCourses.reduce((sum, c) => sum + c.credits, 0)}`;
     }
@@ -1115,48 +1382,6 @@ ${recentGrades.map(a => {
 }).join('\n')}` : ''}`;
     }
     
-    // Deadlines query
-    if (queryType === 'deadlines') {
-      const upcomingAssignments = studentStats.assignments.upcoming;
-      const upcomingExams = studentStats.exams.upcoming;
-      
-      const allDeadlines = [
-        ...upcomingAssignments.map(a => ({ ...a, type: 'assignment', date: a.due_date })),
-        ...upcomingExams.map(e => ({ ...e, type: 'exam', date: e.start_time }))
-      ].sort((a, b) => new Date(a.date) - new Date(b.date));
-      
-      const now = new Date();
-      const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-      const deadlinesThisWeek = allDeadlines.filter(d => new Date(d.date) <= nextWeek);
-      
-      return `⏰ **All Upcoming Deadlines:**
-
-**This Week (${deadlinesThisWeek.length}):**
-${deadlinesThisWeek.length > 0 ? 
-  deadlinesThisWeek.map(item => {
-    const date = new Date(item.date);
-    const daysLeft = Math.ceil((date - now) / (1000 * 60 * 60 * 24));
-    const typeIcon = item.type === 'assignment' ? '📝' : '📋';
-    let urgency = '';
-    if (daysLeft <= 1) urgency = ' 🚨';
-    else if (daysLeft <= 3) urgency = ' ⚠️';
-    
-    return `${typeIcon} **${item.title}**${urgency}\n  Type: ${item.type === 'assignment' ? 'Assignment' : 'Exam'}\n  Date: ${date.toLocaleDateString()}\n  Time: ${formatTime(item.type === 'assignment' ? '23:59' : item.start_time?.split(' ')[0] || '09:00')}\n  Days left: ${daysLeft}`;
-  }).join('\n\n') : 
-  'No deadlines this week! Well done!'}
-
-**All Deadlines (${allDeadlines.length}):**
-${allDeadlines.length > 0 ? 
-  allDeadlines.slice(0, 10).map(item => {
-    const date = new Date(item.date);
-    const daysLeft = Math.ceil((date - now) / (1000 * 60 * 60 * 24));
-    return `• ${item.type === 'assignment' ? '📝' : '📋'} **${item.title}** - ${date.toLocaleDateString()} (${daysLeft} days)`;
-  }).join('\n') : 
-  'No upcoming deadlines!'}
-
-**📅 Tip:** Start working on assignments at least 3 days before the deadline for best results!`;
-    }
-    
     // Exams query
     if (queryType === 'exams') {
       const upcomingExams = studentStats.exams.upcoming;
@@ -1209,522 +1434,6 @@ ${upcomingExams.length > 0 ?
 5. Arrive at least 30 minutes early`;
     }
     
-    // Today's schedule query
-    if (queryType === 'today') {
-      const today = new Date();
-      const dayOfWeek = today.toLocaleDateString('en-US', { weekday: 'long' });
-      const todayLectures = studentStats.lectures.filter(l => 
-        new Date(l.date).toDateString() === today.toDateString()
-      );
-      
-      const currentClass = studentStats.timetable.currentClass;
-      const nextClass = studentStats.timetable.today.find(slot => {
-        const [hour, minute] = (slot.start_time || '00:00').split(':').map(Number);
-        const currentTime = today.getHours() * 60 + today.getMinutes();
-        return hour * 60 + minute > currentTime;
-      });
-      
-      const todayEvents = studentStats.events.today;
-      const todayAssignments = studentStats.assignments.upcoming.filter(a => 
-        new Date(a.due_date).toDateString() === today.toDateString()
-      );
-      
-      return `📅 **Today's Schedule (${dayOfWeek}):**
-
-**Current Time:** ${today.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-
-${currentClass ? `**🟢 Currently In Class:**\n• **${currentClass.courses?.course_name}**\n  Time: ${formatTime(currentClass.start_time)} - ${formatTime(currentClass.end_time)}\n  Room: ${currentClass.room_number}\n  Lecturer: ${currentClass.lecturers?.full_name || 'TBA'}\n` : ''}
-
-${nextClass ? `**⏭️ Next Class:**\n• **${nextClass.courses?.course_name}** at ${formatTime(nextClass.start_time)} in ${nextClass.room_number}\n` : ''}
-
-**📚 Lectures Today (${todayLectures.length}):**
-${todayLectures.length > 0 ? 
-  todayLectures.map(lecture => 
-    `• **${lecture.courseCode} - ${lecture.title}**\n  Time: ${formatTime(lecture.time)} - ${formatTime(lecture.endTime)}\n  Lecturer: ${lecture.lecturer}\n  Duration: ${lecture.duration} min\n  Status: ${lecture.status === 'ongoing' ? '🟢 Live Now' : 'Scheduled'}${lecture.google_meet_link ? `\n  Link: ${lecture.google_meet_link}` : ''}`
-  ).join('\n\n') : 
-  'No lectures scheduled for today! 🎉'}
-
-${todayAssignments.length > 0 ? `**📝 Assignments Due Today (${todayAssignments.length}):**
-${todayAssignments.map(a => `• **${a.title}** - ${a.courses?.course_name || 'Unknown'}`).join('\n')}\n` : ''}
-
-${todayEvents.length > 0 ? `**🎉 Campus Events Today:**\n${todayEvents.map(e => `• **${e.title}** at ${e.location} (${formatTime(e.time)})`).join('\n')}` : ''}`;
-    }
-    
-    // This week's schedule
-    if (queryType === 'week') {
-      const now = new Date();
-      const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-      const weekLectures = studentStats.lectures.filter(l => 
-        new Date(l.date) <= nextWeek
-      );
-      const upcomingEvents = studentStats.events.upcoming.filter(e => 
-        new Date(e.date) <= nextWeek
-      );
-      
-      // Group lectures by day
-      const lecturesByDay = weekLectures.reduce((acc, lecture) => {
-        const date = new Date(lecture.date);
-        const dayKey = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-        if (!acc[dayKey]) acc[dayKey] = [];
-        acc[dayKey].push(lecture);
-        return acc;
-      }, {});
-      
-      return `📅 **This Week's Schedule:**
-
-${Object.keys(lecturesByDay).length > 0 ? 
-  Object.entries(lecturesByDay).map(([day, lectures]) => 
-    `**${day}:**\n${lectures.map(l => `• ${l.courseCode}: ${l.title} (${formatTime(l.time)})`).join('\n')}`
-  ).join('\n\n') : 
-  'No upcoming lectures scheduled for this week.'}
-
-**Weekly Timetable:**
-${Object.entries(studentStats.timetable.byDay).map(([day, slots]) => 
-  `**${day}:**\n${slots.map(slot => 
-    `• ${slot.start_time} - ${slot.end_time}: ${slot.courses?.course_name || 'Unknown'} (${slot.room_number})`
-  ).join('\n')}`
-).join('\n\n')}
-
-${upcomingEvents.length > 0 ? `**📢 Events This Week:**\n${upcomingEvents.map(e => `• **${formatDate(e.date)}**: ${e.title} at ${e.location}`).join('\n')}` : ''}`;
-    }
-    
-    // Finance query
-    if (queryType === 'finance') {
-      const finance = studentStats.finance;
-      const totalOutstanding = finance.totalPending + finance.totalPartial;
-      
-      let statusMessage = '';
-      let statusIcon = '💰';
-      
-      if (finance.overdue > 0) {
-        statusMessage = `🚨 **URGENT:** You have ${finance.overdue} overdue payment${finance.overdue !== 1 ? 's' : ''}! Please settle immediately to avoid penalties.`;
-        statusIcon = '🚨';
-      } else if (totalOutstanding > 0) {
-        statusMessage = `⚠️ **REMINDER:** You have outstanding payments totaling $${totalOutstanding.toFixed(2)}.`;
-        statusIcon = '⚠️';
-      } else {
-        statusMessage = '✅ **GREAT:** All payments are up to date!';
-        statusIcon = '✅';
-      }
-      
-      return `${statusIcon} **Your Financial Status:**
-
-**Balance Summary:**
-• **Total Paid This Year:** $${finance.totalPaid.toFixed(2)}
-• **Pending Balance:** $${finance.totalPending.toFixed(2)}
-• **Partial Payments Outstanding:** $${finance.totalPartial.toFixed(2)}
-• **Total Outstanding:** $${totalOutstanding.toFixed(2)}
-• **Overdue Payments:** ${finance.overdue}
-${finance.scholarships > 0 ? `• **Scholarships Awarded:** $${finance.scholarships.toFixed(2)}` : ''}
-${finance.fines > 0 ? `• **Fines/Charges:** $${finance.fines.toFixed(2)}` : ''}
-
-${statusMessage}
-
-**Recent Transactions:**
-${finance.recent.length > 0 ? 
-  finance.recent.map(f => {
-    const date = f.payment_date ? new Date(f.payment_date) : f.due_date ? new Date(f.due_date) : null;
-    let statusIcon = '📄';
-    if (f.status === 'paid') statusIcon = '✅';
-    else if (f.status === 'overdue') statusIcon = '🚨';
-    else if (f.status === 'partial') statusIcon = '⚠️';
-    
-    return `${statusIcon} **${f.description || 'Transaction'}**\n  Amount: $${f.amount.toFixed(2)} | Status: ${f.status}\n  Date: ${date ? date.toLocaleDateString() : 'N/A'}${f.balance_due > 0 ? `\n  Balance Due: $${f.balance_due.toFixed(2)}` : ''}`;
-  }).join('\n\n') : 
-  'No recent transactions found'}
-
-**Payment Methods Accepted:**
-• Credit/Debit Cards
-• Bank Transfer
-• Mobile Money
-• Cash at Finance Office
-
-**Contact Finance Office:** finance@university.edu | Ext: 1234`;
-    }
-    
-    // Attendance query
-    if (queryType === 'attendance') {
-      const attendance = studentStats.attendance;
-      const trend = attendance.trend;
-      const byCourse = attendance.byCourse;
-      const minimumRequired = 75;
-      const currentRate = parseFloat(attendance.rate);
-      
-      let statusMessage = '';
-      if (currentRate >= minimumRequired) {
-        statusMessage = `✅ **EXCELLENT:** Your attendance rate of ${currentRate}% meets the minimum requirement of ${minimumRequired}%!`;
-      } else if (currentRate >= minimumRequired - 10) {
-        statusMessage = `⚠️ **WARNING:** Your attendance rate of ${currentRate}% is below the required ${minimumRequired}%. Consider improving your attendance.`;
-      } else {
-        statusMessage = `🚨 **URGENT:** Your attendance rate of ${currentRate}% is significantly below the required ${minimumRequired}%. Immediate improvement is needed.`;
-      }
-      
-      return `📊 **Your Attendance Records:**
-
-**Last 30 Days Summary:**
-• **Total Classes:** ${attendance.total}
-• **Present:** ${attendance.present} days (${attendance.rate}%)
-• **Absent:** ${attendance.absent} days
-• **Late:** ${attendance.late} times
-• **Trend:** ${trend === 'improving' ? '📈 Improving' : trend === 'declining' ? '📉 Declining' : '➡️ Stable'}
-
-${statusMessage}
-
-**Attendance by Course:**
-${Object.keys(byCourse).length > 0 ? 
-  Object.entries(byCourse).map(([course, stats]) => {
-    const rate = ((stats.present / stats.total) * 100).toFixed(1);
-    let icon = '📊';
-    if (rate >= 80) icon = '✅';
-    else if (rate >= 75) icon = '⚠️';
-    else icon = '🚨';
-    
-    return `${icon} **${course}**: ${stats.present}/${stats.total} (${rate}%)`;
-  }).join('\n') : 
-  'No course-specific attendance data'}
-
-**Recent Attendance:**
-${attendance.recent.length > 0 ? 
-  attendance.recent.slice(0, 5).map(a => 
-    `• **${new Date(a.date).toLocaleDateString()}**\n  Course: ${a.courses?.course_name || 'General'}\n  Status: ${a.status === 'present' ? '✅ Present' : a.status === 'late' ? '⚠️ Late' : '❌ Absent'}${a.check_in_time ? ` | Check-in: ${a.check_in_time}` : ''}`
-  ).join('\n\n') : 
-  'No recent attendance records'}
-
-**University Policy:** Minimum ${minimumRequired}% attendance required in each course.`;
-    }
-    
-    // Library query
-    if (queryType === 'library') {
-      const library = studentStats.library;
-      
-      // Generate study session tips
-      const studyTips = [...knowledgeBase.studyTips]
-        .sort(() => Math.random() - 0.5)
-        .slice(0, 3);
-      
-      return `📚 **Library Resources:**
-
-**Available Books:** ${library.available} books currently available
-
-${library.recommended.length > 0 ? `**Recommended for Your Program:**\n${library.recommended.map(b => `• **${b.title}** by ${b.author}\n  ISBN: ${b.isbn} | Category: ${b.category}`).join('\n\n')}\n` : ''}
-
-**Library Services:**
-• **Hours:** 8:00 AM - 10:00 PM (Weekdays), 9:00 AM - 6:00 PM (Weekends)
-• **E-Resources:** Access online journals and databases
-• **Study Rooms:** Book private study rooms (max 4 hours)
-• **Research Help:** Librarians available for assistance
-• **Inter-library Loan:** Request books from other libraries
-
-**Popular Categories:**
-• Computer Science & Engineering
-• Business & Management
-• Science & Mathematics
-• Literature & Arts
-• Reference Materials
-
-**Study Session Tips:**
-${studyTips.map((tip, i) => `${i + 1}. ${tip}`).join('\n')}
-
-**Contact Library:** library@university.edu | Ext: 5678`;
-    }
-    
-    // Events query
-    if (queryType === 'events') {
-      const events = studentStats.events.upcoming;
-      const now = new Date();
-      
-      // Categorize events by time frame
-      const todayEvents = events.filter(e => 
-        new Date(e.date).toDateString() === now.toDateString()
-      );
-      const thisWeekEvents = events.filter(e => {
-        const eventDate = new Date(e.date);
-        const daysDiff = Math.ceil((eventDate - now) / (1000 * 60 * 60 * 24));
-        return daysDiff > 0 && daysDiff <= 7;
-      });
-      const futureEvents = events.filter(e => {
-        const eventDate = new Date(e.date);
-        const daysDiff = Math.ceil((eventDate - now) / (1000 * 60 * 60 * 24));
-        return daysDiff > 7;
-      });
-      
-      return `🎉 **Campus Events & Activities:**
-
-**Today's Events (${todayEvents.length}):**
-${todayEvents.length > 0 ? 
-  todayEvents.map(e => {
-    return `• **${e.title}**\n  Time: ${formatTime(e.time)}\n  Location: ${e.location}\n  Type: ${e.type || 'General'}\n  Description: ${e.description?.substring(0, 100) || 'No description available'}...`;
-  }).join('\n\n') : 
-  'No events today'}
-
-**This Week's Events (${thisWeekEvents.length}):**
-${thisWeekEvents.length > 0 ? 
-  thisWeekEvents.map(e => {
-    const date = new Date(e.date);
-    const daysLeft = Math.ceil((date - now) / (1000 * 60 * 60 * 24));
-    return `• **${e.title}**\n  Date: ${date.toLocaleDateString()} at ${formatTime(e.time)}\n  Location: ${e.location}\n  Starts in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`;
-  }).join('\n\n') : 
-  'No events this week'}
-
-**Future Events (${futureEvents.length}):**
-${futureEvents.length > 0 ? 
-  futureEvents.slice(0, 5).map(e => {
-    const date = new Date(e.date);
-    return `• **${date.toLocaleDateString()}**: ${e.title} at ${e.location}`;
-  }).join('\n') : 
-  'No future events scheduled'}
-
-**Regular Activities:**
-• **Sports:** Football, Basketball, Swimming (Daily 4-6 PM)
-• **Clubs:** Coding Club, Debate Society, Music Club
-• **Workshops:** Weekly skill development sessions
-• **Guest Lectures:** Industry experts every Friday
-• **Cultural Events:** Monthly performances and exhibitions
-
-**Get Involved:** Visit Student Affairs Office or check notice boards!`;
-    }
-    
-    // Study tips query
-    if (queryType === 'study') {
-      const randomTips = [...knowledgeBase.studyTips]
-        .sort(() => Math.random() - 0.5)
-        .slice(0, 7);
-      
-      const randomExamTips = [...knowledgeBase.examTips]
-        .sort(() => Math.random() - 0.5)
-        .slice(0, 5);
-      
-      const randomAssignmentTips = [...knowledgeBase.assignmentHelp]
-        .sort(() => Math.random() - 0.5)
-        .slice(0, 5);
-      
-      return `🧠 **Study Tips & Strategies:**
-
-**Effective Study Techniques:**
-${randomTips.map((tip, i) => `${i + 1}. ${tip}`).join('\n')}
-
-**Time Management:**
-• Create a weekly study schedule
-• Prioritize difficult subjects during peak focus times
-• Use digital calendars with reminders
-• Break large tasks into smaller chunks
-• Set specific, achievable goals
-
-**Exam Preparation:**
-${randomExamTips.map((tip, i) => `${i + 1}. ${tip}`).join('\n')}
-
-**Assignment Excellence:**
-${randomAssignmentTips.map((tip, i) => `${i + 1}. ${tip}`).join('\n')}
-
-**Resource Recommendations:**
-• **Online:** Khan Academy, Coursera, edX, MIT OpenCourseWare
-• **Apps:** Anki (flashcards), Forest (focus), Todoist (planning), Notion (organization)
-• **Books:** "A Mind for Numbers", "Make It Stick", "Deep Work", "Atomic Habits"
-
-**Need help with a specific subject?** Tell me which course you're struggling with!`;
-    }
-    
-    // Progress report query
-    if (queryType === 'progress') {
-      const currentMonth = new Date().toLocaleString('default', { month: 'long' });
-      const currentYear = new Date().getFullYear();
-      const semester = studentData.semester || 1;
-      
-      // Calculate projected graduation
-      const programDuration = 4; // Default 4 years
-      const yearsCompleted = studentData.year_of_study - 1 + (semester / 2);
-      const progressPercentage = (yearsCompleted / programDuration) * 100;
-      const projectedGraduationYear = currentYear + (programDuration - Math.ceil(yearsCompleted));
-      
-      return `📈 **Comprehensive Academic Progress Report**
-
-**Academic Year:** ${currentYear}
-**Semester:** ${semester}
-**Report Date:** ${new Date().toLocaleDateString()}
-
-**Academic Performance:**
-• **CGPA:** ${studentStats.gpa.toFixed(2)} (from ${studentStats.courses.completed} completed courses)
-• **Courses Completed:** ${studentStats.courses.completed}/${studentStats.courses.total}
-• **Attendance Rate:** ${studentStats.attendance.rate}% (${studentStats.attendance.trend} trend)
-• **Current Semester:** Year ${studentData.year_of_study}, Semester ${studentData.semester}
-• **Program:** ${studentData.program}
-
-**Current Status (${currentMonth}):**
-• **Pending Assignments:** ${studentStats.assignments.pending}
-• **Overdue Assignments:** ${studentStats.assignments.overdue}
-• **Upcoming Exams:** ${studentStats.exams.upcoming.length}
-• **Upcoming Lectures:** ${studentStats.lectures.length}
-• **Financial Balance:** $${(studentStats.finance.totalPending + studentStats.finance.totalPartial).toFixed(2)}
-• **Library Books Available:** ${studentStats.library.available}
-
-**Top Priorities This Week:**
-${studentStats.assignments.upcoming.length > 0 ? `1. **${studentStats.assignments.upcoming[0]?.title}** - Due ${formatDate(studentStats.assignments.upcoming[0]?.due_date)}` : '1. No urgent assignments'}
-${studentStats.exams.upcoming.length > 0 ? `2. **${studentStats.exams.upcoming[0]?.title}** - Exam on ${formatDate(studentStats.exams.upcoming[0]?.start_time)}` : '2. No upcoming exams'}
-${studentStats.finance.overdue > 0 ? '3. **Clear overdue payments** - Financial clearance required' : '3. Financial status is good'}
-${studentStats.lectures.length > 0 ? `4. **Attend ${studentStats.lectures[0]?.courseCode} lecture** - ${formatDate(studentStats.lectures[0]?.date)} at ${formatTime(studentStats.lectures[0]?.time)}` : '4. No lectures scheduled'}
-
-**Recommendations:**
-1. ${studentStats.attendance.rate >= 75 ? '✅ Maintain good attendance' : '📈 Improve attendance to meet 75% requirement'}
-2. ${studentStats.assignments.pending > 0 ? '📝 Complete pending assignments this week' : '✅ Great job staying on top of assignments'}
-3. ${studentStats.gpa < 3.0 ? '📊 Focus on improving grades in current courses' : '✅ Maintain strong academic performance'}
-4. ${studentStats.finance.overdue > 0 ? '💰 Clear overdue payments immediately' : '✅ Financial status is satisfactory'}
-5. ${studentStats.library.recommended.length > 0 ? '📚 Check out recommended library books' : '📚 Utilize library resources for better learning'}
-
-**Projected Graduation:** ${progressPercentage.toFixed(1)}% complete | Projected: ${projectedGraduationYear}`;
-    }
-    
-    // Profile query
-    if (queryType === 'profile') {
-      const enrollmentDate = new Date(studentData.created_at);
-      const daysEnrolled = Math.floor((new Date() - enrollmentDate) / (1000 * 60 * 60 * 24));
-      
-      return `👤 **Your Student Profile:**
-
-**Personal Information:**
-• **Full Name:** ${studentData.full_name}
-• **Student ID:** ${studentData.student_id}
-• **Email:** ${studentData.email}
-• **Phone:** ${studentData.phone || 'Not provided'}
-
-**Academic Information:**
-• **Program:** ${studentData.program}
-• **Year of Study:** Year ${studentData.year_of_study}, Semester ${studentData.semester}
-• **Intake:** ${studentData.intake || 'Not specified'}
-• **Academic Year:** ${studentData.academic_year || 'Current'}
-
-**Enrollment Details:**
-• **Enrollment Date:** ${enrollmentDate.toLocaleDateString()}
-• **Days Enrolled:** ${daysEnrolled} days
-• **Status:** Active Student
-
-**Contact Information:**
-• **Student Portal:** portal.university.edu
-• **Email:** ${studentData.email}
-• **Phone:** ${studentData.phone || 'Not available'}
-• **Emergency Contact:** Update in Student Services
-
-**Need to update your information?** Visit the Student Affairs office or update through the portal.`;
-    }
-    
-    // University info query
-    if (queryType === 'university') {
-      return `🏛️ **University Information:**
-
-**About Our University:**
-We are a premier institution dedicated to academic excellence and innovation in education. We provide world-class education across various disciplines.
-
-**Key Departments:**
-• **Computer Science & Engineering**
-• **Business & Management**
-• **Health Sciences**
-• **Arts & Humanities**
-• **Science & Technology**
-
-**Campus Facilities:**
-• **Library:** State-of-the-art digital and physical resources
-• **Labs:** Modern computer and science laboratories
-• **Sports Complex:** Indoor and outdoor sports facilities
-• **Student Center:** Cafeteria, study spaces, and lounge areas
-• **Medical Center:** 24/7 health services
-
-**Academic Calendar Highlights:**
-• **Semester Start:** September & February
-• **Examination Periods:** December & May
-• **Breaks:** Summer (June-August), Winter (December-January)
-• **Graduation Ceremony:** Annual ceremony in July
-
-**Contact Information:**
-• **Main Office:** +1 (555) 123-4567
-• **Email:** info@university.edu
-• **Address:** 123 Education Street, Knowledge City
-• **Website:** www.university.edu
-
-**Vision:** To be a globally recognized center of excellence in education and research.`;
-    }
-    
-    // Help query
-    if (queryType === 'help') {
-      return `🤖 **AI Student Assistant - Complete Guide**
-
-**What I Can Help You With:**
-
-**📚 Academic Information:**
-• Course grades, GPA calculations, and academic standing
-• Current and completed courses with details
-• Program requirements and progress tracking
-• Lecturer information and course materials
-
-**📝 Assignments & Coursework:**
-• Upcoming assignment deadlines and requirements
-• Submission status and grades received
-• Project guidelines and resources
-• Time management for coursework
-
-**📋 Exams & Assessments:**
-• Exam schedules, locations, and formats
-• Past exam results and performance analysis
-• Study preparation tips and resources
-• Grade calculations and projections
-
-**💰 Financial Matters:**
-• Tuition fees and payment status
-• Outstanding balances and due dates
-• Scholarship information and applications
-• Financial aid and payment plans
-
-**📅 Schedule & Attendance:**
-• Daily, weekly, and monthly timetable
-• Lecture schedules and room locations
-• Attendance records and percentage
-• Class cancellations and rescheduling
-
-**🎓 Student Life:**
-• Campus events and activities
-• Club and society information
-• Library resources and book availability
-• Campus facilities and services
-
-**📈 Performance & Progress:**
-• Comprehensive progress reports
-• GPA trends and improvement suggestions
-• Study habit recommendations
-• Goal setting and achievement tracking
-
-**🏛️ University Information:**
-• University policies and procedures
-• Important dates and deadlines
-• Contact information for departments
-• Campus news and updates
-
-**💬 General Chat:**
-• Greetings and casual conversation
-• Motivational quotes and encouragement
-• Study tips and learning strategies
-• General academic advice
-
-**Try These Sample Questions:**
-• "What's my current GPA?"
-• "Show me assignments due this week"
-• "What exams do I have coming up?"
-• "How much do I owe in tuition?"
-• "What's my attendance percentage?"
-• "What lectures do I have today?"
-• "Recommend some study tips"
-• "What library books are available?"
-• "Any campus events this month?"
-• "How can I improve my grades?"
-• "Tell me about my program"
-• "What's my class schedule for tomorrow?"
-• "Check my financial balance"
-• "How many credits have I completed?"
-• "What's my academic standing?"
-• "Give me some motivation"
-• "How are you doing?"
-• "What can you help me with?"
-
-**Pro Tip:** Be specific in your questions for more detailed answers! I understand natural language, so feel free to chat naturally!`;
-    }
-    
     // Default response for unknown queries
     const randomEncouragement = knowledgeBase.encouragement[
       Math.floor(Math.random() * knowledgeBase.encouragement.length)
@@ -1739,7 +1448,8 @@ ${randomEncouragement}
 
 **Here's what I can help you with:**
 
-• **Academic Performance** - Grades, GPA, courses, progress
+• **Academic Performance** - GPA, CGPA, grades, progress
+• **Exam Results** - Real-time GPA/CGPA from graded exams
 • **Assignments & Exams** - Deadlines, submissions, results
 • **Financial Status** - Fees, payments, balances
 • **Schedule** - Timetable, lectures, classes
@@ -1753,7 +1463,8 @@ ${randomEncouragement}
 **Tip:** ${randomTip}
 
 **Try asking me one of these:**
-"What's my current GPA?"
+"What's my current GPA from exams?"
+"What's my overall CGPA?"
 "What assignments are due this week?"
 "What's my attendance percentage?"
 "How much do I owe in fees?"
@@ -1763,14 +1474,6 @@ ${randomEncouragement}
 "What library books are available?"
 "Give me some motivation"
 "How are you doing today?"`;
-  };
-
-  // Handle chat scroll
-  const handleChatScroll = () => {
-    if (chatContainerRef.current) {
-      const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
-      setIsScrolledToBottom(scrollHeight - scrollTop - clientHeight < 100);
-    }
   };
 
   // Event handlers
@@ -1801,6 +1504,11 @@ ${randomEncouragement}
       
       setMessages(prev => [...prev, aiMessage]);
       setIsLoading(false);
+      
+      // Auto-scroll to bottom
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
     }, 600);
   };
 
@@ -1822,9 +1530,21 @@ ${randomEncouragement}
     }
   };
 
-  // Enhanced quick questions
+  const handleQuickQuestion = (question) => {
+    setInputText(question);
+    if (isMobile) {
+      setShowQuickQuestions(false);
+      // Focus on input after a delay
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 100);
+    }
+  };
+
+  // Enhanced quick questions with GPA/CGPA options
   const quickQuestions = [
-    "What's my GPA?",
+    "What's my CGPA?",
+    "Current GPA?",
     "Assignments due?",
     "How much do I owe?",
     "Lectures today?",
@@ -1834,25 +1554,15 @@ ${randomEncouragement}
     "Library books",
     "Campus events",
     "Progress report",
-    "Motivation",
-    "How are you?"
+    "Motivation"
   ];
 
   // Scroll to bottom
   useEffect(() => {
-    if (isScrolledToBottom) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages, isLoading, isScrolledToBottom]);
-
-  // Add scroll listener
-  useEffect(() => {
-    const container = chatContainerRef.current;
-    if (container) {
-      container.addEventListener('scroll', handleChatScroll);
-      return () => container.removeEventListener('scroll', handleChatScroll);
-    }
-  }, []);
+  }, [messages, isLoading]);
 
   // Fetch data on mount
   useEffect(() => {
@@ -1866,7 +1576,13 @@ ${randomEncouragement}
         maxWidth: '1200px',
         margin: '0 auto',
         padding: '2rem',
-        textAlign: 'center'
+        textAlign: 'center',
+        minHeight: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#f5f7fa'
       }}>
         <div style={{
           width: '60px',
@@ -1875,12 +1591,12 @@ ${randomEncouragement}
           borderTop: '4px solid #3498db',
           borderRadius: '50%',
           animation: 'spin 1s linear infinite',
-          margin: '2rem auto'
+          marginBottom: '1.5rem'
         }}></div>
-        <h3 style={{ color: '#2c3e50', marginBottom: '1rem' }}>
+        <h3 style={{ color: '#2c3e50', marginBottom: '0.5rem', fontSize: isMobile ? '1.2rem' : '1.5rem' }}>
           Loading your personal AI assistant...
         </h3>
-        <p style={{ color: '#7f8c8d' }}>
+        <p style={{ color: '#7f8c8d', fontSize: isMobile ? '0.9rem' : '1rem' }}>
           Fetching your academic data from the database
         </p>
         <style>{`
@@ -1898,17 +1614,18 @@ ${randomEncouragement}
       maxWidth: '1200px',
       margin: '0 auto',
       padding: isMobile ? '0.5rem' : '1rem',
-      minHeight: 'calc(100vh - 100px)',
+      minHeight: '100vh',
       display: 'flex',
-      flexDirection: 'column'
+      flexDirection: 'column',
+      backgroundColor: '#f5f7fa'
     }}>
       {/* Header */}
       <div style={{
         background: 'linear-gradient(135deg, #4361ee 0%, #3a0ca3 100%)',
-        borderRadius: '12px',
-        padding: isMobile ? '1.5rem' : '2rem',
+        borderRadius: isMobile ? '10px' : '12px',
+        padding: isMobile ? '1rem' : '1.5rem',
         color: 'white',
-        marginBottom: isMobile ? '1.5rem' : '2rem',
+        marginBottom: isMobile ? '1rem' : '1.5rem',
         boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
       }}>
         <div style={{ 
@@ -1916,11 +1633,11 @@ ${randomEncouragement}
           flexDirection: isMobile ? 'column' : 'row',
           alignItems: isMobile ? 'flex-start' : 'center', 
           justifyContent: 'space-between',
-          gap: isMobile ? '1rem' : '0'
+          gap: isMobile ? '0.75rem' : '0'
         }}>
           <div>
             <h1 style={{ 
-              fontSize: isMobile ? '1.5rem' : '2rem', 
+              fontSize: isMobile ? '1.25rem' : '1.75rem', 
               fontWeight: 'bold', 
               margin: '0 0 0.5rem 0',
               lineHeight: '1.2'
@@ -1930,7 +1647,7 @@ ${randomEncouragement}
             <p style={{ 
               opacity: 0.9, 
               margin: 0,
-              fontSize: isMobile ? '0.9rem' : '1.1rem',
+              fontSize: isMobile ? '0.85rem' : '1rem',
               lineHeight: '1.4'
             }}>
               Personalized assistance for {studentData?.full_name || 'Student'}
@@ -1939,7 +1656,7 @@ ${randomEncouragement}
               display: 'flex', 
               gap: '0.5rem', 
               marginTop: '0.75rem',
-              fontSize: isMobile ? '0.8rem' : '0.9rem',
+              fontSize: isMobile ? '0.75rem' : '0.85rem',
               flexWrap: 'wrap'
             }}>
               <span style={{ 
@@ -1968,25 +1685,25 @@ ${randomEncouragement}
           <div style={{
             background: 'rgba(255,255,255,0.1)',
             padding: isMobile ? '0.75rem' : '1rem',
-            borderRadius: '10px',
+            borderRadius: '8px',
             textAlign: 'center',
-            minWidth: isMobile ? '100px' : '120px',
+            minWidth: isMobile ? '100%' : '120px',
             marginTop: isMobile ? '0.5rem' : '0',
             alignSelf: isMobile ? 'stretch' : 'auto'
           }}>
             <div style={{ 
-              fontSize: isMobile ? '0.8rem' : '0.9rem', 
+              fontSize: isMobile ? '0.75rem' : '0.85rem', 
               opacity: 0.8,
               marginBottom: '0.25rem'
             }}>
-              Current CGPA
+              Exam CGPA
             </div>
             <div style={{ 
-              fontSize: isMobile ? '1.75rem' : '2rem', 
+              fontSize: isMobile ? '1.5rem' : '2rem', 
               fontWeight: 'bold',
               lineHeight: '1'
             }}>
-              {studentStats?.gpa?.toFixed(2) || '0.00'}
+              {(studentStats?.gpa?.examBasedCGPA || studentStats?.gpa?.currentCGPA || 0).toFixed(2)}
             </div>
           </div>
         </div>
@@ -1995,18 +1712,18 @@ ${randomEncouragement}
       {/* Main Chat Interface */}
       <div style={{
         backgroundColor: 'white',
-        borderRadius: '12px',
+        borderRadius: isMobile ? '10px' : '12px',
         boxShadow: '0 2px 20px rgba(0,0,0,0.08)',
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
-        height: isMobile ? 'calc(100vh - 250px)' : '70vh',
+        height: isMobile ? 'calc(100vh - 180px)' : '70vh',
         minHeight: isMobile ? '500px' : '600px',
         flex: '1'
       }}>
         {/* Chat Header */}
         <div style={{
-          padding: isMobile ? '1rem' : '1.5rem',
+          padding: isMobile ? '0.75rem 1rem' : '1rem 1.5rem',
           borderBottom: '1px solid #e9ecef',
           display: 'flex',
           alignItems: 'center',
@@ -2014,7 +1731,7 @@ ${randomEncouragement}
           background: '#f8f9fa',
           flexShrink: 0
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '0.75rem' : '1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '0.5rem' : '0.75rem' }}>
             <div style={{
               width: isMobile ? '32px' : '40px',
               height: isMobile ? '32px' : '40px',
@@ -2030,7 +1747,7 @@ ${randomEncouragement}
             </div>
             <div>
               <h2 style={{ 
-                fontSize: isMobile ? '1rem' : '1.25rem', 
+                fontSize: isMobile ? '0.9rem' : '1.1rem', 
                 fontWeight: '600', 
                 margin: 0,
                 color: '#2c3e50',
@@ -2041,8 +1758,8 @@ ${randomEncouragement}
               <div style={{ 
                 display: 'flex', 
                 alignItems: 'center', 
-                gap: '0.5rem',
-                fontSize: isMobile ? '0.75rem' : '0.875rem',
+                gap: '0.25rem',
+                fontSize: isMobile ? '0.7rem' : '0.8rem',
                 color: '#7f8c8d'
               }}>
                 <div style={{
@@ -2051,30 +1768,54 @@ ${randomEncouragement}
                   borderRadius: '50%',
                   backgroundColor: '#4CAF50'
                 }}></div>
-                <span>Connected to your academic database</span>
+                <span>Connected to academic database</span>
               </div>
             </div>
           </div>
-          <button
-            onClick={handleClearChat}
-            style={{
-              background: 'none',
-              border: '1px solid #dee2e6',
-              borderRadius: '6px',
-              padding: isMobile ? '0.4rem 0.75rem' : '0.5rem 1rem',
-              color: '#e74c3c',
-              cursor: 'pointer',
-              fontSize: isMobile ? '0.75rem' : '0.875rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              whiteSpace: 'nowrap',
-              flexShrink: 0
-            }}
-          >
-            <span>🗑️</span>
-            {isMobile ? 'Clear' : 'Clear Chat'}
-          </button>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            {isMobile && (
+              <button
+                onClick={() => setShowQuickQuestions(!showQuickQuestions)}
+                style={{
+                  background: 'none',
+                  border: '1px solid #dee2e6',
+                  borderRadius: '6px',
+                  padding: '0.4rem 0.75rem',
+                  color: showQuickQuestions ? '#4361ee' : '#6c757d',
+                  cursor: 'pointer',
+                  fontSize: '0.75rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.25rem',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0
+                }}
+              >
+                <span>{showQuickQuestions ? '❌' : '💬'}</span>
+                {showQuickQuestions ? 'Hide' : 'Quick Qs'}
+              </button>
+            )}
+            <button
+              onClick={handleClearChat}
+              style={{
+                background: 'none',
+                border: '1px solid #dee2e6',
+                borderRadius: '6px',
+                padding: isMobile ? '0.4rem 0.75rem' : '0.5rem 1rem',
+                color: '#e74c3c',
+                cursor: 'pointer',
+                fontSize: isMobile ? '0.75rem' : '0.85rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                whiteSpace: 'nowrap',
+                flexShrink: 0
+              }}
+            >
+              <span>🗑️</span>
+              {!isMobile && 'Clear Chat'}
+            </button>
+          </div>
         </div>
 
         {/* Messages Container */}
@@ -2082,7 +1823,7 @@ ${randomEncouragement}
           ref={chatContainerRef}
           style={{
             flex: 1,
-            padding: isMobile ? '1rem' : '1.5rem',
+            padding: isMobile ? '0.75rem' : '1rem',
             overflowY: 'auto',
             background: '#fafafa',
             display: 'flex',
@@ -2095,7 +1836,7 @@ ${randomEncouragement}
               <div
                 key={message.id}
                 style={{
-                  marginBottom: isMobile ? '0.75rem' : '1rem',
+                  marginBottom: isMobile ? '0.5rem' : '0.75rem',
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: message.sender === 'user' ? 'flex-end' : 'flex-start'
@@ -2134,7 +1875,7 @@ ${randomEncouragement}
                     maxWidth: '100%',
                     wordBreak: 'break-word',
                     whiteSpace: 'pre-line',
-                    fontSize: isMobile ? '0.875rem' : '0.9375rem',
+                    fontSize: isMobile ? '0.85rem' : '0.9rem',
                     lineHeight: '1.6'
                   }}>
                     <div style={{ 
@@ -2144,7 +1885,7 @@ ${randomEncouragement}
                       {message.text}
                     </div>
                     <div style={{
-                      fontSize: isMobile ? '0.7rem' : '0.75rem',
+                      fontSize: isMobile ? '0.65rem' : '0.75rem',
                       opacity: 0.7,
                       marginTop: '0.5rem',
                       textAlign: 'right'
@@ -2181,8 +1922,8 @@ ${randomEncouragement}
               <div style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: isMobile ? '0.75rem' : '1rem',
-                marginTop: '1rem'
+                gap: isMobile ? '0.5rem' : '0.75rem',
+                marginTop: '0.75rem'
               }}>
                 <div style={{
                   width: isMobile ? '28px' : '32px',
@@ -2231,96 +1972,115 @@ ${randomEncouragement}
           </div>
         </div>
 
-        {/* Quick Questions */}
-        <div 
-          ref={quickQuestionsRef}
-          style={{
-            padding: isMobile ? '0.75rem 1rem' : '1rem 1.5rem',
-            borderTop: '1px solid #e9ecef',
-            background: '#f8f9fa',
-            flexShrink: 0,
-            minHeight: '80px',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'center'
-          }}
-        >
-          <div style={{ 
-            fontSize: isMobile ? '0.75rem' : '0.875rem', 
-            color: '#7f8c8d',
-            marginBottom: isMobile ? '0.5rem' : '0.75rem',
-            fontWeight: '500',
-            paddingLeft: '4px'
-          }}>
-            Quick questions:
+        {/* Quick Questions - Mobile optimized */}
+        {showQuickQuestions && (
+          <div 
+            ref={quickQuestionsRef}
+            style={{
+              padding: isMobile ? '0.5rem 0.75rem' : '0.75rem 1rem',
+              borderTop: '1px solid #e9ecef',
+              background: '#f8f9fa',
+              flexShrink: 0,
+              maxHeight: isMobile ? '120px' : 'auto',
+              overflowY: isMobile ? 'auto' : 'visible'
+            }}
+          >
+            <div style={{ 
+              fontSize: isMobile ? '0.75rem' : '0.85rem', 
+              color: '#7f8c8d',
+              marginBottom: isMobile ? '0.5rem' : '0.75rem',
+              fontWeight: '500',
+              paddingLeft: '4px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <span>Quick questions:</span>
+              {isMobile && (
+                <button
+                  onClick={() => setShowQuickQuestions(false)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#4361ee',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                    padding: '0.25rem 0.5rem'
+                  }}
+                >
+                  Close
+                </button>
+              )}
+            </div>
+            <div style={{
+              display: 'flex',
+              gap: isMobile ? '0.4rem' : '0.5rem',
+              flexWrap: 'wrap',
+              overflowX: isMobile ? 'auto' : 'visible',
+              paddingBottom: isMobile ? '4px' : '0',
+              WebkitOverflowScrolling: 'touch',
+              alignItems: 'center',
+              minHeight: isMobile ? 'auto' : '36px'
+            }}>
+              {quickQuestions.map((question, index) => (
+                <button
+                  key={index}
+                  onClick={() => handleQuickQuestion(question)}
+                  style={{
+                    padding: isMobile ? '0.4rem 0.75rem' : '0.5rem 0.9rem',
+                    background: 'rgba(67, 97, 238, 0.1)',
+                    color: '#4361ee',
+                    border: '1px solid rgba(67, 97, 238, 0.2)',
+                    borderRadius: '20px',
+                    fontSize: isMobile ? '0.75rem' : '0.8rem',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    whiteSpace: 'nowrap',
+                    flexShrink: 0,
+                    height: isMobile ? '32px' : '36px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    lineHeight: '1',
+                    fontWeight: '500'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(67, 97, 238, 0.2)';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(67, 97, 238, 0.2)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(67, 97, 238, 0.1)';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.boxShadow = 'none';
+                  }}
+                >
+                  {question}
+                </button>
+              ))}
+            </div>
           </div>
-          <div style={{
-            display: 'flex',
-            gap: isMobile ? '0.5rem' : '0.6rem',
-            flexWrap: 'wrap',
-            overflowX: 'auto',
-            paddingBottom: '8px',
-            WebkitOverflowScrolling: 'touch',
-            alignItems: 'center',
-            minHeight: '36px'
-          }}>
-            {quickQuestions.map((question, index) => (
-              <button
-                key={index}
-                onClick={() => setInputText(question)}
-                style={{
-                  padding: isMobile ? '0.5rem 0.9rem' : '0.6rem 1rem',
-                  background: 'rgba(67, 97, 238, 0.1)',
-                  color: '#4361ee',
-                  border: '1px solid rgba(67, 97, 238, 0.2)',
-                  borderRadius: '20px',
-                  fontSize: isMobile ? '0.75rem' : '0.8125rem',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s',
-                  whiteSpace: 'nowrap',
-                  flexShrink: 0,
-                  height: '36px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  lineHeight: '1',
-                  fontWeight: '500'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'rgba(67, 97, 238, 0.2)';
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                  e.currentTarget.style.boxShadow = '0 2px 8px rgba(67, 97, 238, 0.2)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'rgba(67, 97, 238, 0.1)';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = 'none';
-                }}
-              >
-                {question}
-              </button>
-            ))}
-          </div>
-        </div>
+        )}
 
         {/* Input Area */}
         <div style={{
-          padding: isMobile ? '1rem' : '1.5rem',
+          padding: isMobile ? '0.75rem' : '1rem',
           borderTop: '1px solid #e9ecef',
           background: 'white',
           flexShrink: 0
         }}>
           <div style={{ 
             display: 'flex', 
-            gap: isMobile ? '0.75rem' : '1rem',
+            gap: isMobile ? '0.5rem' : '0.75rem',
             flexDirection: isMobile ? 'column' : 'row'
           }}>
             <div style={{ 
               flex: 1, 
               position: 'relative',
-              minHeight: isMobile ? '50px' : '60px'
+              minHeight: isMobile ? '44px' : '50px'
             }}>
               <textarea
+                ref={inputRef}
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyPress={handleKeyPress}
@@ -2330,8 +2090,8 @@ ${randomEncouragement}
                   padding: isMobile ? '0.75rem 0.75rem 0.75rem 2.5rem' : '1rem 1rem 1rem 3rem',
                   border: '1px solid #dee2e6',
                   borderRadius: '8px',
-                  fontSize: isMobile ? '0.875rem' : '0.9375rem',
-                  minHeight: isMobile ? '50px' : '60px',
+                  fontSize: isMobile ? '0.9rem' : '0.95rem',
+                  minHeight: isMobile ? '44px' : '50px',
                   maxHeight: '120px',
                   resize: 'vertical',
                   outline: 'none',
@@ -2359,14 +2119,14 @@ ${randomEncouragement}
                 color: 'white',
                 border: 'none',
                 borderRadius: '8px',
-                padding: isMobile ? '0.75rem 1.5rem' : '0 2rem',
+                padding: isMobile ? '0.75rem 1rem' : '0 1.5rem',
                 cursor: !inputText.trim() || isLoading ? 'not-allowed' : 'pointer',
                 opacity: !inputText.trim() || isLoading ? 0.6 : 1,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '0.5rem',
-                fontSize: isMobile ? '0.875rem' : '0.9375rem',
+                fontSize: isMobile ? '0.9rem' : '0.95rem',
                 fontWeight: '600',
                 transition: 'all 0.2s',
                 boxShadow: '0 4px 6px rgba(67, 97, 238, 0.4)',
@@ -2412,23 +2172,50 @@ ${randomEncouragement}
 
       {/* Footer */}
       <div style={{
-        marginTop: isMobile ? '1rem' : '1.5rem',
+        marginTop: isMobile ? '0.75rem' : '1rem',
         textAlign: 'center',
         color: '#7f8c8d',
-        fontSize: isMobile ? '0.75rem' : '0.875rem',
+        fontSize: isMobile ? '0.7rem' : '0.8rem',
         padding: '0.5rem'
       }}>
-        <p style={{ margin: 0 }}>
-          AI Student Assistant • Connected to your academic database • Data updates in real-time
+        <p style={{ margin: 0, lineHeight: '1.4' }}>
+          AI Student Assistant • Real-time GPA/CGPA from exam results • Data updates automatically
         </p>
         <p style={{ 
           margin: '0.25rem 0 0 0', 
-          fontSize: isMobile ? '0.7rem' : '0.75rem',
+          fontSize: isMobile ? '0.65rem' : '0.75rem',
           opacity: 0.7
         }}>
           Last updated: {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • Ask me anything!
         </p>
       </div>
+
+      {/* Mobile Quick Questions Toggle */}
+      {isMobile && !showQuickQuestions && (
+        <button
+          onClick={() => setShowQuickQuestions(true)}
+          style={{
+            position: 'fixed',
+            bottom: '80px',
+            right: '20px',
+            background: '#4361ee',
+            color: 'white',
+            border: 'none',
+            borderRadius: '50%',
+            width: '50px',
+            height: '50px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            boxShadow: '0 4px 12px rgba(67, 97, 238, 0.4)',
+            zIndex: 1000,
+            fontSize: '1.2rem'
+          }}
+        >
+          💬
+        </button>
+      )}
 
       <style>{`
         @keyframes bounce {
@@ -2466,26 +2253,6 @@ ${randomEncouragement}
           background: #a1a1a1;
         }
         
-        /* Custom scrollbar for quick questions */
-        .quick-questions-container::-webkit-scrollbar {
-          height: 4px;
-        }
-        
-        .quick-questions-container::-webkit-scrollbar-track {
-          background: #f1f1f1;
-          border-radius: 2px;
-          margin: 0 4px;
-        }
-        
-        .quick-questions-container::-webkit-scrollbar-thumb {
-          background: #c1c1c1;
-          border-radius: 2px;
-        }
-        
-        .quick-questions-container::-webkit-scrollbar-thumb:hover {
-          background: #a1a1a1;
-        }
-        
         /* Mobile-specific optimizations */
         @media (max-width: 480px) {
           .quick-questions {
@@ -2514,19 +2281,9 @@ ${randomEncouragement}
         }
         
         /* Large screen optimizations */
-            /* Large screen optimizations */
         @media (min-width: 1200px) {
           .chat-container {
             height: 75vh !important;
-          }
-        }
-        
-        /* Accessibility improvements */
-        @media (prefers-reduced-motion: reduce) {
-          * {
-            animation-duration: 0.01ms !important;
-            animation-iteration-count: 1 !important;
-            transition-duration: 0.01ms !important;
           }
         }
         
@@ -2541,47 +2298,6 @@ ${randomEncouragement}
           .message-input,
           .chat-header {
             display: none !important;
-          }
-        }
-        
-        /* High contrast mode support */
-        @media (prefers-contrast: high) {
-          .chat-message {
-            border: 2px solid #000 !important;
-          }
-          
-          .quick-question-button {
-            border: 2px solid #4361ee !important;
-          }
-        }
-        
-        /* Dark mode support */
-        @media (prefers-color-scheme: dark) {
-          .chat-window {
-            background-color: #1a1a1a !important;
-            color: #ffffff !important;
-          }
-          
-          .chat-header {
-            background-color: #2d2d2d !important;
-            border-bottom: 1px solid #404040 !important;
-          }
-          
-          .message-input textarea {
-            background-color: #2d2d2d !important;
-            color: #ffffff !important;
-            border-color: #404040 !important;
-          }
-          
-          .quick-questions {
-            background-color: #2d2d2d !important;
-            border-top: 1px solid #404040 !important;
-          }
-          
-          .quick-question-button {
-            background-color: #3a3a3a !important;
-            color: #4361ee !important;
-            border-color: #404040 !important;
           }
         }
         
@@ -2601,12 +2317,6 @@ ${randomEncouragement}
           .clear-button {
             padding: 0.6rem 1rem !important;
           }
-        }
-        
-        /* Performance optimizations */
-        .chat-message {
-          will-change: transform, opacity;
-          transform: translateZ(0);
         }
         
         /* Focus styles for accessibility */
@@ -2650,39 +2360,6 @@ ${randomEncouragement}
           transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
         
-        /* Card hover effects */
-        .stat-card:hover {
-          transform: translateY(-4px);
-          box-shadow: 0 8px 25px rgba(0,0,0,0.15) !important;
-        }
-        
-        /* Gradient text effect */
-        .gradient-text {
-          background: linear-gradient(135deg, #4361ee 0%, #3a0ca3 100%);
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
-        }
-        
-        /* Shimmer loading effect */
-        .shimmer {
-          background: linear-gradient(90deg, 
-            rgba(255,255,255,0) 0%, 
-            rgba(255,255,255,0.2) 50%, 
-            rgba(255,255,255,0) 100%);
-          background-size: 200% 100%;
-          animation: shimmer 2s infinite;
-        }
-        
-        @keyframes shimmer {
-          0% {
-            background-position: -200% 0;
-          }
-          100% {
-            background-position: 200% 0;
-          }
-        }
-        
         /* Pulse animation for notifications */
         @keyframes pulse {
           0%, 100% {
@@ -2713,20 +2390,6 @@ ${randomEncouragement}
         
         .slide-in {
           animation: slideIn 0.3s ease-out;
-        }
-        
-        /* Fade-in animation for chat */
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-          }
-          to {
-            opacity: 1;
-          }
-        }
-        
-        .fade-in {
-          animation: fadeIn 0.5s ease-in;
         }
         
         /* Ripple effect for buttons */
@@ -2787,17 +2450,6 @@ ${randomEncouragement}
           
           .chat-message:last-child {
             scroll-snap-align: end;
-          }
-        }
-        
-        /* Optimize for reduced data mode */
-        @media (prefers-reduced-data: reduce) {
-          .gradient-bg {
-            background: #4361ee !important;
-          }
-          
-          .shimmer {
-            animation: none;
           }
         }
       `}</style>
