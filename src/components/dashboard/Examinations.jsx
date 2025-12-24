@@ -65,7 +65,7 @@ const Examinations = () => {
         return;
       }
 
-      // Fetch exams with cohort targeting
+      // Fetch exams with cohort targeting - CHANGED ORDER TO DESCENDING
       let query = supabase
         .from('examinations')
         .select(`
@@ -74,7 +74,7 @@ const Examinations = () => {
         `)
         .in('course_id', courseIds)
         .in('status', ['scheduled', 'published', 'active', 'completed'])
-        .order('start_time', { ascending: true });
+        .order('start_time', { ascending: false }); // CHANGED: ascending: false for newest first
 
       // Apply cohort targeting
       const cleanAY = (student.academic_year || '').trim().replace(/\s/g, '');
@@ -966,7 +966,7 @@ const Examinations = () => {
         <div style={styles.examsListHeader}>
           <h3 style={styles.examsListTitle}>
             <i className="fas fa-list-alt" style={{ marginRight: '10px', color: '#dc3545' }}></i>
-            Available Examinations
+            Available Examinations (Newest First)
           </h3>
           <div style={styles.examsCount}>
             Showing {exams.length} exam{exams.length !== 1 ? 's' : ''}
