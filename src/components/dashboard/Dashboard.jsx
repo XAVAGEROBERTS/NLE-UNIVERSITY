@@ -29,7 +29,6 @@ ChartJS.register(
 const Dashboard = () => {
   const { user } = useStudentAuth();
   const [loading, setLoading] = useState(true);
-  const [showAdminControls, setShowAdminControls] = useState(false);
   const [attendanceData, setAttendanceData] = useState([1, 1, 0, 1, 1]);
   const [dashboardStats, setDashboardStats] = useState({
     programProgress: 85,
@@ -44,6 +43,8 @@ const Dashboard = () => {
   const [studentDetails, setStudentDetails] = useState(null);
   const [chartError, setChartError] = useState(null);
   const [isMobile, setIsMobile] = useState(false);
+  const [semesterTotalDays, setSemesterTotalDays] = useState(0);
+  const [semesterPresentDays, setSemesterPresentDays] = useState(0);
 
   const calendarContainerRef = useRef(null);
   const chartRef = useRef(null);
@@ -148,223 +149,217 @@ const Dashboard = () => {
     const fetchDashboardData = async () => {
       try {
         setLoading(true);
-        
+
         if (!user?.email) {
           console.error('No user logged in');
           setLoading(false);
           return;
         }
 
-        // 1. Fetch complete student details
+        // 1. Fetch student details
         const { data: student, error: studentError } = await supabase
           .from('students')
           .select('*')
           .eq('email', user.email)
           .single();
 
-        if (studentError) throw studentError;
-        if (!student) throw new Error('Student not found');
+        if (studentError || !student) {
+          console.error('Student not found:', studentError);
+          setLoading(false);
+          return;
+        }
 
         setStudentDetails(student);
 
-        // 2. Fetch student's courses with grades for GPA calculation
-        const { data: studentCourses, error: coursesError } = await supabase
+        // Default values in case anything fails
+        let attendanceArray = [1, 1, 0, 1, 1]; // for chart
+        let semesterAttendanceRate = 0;
+        let localSemesterTotalDays = 0;
+        let localSemesterPresentDays = 0;
+        let pendingAssignmentsCount = 0;
+        let upcomingExamsCount = 0;
+        let cgpa = 0.0;
+
+        // 2. Fetch courses for GPA and active course filtering
+        const { data: studentCourses = [] } = await supabase
           .from('student_courses')
           .select(`
             *,
-            courses (
-              id,
-              course_code,
-              course_name,
-              credits,
-              year,
-              semester
-            )
+            courses (id, course_code, course_name, credits, year, semester)
           `)
           .eq('student_id', student.id);
 
-        // Calculate GPA using updated logic
-        let cgpa = 0.0;
-        if (!coursesError && studentCourses) {
-          // Transform data to match Results component structure
-          const coursesWithGrades = studentCourses.map(sc => {
-            const grade = sc.grade || getGradeFromMarks(sc.marks);
-            return {
-              ...sc,
-              grade: grade,
-              grade_points: sc.grade_points || getGradePoints(grade),
-              credits: sc.courses?.credits || 3,
-              status: sc.status
-            };
-          });
-          
-          cgpa = calculateGPA(coursesWithGrades);
-          
-          // 3. Calculate program progress
-          const programDuration = getProgramDuration(student.program);
-          const calculateProgramProgress = () => {
-            const completedSemesters = ((student.year_of_study - 1) * 2) + (student.semester - 1);
-            const progress = (completedSemesters / programDuration.semesters) * 100;
-            return Math.min(Math.round(progress), 85);
-          };
+        // Calculate CGPA
+        const coursesWithGrades = studentCourses.map(sc => ({
+          ...sc,
+          grade: sc.grade || getGradeFromMarks(sc.marks),
+          grade_points: sc.grade_points || getGradePoints(sc.grade || getGradeFromMarks(sc.marks)),
+          credits: sc.courses?.credits || 3
+        }));
+        cgpa = calculateGPA(coursesWithGrades);
 
-          // 4. Fetch attendance data
-          const { data: attendanceRecords, error: attendanceError } = await supabase
-            .from('attendance_records')
-            .select('date, status')
-            .eq('student_id', student.id)
-            .order('date', { ascending: false })
-            .limit(5);
+        // Get active (non-completed) course IDs
+        const activeCourseIds = studentCourses
+          .filter(c => c.status !== 'completed')
+          .map(sc => sc.course_id)
+          .filter(Boolean);
 
-          let attendanceArray = [1, 1, 0, 1, 1];
-          
-          if (!attendanceError && attendanceRecords && attendanceRecords.length > 0) {
-            attendanceArray = attendanceRecords.reverse().map(record => 
-              record.status === 'present' ? 1 : 0
-            );
-          }
+        // 3. Semester attendance (last ~4 months)
+        const semesterStart = new Date();
+        semesterStart.setMonth(semesterStart.getMonth() - 4);
+        semesterStart.setDate(1);
 
-          // 5. Get active courses (not completed)
-          const activeCourses = studentCourses.filter(c => c.status !== 'completed') || [];
-          const activeCourseIds = activeCourses.map(sc => sc.course_id) || [];
+        const { data: semesterRecords = [] } = await supabase
+          .from('attendance_records')
+          .select('date, status')
+          .eq('student_id', student.id)
+          .gte('date', semesterStart.toISOString().split('T')[0]);
 
-          // 6. Fetch pending assignments - ONLY for ACTIVE courses (not completed)
-          let pendingAssignmentsCount = 0;
-          if (activeCourseIds.length > 0) {
-            const { data: allAssignments, error: assignmentsError } = await supabase
-              .from('assignments')
-              .select('id, course_id')
-              .eq('status', 'published')
-              .gt('due_date', new Date().toISOString());
+        localSemesterTotalDays = semesterRecords.length;
+        localSemesterPresentDays = semesterRecords.filter(r => r.status === 'present').length;
+        semesterAttendanceRate = localSemesterTotalDays > 0
+          ? Math.round((localSemesterPresentDays / localSemesterTotalDays) * 100)
+          : 0;
 
-            if (!assignmentsError && allAssignments) {
-              // Filter assignments to only include those for active courses
-              const pendingAssignments = allAssignments.filter(assignment => 
-                activeCourseIds.includes(assignment.course_id)
-              );
-              
-              pendingAssignmentsCount = pendingAssignments.length;
-            }
-          }
+        // Set semester state
+        setSemesterTotalDays(localSemesterTotalDays);
+        setSemesterPresentDays(localSemesterPresentDays);
 
-          // 7. Fetch upcoming exams - ONLY for ACTIVE courses (not completed)
-          let upcomingExamsCount = 0;
-          if (activeCourseIds.length > 0) {
-            const { data: allExams, error: examsError } = await supabase
-              .from('examinations')
-              .select('id, course_id')
-              .eq('status', 'published')
-              .gt('start_time', new Date().toISOString());
+        
+          // 4. Current week attendance for chart (Monday to Sunday)
+    const today = new Date();
+    const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    const startOfWeek = new Date(today);
+    startOfWeek.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1)); // Monday
+    startOfWeek.setHours(0, 0, 0, 0);
 
-            if (!examsError && allExams) {
-              // Filter exams to only include those for active courses
-              const upcomingExams = allExams.filter(exam => 
-                activeCourseIds.includes(exam.course_id)
-              );
-              
-              upcomingExamsCount = upcomingExams.length;
-            }
-          }
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 6); // Sunday
+    endOfWeek.setHours(23, 59, 59, 999);
 
-          // 8. Fetch financial summary
-          const { data: financial } = await supabase
-            .from('financial_records')
-            .select('amount, balance_due, status, academic_year')
-            .eq('student_id', student.id)
-            .eq('academic_year', student.academic_year);
+    const { data: weekRecords = [] } = await supabase
+      .from('attendance_records')
+      .select('date, status')
+      .eq('student_id', student.id)
+      .gte('date', startOfWeek.toISOString().split('T')[0])
+      .lte('date', endOfWeek.toISOString().split('T')[0])
+      .order('date', { ascending: true });
 
-          let financialSummary = { paid: 0, balance: 0 };
-          if (financial) {
-            financialSummary = {
-              paid: financial
-                .filter(f => f.status === 'paid')
-                .reduce((sum, f) => sum + parseFloat(f.amount || 0), 0),
-              balance: financial
-                .filter(f => f.status === 'partial')
-                .reduce((sum, f) => sum + parseFloat(f.balance_due || 0), 0) +
-                financial
-                  .filter(f => f.status === 'pending')
-                  .reduce((sum, f) => sum + parseFloat(f.amount || 0), 0)
-            };
-          }
+    // Create attendance array: index 0 = Monday, 6 = Sunday
+    const weekDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const attendanceMap = {};
+    weekRecords.forEach(record => {
+      const date = new Date(record.date);
+      const dayIndex = date.getDay(); // 0=Sun → adjust to 0=Mon
+      const adjustedIndex = dayIndex === 0 ? 6 : dayIndex - 1;
+      attendanceMap[adjustedIndex] = record.status === 'present' ? 1 : 0;
+    });
 
-          // 9. Fetch upcoming lectures for the week - ONLY for ACTIVE courses
-          const today = new Date();
-          const nextWeek = new Date();
-          nextWeek.setDate(today.getDate() + 7);
+    // Build final array: 1 = present, 0 = absent, null = no lecture that day
+    attendanceArray = weekDays.map((_, index) => attendanceMap[index] ?? null);
 
-          let lectures = [];
-          if (activeCourseIds.length > 0) {
-            const { data: allLectures, error: lecturesError } = await supabase
-              .from('lectures')
-              .select(`
-                *,
-                courses (course_code, course_name),
-                lecturers (full_name)
-              `)
-              .gte('scheduled_date', today.toISOString().split('T')[0])
-              .lte('scheduled_date', nextWeek.toISOString().split('T')[0])
-              .in('status', ['scheduled', 'ongoing'])
-              .order('scheduled_date', { ascending: true })
-              .order('start_time', { ascending: true });
+    // For chart: treat null (no lecture) as neutral (e.g., 0.5 or keep as null for styling)
+    attendanceArray = weekDays.map((_, index) => attendanceMap[index] ?? null);
+        // 5. Pending assignments (only active courses)
+        if (activeCourseIds.length > 0) {
+          const { data: assignments = [] } = await supabase
+            .from('assignments')
+            .select('id')
+            .in('course_id', activeCourseIds)
+            .eq('status', 'published')
+            .gt('due_date', new Date().toISOString());
 
-            if (!lecturesError && allLectures) {
-              // Filter lectures to only include those for active courses
-              lectures = allLectures.filter(lecture => 
-                activeCourseIds.includes(lecture.course_id)
-              );
-            }
-          }
-
-          let formattedLectures = [];
-          if (lectures) {
-            formattedLectures = lectures.map(lecture => {
-              const startTime = lecture.start_time || '09:00';
-              const endTime = lecture.end_time || '11:00';
-              const startDate = new Date(`2000-01-01T${startTime}`);
-              const endDate = new Date(`2000-01-01T${endTime}`);
-              const duration = Math.round((endDate - startDate) / 60000);
-              
-              return {
-                id: lecture.id,
-                title: lecture.courses?.course_name || lecture.title || 'Untitled Lecture',
-                date: lecture.scheduled_date,
-                time: startTime,
-                endTime: endTime,
-                lecturer: lecture.lecturers?.full_name || 'Unknown Lecturer',
-                duration: duration,
-                courseCode: lecture.courses?.course_code || 'N/A',
-                google_meet_link: lecture.google_meet_link,
-                status: lecture.status
-              };
-            });
-          }
-
-          // Update all states
-          setDashboardStats({
-            programProgress: calculateProgramProgress(),
-            pendingAssignments: pendingAssignmentsCount,
-            upcomingExams: upcomingExamsCount,
-            financialPaid: financialSummary.paid,
-            financialBalance: financialSummary.balance,
-            cgpa: cgpa,
-            attendanceRate: Math.round((attendanceArray.filter(val => val === 1).length / attendanceArray.length) * 100)
-          });
-
-          setAttendanceData(attendanceArray);
-          setUpcomingLectures(formattedLectures);
+          pendingAssignmentsCount = assignments.length;
         }
-      } catch (error) {
-        console.error('Error fetching dashboard data:', error);
+
+        // 6. Upcoming exams (only active courses)
+        if (activeCourseIds.length > 0) {
+          const { data: exams = [] } = await supabase
+            .from('examinations')
+            .select('id')
+            .in('course_id', activeCourseIds)
+            .eq('status', 'published')
+            .gt('start_time', new Date().toISOString());
+
+          upcomingExamsCount = exams.length;
+        }
+
+        // 7. Financial summary
+        const { data: financial = [] } = await supabase
+          .from('financial_records')
+          .select('amount, balance_due, status')
+          .eq('student_id', student.id)
+          .eq('academic_year', student.academic_year);
+
+        const financialSummary = {
+          paid: financial.filter(f => f.status === 'paid').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0),
+          balance: financial.filter(f => f.status === 'partial' || f.status === 'pending')
+            .reduce((sum, f) => sum + (parseFloat(f.balance_due || f.amount) || 0), 0)
+        };
+
+        // 8. Upcoming lectures (this week, active courses only)
+         // 8. Upcoming lectures (this week, active courses only)
+    const currentDate = new Date();
+    const nextWeek = new Date(currentDate);
+    nextWeek.setDate(currentDate.getDate() + 7);
+        let formattedLectures = [];
+        if (activeCourseIds.length > 0) {
+          const { data: lectures = [] } = await supabase
+            .from('lectures')
+            .select(`
+              *,
+              courses(course_code, course_name),
+              lecturers(full_name)
+            `)
+            .in('course_id', activeCourseIds)
+            .gte('scheduled_date', today.toISOString().split('T')[0])
+            .lte('scheduled_date', nextWeek.toISOString().split('T')[0])
+            .in('status', ['scheduled', 'ongoing'])
+            .order('scheduled_date')
+            .order('start_time');
+
+          formattedLectures = lectures.map(l => ({
+            id: l.id,
+            title: l.courses?.course_name || l.title || 'Lecture',
+            date: l.scheduled_date,
+            time: l.start_time || '09:00',
+            endTime: l.end_time || '11:00',
+            lecturer: l.lecturers?.full_name || 'Unknown',
+            duration: 120,
+            courseCode: l.courses?.course_code || 'N/A',
+            google_meet_link: l.google_meet_link,
+            status: l.status
+          }));
+        }
+
+        // Program progress
+        const programDuration = getProgramDuration(student.program);
+        const completedSemesters = ((student.year_of_study - 1) * 2) + (student.semester - 1);
+        const programProgress = Math.min(Math.round((completedSemesters / programDuration.semesters) * 100), 100);
+
+        // Final state updates
+        setAttendanceData(attendanceArray);
+
         setDashboardStats({
-          programProgress: 85,
-          pendingAssignments: 3,
-          upcomingExams: 2,
-          financialPaid: 7500,
-          financialBalance: 2550,
-          cgpa: 0.0,
-          attendanceRate: 80
+          programProgress,
+          pendingAssignments: pendingAssignmentsCount,
+          upcomingExams: upcomingExamsCount,
+          financialPaid: financialSummary.paid,
+          financialBalance: financialSummary.balance,
+          cgpa,
+          attendanceRate: semesterAttendanceRate
         });
+
+        setUpcomingLectures(formattedLectures);
+
+      } catch (error) {
+        console.error('Error in fetchDashboardData:', error);
+        // Safe fallback
+        setAttendanceData([1, 1, 0, 1, 1]);
+        setDashboardStats(prev => ({
+          ...prev,
+          attendanceRate: 0
+        }));
       } finally {
         setLoading(false);
       }
@@ -384,32 +379,29 @@ const Dashboard = () => {
     if (!ctx) return false;
 
     try {
-      const labels = [];
-      for (let i = 4; i >= 0; i--) {
-        const date = new Date();
-        date.setDate(date.getDate() - i);
-        labels.push(date.toLocaleDateString('en-US', { weekday: 'short' }));
-      }
+      const weekDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
       const chart = new ChartJS(ctx, {
         type: 'line',
         data: {
-          labels: labels,
+          labels: weekDays,
           datasets: [{
-            label: 'Attendance',
-            data: attendanceData,
+            label: 'This Week',
+            data: attendanceData.map(val => val === null ? null : val), // null = no lecture
             backgroundColor: 'rgba(46, 204, 113, 0.3)',
             borderColor: 'rgba(46, 204, 113, 1)',
             borderWidth: 2,
             fill: true,
             tension: 0.3,
             pointBackgroundColor: attendanceData.map(val => 
-              val === 1 ? 'rgba(46, 204, 113, 1)' : 'rgba(231, 76, 60, 1)'
+              val === 1 ? 'rgba(46, 204, 113, 1)' : 
+              val === 0 ? 'rgba(231, 76, 60, 1)' : 
+              'rgba(150, 150, 150, 0.6)' // grey for no lecture
             ),
             pointBorderColor: '#fff',
             pointBorderWidth: 2,
-            pointRadius: 6,
-            pointHoverRadius: 8
+            pointRadius: 7,
+            pointHoverRadius: 9
           }]
         },
         options: {
@@ -420,6 +412,7 @@ const Dashboard = () => {
             tooltip: {
               callbacks: {
                 label: function(context) {
+                  if (context.parsed.y === null) return 'No lecture';
                   return context.parsed.y === 1 ? 'Present' : 'Absent';
                 }
               }
@@ -432,13 +425,18 @@ const Dashboard = () => {
               ticks: {
                 stepSize: 1,
                 callback: function(value) {
-                  return value === 1 ? 'Present' : 'Absent';
+                  if (value === 1) return 'Present';
+                  if (value === 0) return 'Absent';
+                  return '';
                 }
               },
               grid: { drawBorder: false }
             },
             x: {
-              grid: { display: false }
+              grid: { display: false },
+              ticks: {
+                font: { weight: '500' }
+              }
             }
           }
         }
@@ -524,42 +522,6 @@ const Dashboard = () => {
     calendarContainerRef.current.innerHTML = calendarHTML;
   }, []);
 
-  // Handle attendance toggle
-  const handleToggleDayAttendance = useCallback((index) => {
-    if (!studentDetails?.id) return;
-
-    const newData = [...attendanceData];
-    newData[index] = newData[index] === 1 ? 0 : 1;
-    
-    const date = new Date();
-    date.setDate(date.getDate() - (4 - index));
-    
-    supabase
-      .from('attendance_records')
-      .upsert({
-        student_id: studentDetails.id,
-        date: date.toISOString().split('T')[0],
-        status: newData[index] === 1 ? 'present' : 'absent',
-        day_of_week: date.getDay(),
-        recorded_by: studentDetails.id
-      }, {
-        onConflict: 'student_id, date'
-      })
-      .then(({ error }) => {
-        if (error) {
-          console.error('Error updating attendance:', error);
-        } else {
-          setAttendanceData(newData);
-        }
-      });
-  }, [attendanceData, studentDetails]);
-
-  // Save attendance changes
-  const saveAttendanceChanges = useCallback(() => {
-    alert('Attendance updated successfully!');
-    setShowAdminControls(false);
-  }, []);
-
   // Initialize chart
   useEffect(() => {
     if (!loading && chartCanvasRef.current) {
@@ -605,17 +567,20 @@ const Dashboard = () => {
     return `${hour12}:${minutes} ${ampm}`;
   };
 
-  const calculateAttendanceStats = (data) => {
-    const presentDays = data.filter(day => day === 1).length;
-    const rate = Math.round((presentDays / data.length) * 100);
-    return {
-      presentDays,
-      rate,
-      summary: `Last ${data.length} lecture days: ${rate}% (${presentDays}/${data.length} days)`
-    };
-  };
+  const calculateAttendanceStats = (recentData, semesterRate, totalDays, presentDays) => {
+    const recentPresent = recentData.filter(d => d === 1).length;
+    const recentRate = recentData.length > 0 
+      ? Math.round((recentPresent / recentData.length) * 100) 
+      : 0;
+    const weekPresent = recentData.filter(d => d === 1).length;
+    const weekRecorded = recentData.filter(d => d !== null).length;
+    const weekRate = weekRecorded > 0 ? Math.round((weekPresent / weekRecorded) * 100) : 0;
 
-  const attendanceStats = calculateAttendanceStats(attendanceData);
+    const summary = totalDays > 0
+      ? `This Semester: ${semesterRate}% (${presentDays}/${totalDays} days) • This Week: ${weekRate}% (${weekPresent}/${weekRecorded} days)`
+      : `This Semester: No records yet • This Week: ${weekRate}%`;
+    return { rate: recentRate, summary };
+  };
 
   const addToCalendar = (lecture) => {
     const event = {
@@ -948,6 +913,18 @@ const Dashboard = () => {
     </div>
   );
 
+  // Safe attendance stats calculation - always defined
+  const attendanceStats = calculateAttendanceStats(
+    attendanceData,
+    dashboardStats.attendanceRate,
+    semesterTotalDays,
+    semesterPresentDays
+  );
+
+  const displayAttendanceSummary = loading 
+    ? 'Loading attendance data...' 
+    : attendanceStats.summary;
+    
   if (loading) {
     return (
       <div className="dashboard-spinner" style={{ 
@@ -1149,35 +1126,16 @@ const Dashboard = () => {
                 <i className="fas fa-user-check" style={{ color: '#2ecc71', fontSize: 'clamp(16px, 3vw, 20px)' }}></i>
               </div>
             </div>
-            {/* <button 
-              className="btn btn-sm btn-warning" 
-              onClick={() => setShowAdminControls(!showAdminControls)}
-              style={{
-                backgroundColor: '#ffc107',
-                color: '#212529',
-                border: 'none',
-                padding: 'clamp(6px, 1.5vw, 8px) clamp(10px, 2vw, 12px)',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '5px',
-                whiteSpace: 'nowrap',
-                flexShrink: '0',
-              }}
-            >
-              <i className="fas fa-edit"></i> {showAdminControls ? 'Hide Controls' : 'Edit'}
-            </button> */}
+            {/* Edit button removed - admin will edit directly from Supabase table */}
           </div>
           <div className="card-content" style={{ flex: '1' }}>
             <p id="attendanceSummary" style={{ 
               marginBottom: 'clamp(12px, 2.5vw, 15px)', 
               fontWeight: '500',
               fontSize: 'clamp(0.85rem, 2vw, 0.95rem)',
-              lineHeight: '1.4'
+              lineHeight: '1.4',
             }}>
-              {attendanceStats.summary}
+              {displayAttendanceSummary}
             </p>
             
             {chartError ? (
@@ -1230,81 +1188,7 @@ const Dashboard = () => {
               </div>
             )}
             
-            {/* Admin controls */}
-            {showAdminControls && (
-              <div id="adminControls" className="admin-controls" style={{
-                backgroundColor: '#f8f9fa',
-                padding: 'clamp(12px, 2.5vw, 15px)',
-                borderRadius: '8px',
-                marginTop: 'clamp(12px, 2.5vw, 15px)',
-                border: '1px solid #e9ecef'
-              }}>
-                <p className="text-muted" style={{ 
-                  color: '#6c757d', 
-                  marginBottom: '10px',
-                  fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
-                }}>
-                  Toggle days attended:
-                </p>
-                <div className="day-toggles" style={{
-                  display: 'flex',
-                  gap: 'clamp(6px, 1.5vw, 8px)',
-                  margin: '10px 0',
-                  flexWrap: 'wrap'
-                }}>
-                  {attendanceData.map((attendance, index) => {
-                    const date = new Date();
-                    date.setDate(date.getDate() - (attendanceData.length - 1 - index));
-                    const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
-                    
-                    return (
-                      <button
-                        key={index}
-                        className={`day-toggle ${attendance === 1 ? 'btn-present' : 'btn-absent'}`}
-                        onClick={() => handleToggleDayAttendance(index)}
-                        style={{
-                          padding: 'clamp(6px, 1.5vw, 8px) clamp(12px, 2vw, 16px)',
-                          border: 'none',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                          fontWeight: '500',
-                          transition: 'all 0.3s ease',
-                          backgroundColor: attendance === 1 ? '#2ecc71' : '#e74c3c',
-                          color: 'white',
-                          flex: '1 0 auto',
-                          minWidth: '60px',
-                          fontSize: 'clamp(0.8rem, 1.8vw, 0.9rem)'
-                        }}
-                      >
-                        {dayName}
-                      </button>
-                    );
-                  })}
-                </div>
-                <button 
-                  id="saveAttendance" 
-                  className="btn btn-success mt-2"
-                  onClick={saveAttendanceChanges}
-                  style={{
-                    backgroundColor: '#28a745',
-                    color: 'white',
-                    border: 'none',
-                    padding: 'clamp(8px, 1.5vw, 10px) clamp(12px, 2vw, 16px)',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '5px',
-                    marginTop: '10px',
-                    width: '100%',
-                    fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
-                  }}
-                >
-                  <i className="fas fa-save"></i> Save Changes
-                </button>
-              </div>
-            )}
+            {/* Admin controls removed - admin will edit directly from Supabase table */}
           </div>
         </div>
 
@@ -1495,7 +1379,7 @@ const Dashboard = () => {
                 margin: '5px 0 0 0', 
                 fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)', 
                 color: '#666' 
-              }}>
+                }}>
                 Balance: ${dashboardStats.financialBalance.toLocaleString()}
               </p>
             </div>
@@ -1658,11 +1542,6 @@ const Dashboard = () => {
             gap: 12px;
           }
           
-          .card-header button {
-            width: 100%;
-            justify-content: center;
-          }
-          
           .mobile-lecture-card:hover {
             transform: translateY(-2px);
             transition: transform 0.3s ease;
@@ -1673,10 +1552,6 @@ const Dashboard = () => {
         @media (max-width: 480px) {
           .stats-row {
             grid-template-columns: 1fr;
-          }
-          
-          .day-toggles button {
-            flex: 1 0 45%;
           }
           
           .mobile-lecture-card {
