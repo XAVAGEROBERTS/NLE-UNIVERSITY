@@ -1,9 +1,12 @@
+// components/Examinations.jsx
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
 import { useStudentAuth } from '../../context/StudentAuthContext';
+import { checkExamClearance } from '../../utils/clearanceUtils';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
+import './Examinations.css';
 
 const Examinations = () => {
   const navigate = useNavigate();
@@ -11,8 +14,12 @@ const Examinations = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [studentInfo, setStudentInfo] = useState(null);
+  const [clearanceStatus, setClearanceStatus] = useState(null);
   const { user } = useStudentAuth();
   const [isMobile, setIsMobile] = useState(false);
+  const [showClearanceModal, setShowClearanceModal] = useState(false);
+  const [checkingClearance, setCheckingClearance] = useState(false);
+  const [activeTab, setActiveTab] = useState('all'); // 'all', 'upcoming', 'graded', 'submitted'
   
   // Check screen size
   useEffect(() => {
@@ -28,11 +35,11 @@ const Examinations = () => {
 
   useEffect(() => {
     if (user?.email) {
-      fetchExams();
+      fetchStudentData();
     }
   }, [user]);
 
-  const fetchExams = async () => {
+  const fetchStudentData = async () => {
     try {
       setLoading(true);
       setError(null);
@@ -40,44 +47,97 @@ const Examinations = () => {
       // Get student data
       const { data: student, error: studentError } = await supabase
         .from('students')
-        .select('id, full_name, student_id, program, year_of_study, semester, academic_year, program_id')
+        .select(`
+          id, 
+          full_name, 
+          student_id, 
+          program, 
+          program_code,
+          year_of_study, 
+          semester, 
+          academic_year, 
+          program_id, 
+          email, 
+          phone,
+          department_code
+        `)
         .eq('email', user.email)
         .single();
 
       if (studentError) throw new Error(`Student data error: ${studentError.message}`);
       if (!student) throw new Error('Student not found');
 
+      console.log('Student data loaded:', student);
       setStudentInfo(student);
 
+      // Check exam clearance
+      setCheckingClearance(true);
+      const clearance = await checkExamClearance(
+        student.id,
+        student.academic_year || '2025/2029',
+        student.semester || 1
+      );
+      
+      console.log('Clearance result:', clearance);
+      setClearanceStatus(clearance);
+      setCheckingClearance(false);
+
+      // Always fetch exams, but mark if not cleared
+      await fetchExams(student);
+
+      // Show clearance modal if not cleared
+      if (clearance && !clearance.cleared) {
+        setTimeout(() => {
+          setShowClearanceModal(true);
+        }, 1000);
+      }
+
+    } catch (error) {
+      console.error('Error fetching student data:', error);
+      setError(`Failed to load examinations: ${error.message}`);
+      setExams([]);
+      setCheckingClearance(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+
+  const fetchExams = async (student) => {
+    try {
       // Fetch student's enrolled courses - ONLY non-completed courses
       const { data: studentCourses, error: coursesError } = await supabase
         .from('student_courses')
         .select('course_id, status')
         .eq('student_id', student.id)
-        .eq('status', 'enrolled');
+        .neq('status', 'completed');
 
-      if (coursesError) throw new Error(`Courses error: ${coursesError.message}`);
+      if (coursesError) {
+        console.error('Courses error:', coursesError);
+        throw new Error(`Courses error: ${coursesError.message}`);
+      }
 
       const courseIds = studentCourses?.map(sc => sc.course_id) || [];
+      console.log('Enrolled course IDs:', courseIds);
+
       if (courseIds.length === 0) {
         setExams([]);
-        setLoading(false);
         return;
       }
 
-      // Fetch exams with cohort targeting - CHANGED ORDER TO DESCENDING
+      // Fetch exams with cohort targeting
       let query = supabase
         .from('examinations')
         .select(`
           *,
-          courses (id, course_code, course_name)
+          courses (id, course_code, course_name, credits)
         `)
         .in('course_id', courseIds)
         .in('status', ['scheduled', 'published', 'active', 'completed'])
-        .order('start_time', { ascending: false }); // CHANGED: ascending: false for newest first
+        .order('start_time', { ascending: true });
 
       // Apply cohort targeting
-      const cleanAY = (student.academic_year || '').trim().replace(/\s/g, '');
+      const cleanAY = (student.academic_year || '2025/2029').trim().replace(/\s/g, '');
       
       if (cleanAY || student.year_of_study || student.semester || student.program_id) {
         const orConditions = [];
@@ -108,7 +168,13 @@ const Examinations = () => {
       }
 
       const { data: examsData, error: examsError } = await query;
-      if (examsError) throw new Error(`Exams error: ${examsError.message}`);
+      
+      if (examsError) {
+        console.error('Exams error:', examsError);
+        throw new Error(`Exams error: ${examsError.message}`);
+      }
+
+      console.log('Exams found:', examsData?.length || 0);
 
       // Fetch student's exam submissions
       const { data: submissionsData, error: submissionsError } = await supabase
@@ -116,7 +182,9 @@ const Examinations = () => {
         .select('*')
         .eq('student_id', student.id);
 
-      if (submissionsError) throw new Error(`Submissions error: ${submissionsError.message}`);
+      if (submissionsError) {
+        console.error('Submissions error:', submissionsError);
+      }
 
       // Process exams
       const processedExams = examsData ? examsData.map(exam => {
@@ -181,6 +249,7 @@ const Examinations = () => {
           courseId: exam.course_id,
           courseCode: exam.courses?.course_code || 'N/A',
           courseName: exam.courses?.course_name || 'N/A',
+          courseCredits: exam.courses?.credits || 0,
           examType: exam.exam_type,
           startTime: exam.start_time,
           endTime: exam.end_time,
@@ -200,22 +269,32 @@ const Examinations = () => {
           canStart: canStart,
           canResume: canResume,
           hasIncompleteSubmission: isStartedButNotSubmitted,
-          isOnline: isOnlineExam
+          isOnline: isOnlineExam,
+          targetDetails: {
+            academicYear: exam.target_academic_year,
+            yearOfStudy: exam.target_year_of_study,
+            semester: exam.target_semester,
+            programId: exam.target_program_id
+          }
         };
       }) : [];
 
+      console.log('Processed exams:', processedExams);
       setExams(processedExams);
     } catch (error) {
       console.error('Error fetching exams:', error);
       setError(`Failed to load examinations: ${error.message}`);
       setExams([]);
-    } finally {
-      setLoading(false);
     }
   };
 
-  // Start/resume exam function
   const handleStartExam = (exam) => {
+    // Check clearance first
+    if (clearanceStatus && !clearanceStatus.cleared) {
+      setShowClearanceModal(true);
+      return;
+    }
+
     // Check if exam is online
     const isOnlineExam = exam.isOnline;
     
@@ -228,7 +307,6 @@ const Examinations = () => {
     navigate(`/examinations/take/${exam.id}`);
   };
 
-  // Format date
   const formatDate = (dateString) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', {
@@ -241,27 +319,17 @@ const Examinations = () => {
     }) + ' EAT';
   };
 
-  // Get exam status
   const getExamStatus = (exam) => {
-    // First, check if it's graded
     if (exam.graded) return 'graded';
-    
-    // Then check if it's submitted
     if (exam.submitted) return 'submitted';
-    
-    // Then check status from exam object
     if (exam.status) return exam.status;
-    
-    // Fallback logic
     if (exam.hasIncompleteSubmission) return 'active';
     if (exam.isActive) return 'active';
     if (exam.isUpcoming) return 'upcoming';
     if (exam.isEnded) return 'ended';
-    
     return 'upcoming';
   };
 
-  // Get status color
   const getStatusColor = (status) => {
     switch(status) {
       case 'graded': return '#6f42c1';
@@ -274,7 +342,6 @@ const Examinations = () => {
     }
   };
 
-  // Get time until start
   const getTimeUntilStart = (exam) => {
     const now = new Date();
     const startTime = new Date(exam.startTime);
@@ -282,12 +349,15 @@ const Examinations = () => {
     if (now >= startTime) return 'Started';
     
     const diffSeconds = Math.floor((startTime - now) / 1000);
-    const hours = Math.floor(diffSeconds / 3600);
+    const days = Math.floor(diffSeconds / (3600 * 24));
+    const hours = Math.floor((diffSeconds % (3600 * 24)) / 3600);
     const minutes = Math.floor((diffSeconds % 3600) / 60);
-    return `${hours}h ${minutes}m`;
+    
+    if (days > 0) return `${days}d ${hours}h`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    return `${minutes}m`;
   };
 
-  // Navigate to results page
   const navigateToResults = (exam) => {
     navigate(`/examinations/results/${exam.id}`, {
       state: {
@@ -300,13 +370,47 @@ const Examinations = () => {
     });
   };
 
-  // Download exam permit
+  const refreshExams = () => {
+    fetchStudentData();
+  };
+
+  const recheckClearance = async () => {
+    if (!studentInfo) return;
+    
+    setCheckingClearance(true);
+    const clearance = await checkExamClearance(
+      studentInfo.id,
+      studentInfo.academic_year || '2025/2029',
+      studentInfo.semester || 1
+    );
+    
+    setClearanceStatus(clearance);
+    setCheckingClearance(false);
+    
+    if (clearance && clearance.cleared) {
+      setShowClearanceModal(false);
+    }
+  };
+
   const downloadExamPermit = async () => {
     try {
       if (!studentInfo) {
         alert('Student information not available.');
         return;
       }
+
+      // Check clearance before allowing download
+      if (clearanceStatus && !clearanceStatus.cleared) {
+        setShowClearanceModal(true);
+        return;
+      }
+
+      // Filter exams for the permit (only upcoming and active)
+      const permitExams = exams.filter(exam => 
+        !exam.submitted && 
+        !exam.graded && 
+        (exam.status === 'upcoming' || exam.status === 'active')
+      );
 
       const permitElement = document.createElement('div');
       permitElement.id = 'exam-permit-content';
@@ -321,7 +425,7 @@ const Examinations = () => {
       permitElement.innerHTML = `
         <div style="text-align: center; margin-bottom: 30px; border-bottom: 2px solid #007bff; padding-bottom: 20px;">
           <h1 style="color: #007bff; margin-bottom: 10px;">UNIVERSITY EXAMINATION PERMIT</h1>
-          <h2 style="color: #333; margin: 0;">Academic Year: ${studentInfo.academic_year || '2024/2025'}</h2>
+          <h2 style="color: #333; margin: 0;">Academic Year: ${studentInfo.academic_year || '2025/2029'}</h2>
         </div>
         
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px;">
@@ -339,6 +443,9 @@ const Examinations = () => {
               <strong>Program:</strong> ${studentInfo.program}
             </div>
             <div style="margin-bottom: 10px;">
+              <strong>Program Code:</strong> ${studentInfo.program_code || 'N/A'}
+            </div>
+            <div style="margin-bottom: 10px;">
               <strong>Year of Study:</strong> ${studentInfo.year_of_study}
             </div>
             <div style="margin-bottom: 10px;">
@@ -348,41 +455,46 @@ const Examinations = () => {
           
           <div>
             <h3 style="color: #495057; margin-bottom: 15px; border-bottom: 1px solid #dee2e6; padding-bottom: 5px;">
-              EXAMINATION DETAILS
+              EXAMINATION CLEARANCE
             </h3>
+            <div style="margin-bottom: 10px;">
+              <strong>Clearance Status:</strong> 
+              <span style="color: ${clearanceStatus?.cleared ? '#28a745' : '#dc3545'}; font-weight: bold;">
+                ${clearanceStatus?.cleared ? 'CLEARED ✓' : 'NOT CLEARED ✗'}
+              </span>
+            </div>
+            <div style="margin-bottom: 10px;">
+              <strong>Financial Status:</strong> ${clearanceStatus?.financial?.notes || 'Checking...'}
+            </div>
+            <div style="margin-bottom: 10px;">
+              <strong>Attendance Status:</strong> ${clearanceStatus?.attendance?.notes || 'Checking...'}
+            </div>
             <div style="margin-bottom: 10px;">
               <strong>Issued Date:</strong> ${new Date().toLocaleDateString()}
             </div>
             <div style="margin-bottom: 10px;">
               <strong>Valid Until:</strong> End of Semester
             </div>
-            <div style="margin-bottom: 10px;">
-              <strong>Total Exams:</strong> ${exams.filter(e => !e.submitted && new Date(e.startTime) > new Date()).length}
-            </div>
-            <div style="margin-bottom: 10px;">
-              <strong>Status:</strong> Cleared for Examination
-            </div>
           </div>
         </div>
         
         <div style="margin-bottom: 30px;">
           <h3 style="color: #495057; margin-bottom: 15px; border-bottom: 1px solid #dee2e6; padding-bottom: 5px;">
-            SCHEDULED EXAMINATIONS
+            SCHEDULED EXAMINATIONS (${permitExams.length})
           </h3>
-          <table style="width: 100%; border-collapse: collapse;">
-            <thead>
-              <tr style="background-color: #f8f9fa;">
-                <th style="padding: 12px; text-align: left; border: 1px solid #dee2e6;">Course</th>
-                <th style="padding: 12px; text-align: left; border: 1px solid #dee2e6;">Exam Title</th>
-                <th style="padding: 12px; text-align: left; border: 1px solid #dee2e6;">Date & Time</th>
-                <th style="padding: 12px; text-align: left; border: 1px solid #dee2e6;">Location</th>
-                <th style="padding: 12px; text-align: left; border: 1px solid #dee2e6;">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${exams
-                .filter(e => !e.submitted)
-                .map(exam => `
+          ${permitExams.length > 0 ? `
+            <table style="width: 100%; border-collapse: collapse;">
+              <thead>
+                <tr style="background-color: #f8f9fa;">
+                  <th style="padding: 12px; text-align: left; border: 1px solid #dee2e6;">Course</th>
+                  <th style="padding: 12px; text-align: left; border: 1px solid #dee2e6;">Exam Title</th>
+                  <th style="padding: 12px; text-align: left; border: 1px solid #dee2e6;">Date & Time</th>
+                  <th style="padding: 12px; text-align: left; border: 1px solid #dee2e6;">Location</th>
+                  <th style="padding: 12px; text-align: left; border: 1px solid #dee2e6;">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${permitExams.map(exam => `
                   <tr>
                     <td style="padding: 10px; border: 1px solid #dee2e6;">${exam.courseCode}</td>
                     <td style="padding: 10px; border: 1px solid #dee2e6;">${exam.title}</td>
@@ -402,8 +514,14 @@ const Examinations = () => {
                     </td>
                   </tr>
                 `).join('')}
-            </tbody>
-          </table>
+              </tbody>
+            </table>
+          ` : `
+            <div style="text-align: center; padding: 40px; background-color: #f8f9fa; border-radius: 8px;">
+              <i class="fas fa-clipboard-list" style="font-size: 48px; color: #6c757d; margin-bottom: 20px;"></i>
+              <p>No upcoming exams scheduled for download.</p>
+            </div>
+          `}
         </div>
         
         <div style="
@@ -464,87 +582,318 @@ const Examinations = () => {
     }
   };
 
-  const refreshExams = () => {
-    fetchExams();
+  // Filter exams based on active tab
+  const filteredExams = exams.filter(exam => {
+    switch(activeTab) {
+      case 'upcoming':
+        return exam.status === 'upcoming' || exam.isUpcoming;
+      case 'active':
+        return exam.status === 'active' || exam.canStart || exam.canResume;
+      case 'submitted':
+        return exam.submitted && !exam.graded;
+      case 'graded':
+        return exam.graded;
+      default:
+        return true; // 'all'
+    }
+  });
+
+  // Render Clearance Modal
+  const renderClearanceModal = () => {
+    if (!showClearanceModal || !clearanceStatus) return null;
+
+    return (
+      <div className="clearance-modal-overlay">
+        <div className="clearance-modal">
+          <div className="clearance-modal-header">
+            <i className="fas fa-ban"></i>
+            <h3>Exam Access Restricted</h3>
+            <button 
+              className="clearance-modal-close"
+              onClick={() => setShowClearanceModal(false)}
+            >
+              <i className="fas fa-times"></i>
+            </button>
+          </div>
+          
+          <div className="clearance-modal-body">
+            <div className="clearance-status-summary">
+              <div className={`clearance-status-badge ${clearanceStatus.cleared ? 'cleared' : 'not-cleared'}`}>
+                <i className={`fas ${clearanceStatus.cleared ? 'fa-check-circle' : 'fa-ban'}`}></i>
+                <span>{clearanceStatus.cleared ? 'CLEARED' : 'NOT CLEARED'}</span>
+              </div>
+              <p className="clearance-modal-message">
+                {clearanceStatus.cleared 
+                  ? 'You are cleared to take examinations.'
+                  : 'You are not cleared to take examinations due to the following:'
+                }
+              </p>
+            </div>
+            
+            {!clearanceStatus.cleared && (
+              <>
+                <div className="clearance-issues">
+                  {!clearanceStatus.financial?.cleared && (
+                    <div className="clearance-issue financial-issue">
+                      <div className="clearance-issue-header">
+                        <i className="fas fa-money-bill-wave"></i>
+                        <h4>Financial Clearance Failed</h4>
+                        <span className="issue-status">NOT CLEARED</span>
+                      </div>
+                      <p className="issue-notes">{clearanceStatus.financial?.notes}</p>
+                      <div className="clearance-details">
+                        {clearanceStatus.financial?.details?.map((detail, idx) => (
+                          <div key={idx} className="clearance-detail">{detail}</div>
+                        ))}
+                      </div>
+                      {clearanceStatus.financial?.outstandingBalance > 0 && (
+                        <div className="outstanding-amount">
+                          <i className="fas fa-exclamation-circle"></i>
+                          <span>Outstanding Balance: $${clearanceStatus.financial.outstandingBalance.toLocaleString()}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
+                  {!clearanceStatus.attendance?.cleared && (
+                    <div className="clearance-issue attendance-issue">
+                      <div className="clearance-issue-header">
+                        <i className="fas fa-user-check"></i>
+                        <h4>Attendance Clearance Failed</h4>
+                        <span className="issue-status">NOT CLEARED</span>
+                      </div>
+                      <p className="issue-notes">{clearanceStatus.attendance?.notes}</p>
+                      <div className="clearance-details">
+                        {clearanceStatus.attendance?.details?.map((detail, idx) => (
+                          <div key={idx} className="clearance-detail">{detail}</div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                
+                <div className="clearance-requirements">
+                  <h4><i className="fas fa-list-check"></i> Requirements to be Cleared:</h4>
+                  <ul>
+                    <li>
+                      <i className="fas fa-money-check"></i>
+                      <span>All semester fees must be paid in full</span>
+                    </li>
+                    <li>
+                      <i className="fas fa-calendar-check"></i>
+                      <span>Minimum attendance of {clearanceStatus.requirements?.minimum_attendance_percentage || 75}%</span>
+                    </li>
+                    <li>
+                      <i className="fas fa-file-contract"></i>
+                      <span>No disciplinary issues on record</span>
+                    </li>
+                  </ul>
+                </div>
+                
+                <div className="clearance-instructions">
+                  <h4><i className="fas fa-lightbulb"></i> What to Do:</h4>
+                  <div className="instructions-grid">
+                    {!clearanceStatus.financial?.cleared && (
+                      <div className="instruction-card">
+                        <i className="fas fa-building-columns"></i>
+                        <h5>Visit Finance Office</h5>
+                        <p>Clear any outstanding fees and get a clearance certificate</p>
+                      </div>
+                    )}
+                    {!clearanceStatus.attendance?.cleared && (
+                      <div className="instruction-card">
+                        <i className="fas fa-user-graduate"></i>
+                        <h5>Contact Department</h5>
+                        <p>Submit absence excuses or check attendance records</p>
+                      </div>
+                    )}
+                    <div className="instruction-card">
+                      <i className="fas fa-headset"></i>
+                      <h5>Get Help</h5>
+                      <p>Contact your academic advisor for assistance</p>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+            
+            <div className="clearance-actions">
+              <button 
+                className="clearance-action-btn recheck-btn"
+                onClick={recheckClearance}
+                disabled={checkingClearance}
+              >
+                {checkingClearance ? (
+                  <>
+                    <i className="fas fa-spinner fa-spin"></i>
+                    Rechecking...
+                  </>
+                ) : (
+                  <>
+                    <i className="fas fa-sync-alt"></i>
+                    Recheck Clearance
+                  </>
+                )}
+              </button>
+              
+              {!clearanceStatus.financial?.cleared && (
+                <button 
+                  className="clearance-action-btn contact-btn"
+                  onClick={() => {
+                    const subject = encodeURIComponent(`Exam Clearance Issue - ${studentInfo?.student_id}`);
+                    const body = encodeURIComponent(
+                      `Student ID: ${studentInfo?.student_id}\n` +
+                      `Name: ${studentInfo?.full_name}\n` +
+                      `Program: ${studentInfo?.program}\n` +
+                      `Issue: ${clearanceStatus.financial?.notes}\n` +
+                      `Outstanding Balance: $${clearanceStatus.financial?.outstandingBalance || 0}`
+                    );
+                    window.location.href = `mailto:finance@university.edu?subject=${subject}&body=${body}`;
+                  }}
+                >
+                  <i className="fas fa-envelope"></i>
+                  Contact Finance
+                </button>
+              )}
+              
+              <button 
+                className="clearance-action-btn close-btn"
+                onClick={() => setShowClearanceModal(false)}
+              >
+                <i className="fas fa-times"></i>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   };
 
-  // =================== RENDER EXAM CARDS ===================
-  const renderMobileExamCard = (exam, index) => {
+  // Render Clearance Status Banner
+  const renderClearanceBanner = () => {
+    if (!clearanceStatus) return null;
+
+    const isCleared = clearanceStatus.cleared;
+
+    return (
+      <div className={`clearance-banner ${isCleared ? 'cleared' : 'not-cleared'}`}>
+        <div className="clearance-banner-content">
+          <div className="clearance-status">
+            <i className={`fas ${isCleared ? 'fa-check-circle' : 'fa-exclamation-triangle'}`}></i>
+            <div>
+              <h4>{isCleared ? 'EXAM CLEARANCE: GRANTED' : 'EXAM CLEARANCE: REQUIRED'}</h4>
+              <p>{isCleared ? 'You are cleared to take examinations' : 'Clearance required to access examinations'}</p>
+            </div>
+          </div>
+          
+          <div className="clearance-details">
+            <div className={`clearance-detail ${clearanceStatus.financial?.cleared ? 'success' : 'error'}`}>
+              <i className={`fas ${clearanceStatus.financial?.cleared ? 'fa-check' : 'fa-times'}`}></i>
+              <div>
+                <span className="detail-label">Financial</span>
+                <span className="detail-value">{clearanceStatus.financial?.cleared ? 'Cleared' : 'Pending'}</span>
+              </div>
+            </div>
+            <div className={`clearance-detail ${clearanceStatus.attendance?.cleared ? 'success' : 'error'}`}>
+              <i className={`fas ${clearanceStatus.attendance?.cleared ? 'fa-check' : 'fa-times'}`}></i>
+              <div>
+                <span className="detail-label">Attendance</span>
+                <span className="detail-value">{clearanceStatus.attendance?.cleared ? 'Cleared' : 'Pending'}</span>
+              </div>
+            </div>
+          </div>
+          
+          {!isCleared && (
+            <button 
+              className="clearance-banner-btn"
+              onClick={() => setShowClearanceModal(true)}
+            >
+              <i className="fas fa-info-circle"></i>
+              View Details
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // Render Mobile Exam Card
+  const renderMobileExamCard = (exam) => {
     const status = getExamStatus(exam);
     const statusColor = getStatusColor(status);
     const timeUntilStart = getTimeUntilStart(exam);
     const isOnlineExam = exam.isOnline;
+    const isCleared = clearanceStatus?.cleared;
     
     return (
-      <div 
-        key={exam.id} 
-        style={styles.mobileCard}
-      >
-        {/* Exam Header */}
-        <div style={styles.mobileCardHeader}>
-          <div style={styles.mobileCardStatusRow}>
-            <span style={{...styles.statusBadge, backgroundColor: statusColor}}>
+      <div className="mobile-exam-card" key={exam.id}>
+        <div className="mobile-exam-header">
+          <div className="mobile-exam-status-row">
+            <span 
+              className="mobile-status-badge"
+              style={{ backgroundColor: statusColor }}
+            >
               {status.toUpperCase()}
             </span>
-            <span style={styles.typeBadge}>
+            <span className="mobile-type-badge">
               {exam.examType.toUpperCase()}
             </span>
           </div>
           
-          <h4 style={styles.mobileCardTitle}>
+          <h4 className="mobile-exam-title">
             {exam.title}
           </h4>
           
-          <div style={styles.mobileCourseInfo}>
+          <div className="mobile-course-info">
             <i className="fas fa-book"></i>
             <span>{exam.courseCode}: {exam.courseName}</span>
+            <span className="mobile-course-credits">({exam.courseCredits} credits)</span>
           </div>
         </div>
 
-        {/* Exam Details */}
-        <div style={styles.mobileCardBody}>
-          <div style={styles.mobileDetailsGrid}>
-            <div>
-              <div style={styles.mobileDetailLabel}>
+        <div className="mobile-exam-body">
+          <div className="mobile-exam-details-grid">
+            <div className="mobile-exam-detail">
+              <div className="mobile-detail-label">
                 <i className="far fa-calendar-alt"></i> Start
               </div>
-              <div style={styles.mobileDetailValue}>
+              <div className="mobile-detail-value">
                 {formatDate(exam.startTime)}
               </div>
             </div>
-            <div>
-              <div style={styles.mobileDetailLabel}>
+            <div className="mobile-exam-detail">
+              <div className="mobile-detail-label">
                 <i className="fas fa-clock"></i> Duration
               </div>
-              <div style={styles.mobileDetailValue}>
+              <div className="mobile-detail-value">
                 {exam.duration} min
               </div>
             </div>
-            <div>
-              <div style={styles.mobileDetailLabel}>
+            <div className="mobile-exam-detail">
+              <div className="mobile-detail-label">
                 <i className="fas fa-chart-bar"></i> Marks
               </div>
-              <div style={styles.mobileDetailValue}>
+              <div className="mobile-detail-value">
                 {exam.totalMarks} marks
+                {exam.passingMarks && ` (Pass: ${exam.passingMarks})`}
               </div>
             </div>
-            <div>
-              <div style={styles.mobileDetailLabel}>
+            <div className="mobile-exam-detail">
+              <div className="mobile-detail-label">
                 <i className="fas fa-map-marker-alt"></i> Location
               </div>
-              <div style={styles.mobileDetailValue}>
+              <div className="mobile-detail-value">
                 {exam.location || 'TBA'}
               </div>
             </div>
           </div>
 
-          {/* Action Buttons */}
-          <div style={styles.mobileButtonGroup}>
-            {/* Main Action Button */}
+          <div className="mobile-exam-button-group">
             {exam.graded ? (
               <button 
                 onClick={() => navigateToResults(exam)}
-                style={styles.viewResultsButton}
+                className="mobile-view-results-btn"
               >
                 <i className="fas fa-chart-line"></i>
                 View Results
@@ -552,7 +901,7 @@ const Examinations = () => {
             ) : exam.submitted ? (
               <button 
                 disabled
-                style={styles.disabledButton}
+                className="mobile-disabled-btn"
               >
                 <i className="fas fa-check-circle"></i>
                 Awaiting Grading
@@ -560,23 +909,25 @@ const Examinations = () => {
             ) : exam.canResume ? (
               <button 
                 onClick={() => handleStartExam(exam)}
-                style={styles.resumeExamButton}
+                className="mobile-resume-exam-btn"
+                disabled={!isCleared}
               >
                 <i className="fas fa-history"></i>
-                RESUME EXAM
+                {isCleared ? 'RESUME EXAM' : 'CLEARANCE REQUIRED'}
               </button>
             ) : exam.canStart && isOnlineExam ? (
               <button 
                 onClick={() => handleStartExam(exam)}
-                style={styles.startExamButton}
+                className="mobile-start-exam-btn"
+                disabled={!isCleared}
               >
                 <i className="fas fa-play"></i>
-                START ONLINE EXAM
+                {isCleared ? 'START ONLINE EXAM' : 'CLEARANCE REQUIRED'}
               </button>
             ) : status === 'upcoming' ? (
               <button 
                 disabled
-                style={styles.disabledButton}
+                className="mobile-disabled-btn"
               >
                 <i className="fas fa-clock"></i>
                 Starts in {timeUntilStart}
@@ -584,7 +935,7 @@ const Examinations = () => {
             ) : (
               <button 
                 disabled
-                style={styles.disabledButton}
+                className="mobile-disabled-btn"
               >
                 <i className="fas fa-times-circle"></i>
                 Exam {isOnlineExam ? 'Closed' : 'Physical'}
@@ -596,138 +947,128 @@ const Examinations = () => {
     );
   };
 
-  // Render desktop exam card
-  const renderDesktopExamCard = (exam, index) => {
+  // Render Desktop Exam Card
+  const renderDesktopExamCard = (exam) => {
     const status = getExamStatus(exam);
     const statusColor = getStatusColor(status);
     const timeUntilStart = getTimeUntilStart(exam);
     const isOnlineExam = exam.isOnline;
+    const isCleared = clearanceStatus?.cleared;
     
     return (
       <div 
-        key={exam.id} 
-        style={{
-          ...styles.desktopCard,
-          borderLeft: `5px solid ${statusColor}`,
-          cursor: (exam.canStart || exam.canResume || exam.graded) && isOnlineExam ? 'pointer' : 'default',
-        }}
-        onMouseEnter={(e) => {
-          if (((exam.canStart || exam.canResume) && isOnlineExam) || exam.graded) {
-            e.currentTarget.style.transform = 'translateY(-4px)';
-            e.currentTarget.style.boxShadow = '0 8px 25px rgba(0,0,0,0.1)';
-          }
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.transform = 'translateY(0)';
-          e.currentTarget.style.boxShadow = 'none';
-        }}
+        className="desktop-exam-card"
+        key={exam.id}
+        style={{ borderLeft: `5px solid ${statusColor}` }}
       >
-        {/* Exam Header */}
-        <div style={styles.desktopCardHeader}>
+        <div className="desktop-exam-header">
           <div>
-            <div style={styles.desktopStatusRow}>
-              <span style={{...styles.desktopStatusBadge, backgroundColor: statusColor}}>
+            <div className="desktop-exam-status-row">
+              <span 
+                className="desktop-status-badge"
+                style={{ backgroundColor: statusColor }}
+              >
                 {status.toUpperCase()}
               </span>
-              <span style={styles.desktopTypeBadge}>
+              <span className="desktop-type-badge">
                 {exam.examType.toUpperCase()}
               </span>
+              <span className="desktop-course-code">
+                {exam.courseCode} ({exam.courseCredits} credits)
+              </span>
             </div>
-            <h4 style={styles.desktopCardTitle}>
+            <h4 className="desktop-exam-title">
               {exam.title}
             </h4>
+            <p className="desktop-course-name">
+              {exam.courseName}
+            </p>
           </div>
-          <div style={styles.desktopCardHeaderRight}>
-            <div style={styles.desktopCourseInfo}>
-              <i className="fas fa-book" style={{ marginRight: '8px' }}></i>
-              {exam.courseCode}: {exam.courseName}
-            </div>
-            <div style={styles.examId}>
+          <div className="desktop-exam-header-right">
+            <div className="desktop-exam-id">
               Exam ID: {exam.id.slice(0, 8).toUpperCase()}
             </div>
           </div>
         </div>
 
-        {/* Exam Details */}
-        <div style={styles.desktopCardBody}>
+        <div className="desktop-exam-body">
           {exam.description && (
-            <p style={styles.examDescription}>
+            <p className="desktop-exam-description">
               {exam.description}
             </p>
           )}
 
-          <div style={styles.desktopDetailsGrid}>
-            <div>
-              <div style={styles.desktopDetailLabel}>
-                <i className="far fa-calendar-alt" style={{ marginRight: '8px' }}></i>
+          <div className="desktop-exam-details-grid">
+            <div className="desktop-exam-detail">
+              <div className="desktop-detail-label">
+                <i className="far fa-calendar-alt"></i>
                 Start Time
               </div>
-              <div style={styles.desktopDetailValue}>
+              <div className="desktop-detail-value">
                 {formatDate(exam.startTime)}
               </div>
             </div>
-            <div>
-              <div style={styles.desktopDetailLabel}>
-                <i className="far fa-calendar-times" style={{ marginRight: '8px' }}></i>
+            <div className="desktop-exam-detail">
+              <div className="desktop-detail-label">
+                <i className="far fa-calendar-times"></i>
                 End Time
               </div>
-              <div style={styles.desktopDetailValue}>
+              <div className="desktop-detail-value">
                 {formatDate(exam.endTime)}
               </div>
             </div>
-            <div>
-              <div style={styles.desktopDetailLabel}>
-                <i className="fas fa-clock" style={{ marginRight: '8px' }}></i>
+            <div className="desktop-exam-detail">
+              <div className="desktop-detail-label">
+                <i className="fas fa-clock"></i>
                 Duration
               </div>
-              <div style={styles.desktopDetailValue}>
+              <div className="desktop-detail-value">
                 {exam.duration} minutes
               </div>
             </div>
-            <div>
-              <div style={styles.desktopDetailLabel}>
-                <i className="fas fa-chart-bar" style={{ marginRight: '8px' }}></i>
+            <div className="desktop-exam-detail">
+              <div className="desktop-detail-label">
+                <i className="fas fa-chart-bar"></i>
                 Total Marks
               </div>
-              <div style={styles.desktopDetailValue}>
+              <div className="desktop-detail-value">
                 {exam.totalMarks} marks
                 {exam.passingMarks && ` (Pass: ${exam.passingMarks})`}
               </div>
             </div>
             {exam.location && (
-              <div>
-                <div style={styles.desktopDetailLabel}>
-                  <i className="fas fa-map-marker-alt" style={{ marginRight: '8px' }}></i>
+              <div className="desktop-exam-detail">
+                <div className="desktop-detail-label">
+                  <i className="fas fa-map-marker-alt"></i>
                   Location
                 </div>
-                <div style={styles.desktopDetailValue}>
+                <div className="desktop-detail-value">
                   {exam.location}
                 </div>
               </div>
             )}
           </div>
 
-          {/* Action Area */}
-          <div style={styles.desktopActionArea}>
-            <div style={styles.rightActions}>
+          <div className="desktop-exam-action-area">
+            <div className="desktop-exam-right-actions">
               {exam.graded ? (
                 <>
-                  <div style={styles.gradedInfo}>
-                    <i className="fas fa-check-double" style={{ fontSize: '20px', color: '#6f42c1' }}></i>
+                  <div className="desktop-graded-info">
+                    <i className="fas fa-check-double"></i>
                     <div>
-                      <div style={{ fontWeight: 'bold', color: '#6f42c1' }}>
+                      <div className="graded-status">
                         Graded {exam.submission?.graded_at ? 
                           `on ${new Date(exam.submission.graded_at).toLocaleDateString()}` : 
                           'and ready to view'}
                       </div>
-                      <div style={{ fontSize: '12px', color: '#28a745' }}>
+                      <div className="graded-score">
                         Score: {exam.submission?.total_marks_obtained || 'N/A'} / {exam.totalMarks}
                       </div>
                     </div>
                   </div>
                   <button 
                     onClick={() => navigateToResults(exam)}
-                    style={styles.viewResultsButtonDesktop}
+                    className="desktop-view-results-btn"
                   >
                     <i className="fas fa-chart-line"></i>
                     View Results
@@ -735,22 +1076,22 @@ const Examinations = () => {
                 </>
               ) : exam.submitted ? (
                 <>
-                  <div style={styles.submittedInfo}>
-                    <i className="fas fa-check-circle" style={{ fontSize: '20px', color: '#28a745' }}></i>
+                  <div className="desktop-submitted-info">
+                    <i className="fas fa-check-circle"></i>
                     <div>
-                      <div style={{ fontWeight: 'bold' }}>
+                      <div className="submitted-status">
                         Submitted {exam.submission?.submitted_at ? 
                           `on ${new Date(exam.submission.submitted_at).toLocaleDateString()}` : 
                           'successfully'}
                       </div>
-                      <div style={{ fontSize: '12px', color: '#666' }}>
+                      <div className="submitted-waiting">
                         Awaiting grading
                       </div>
                     </div>
                   </div>
                   <button 
                     disabled
-                    style={styles.disabledButtonDesktop}
+                    className="desktop-disabled-btn"
                   >
                     <i className="fas fa-hourglass-half"></i>
                     Awaiting Grading
@@ -758,41 +1099,54 @@ const Examinations = () => {
                 </>
               ) : exam.canResume ? (
                 <>
-                  <div style={styles.resumeInfo}>
+                  <div className="desktop-resume-info">
                     <i className="fas fa-history"></i>
-                    Exam Incomplete - Resume Available
+                    <div>
+                      <div className="resume-status">Exam Incomplete</div>
+                      <div className="resume-detail">Resume Available</div>
+                    </div>
                   </div>
                   <button 
                     onClick={() => handleStartExam(exam)}
-                    style={styles.resumeExamButtonDesktop}
+                    className="desktop-resume-exam-btn"
+                    disabled={!isCleared}
                   >
                     <i className="fas fa-history"></i>
-                    RESUME EXAM
+                    {isCleared ? 'RESUME EXAM' : 'CLEARANCE REQUIRED'}
                   </button>
                 </>
               ) : exam.canStart && isOnlineExam ? (
                 <>
-                  <div style={styles.activeInfo}>
+                  <div className="desktop-active-info">
                     <i className="fas fa-exclamation-triangle"></i>
-                    Exam is ACTIVE
+                    <div>
+                      <div className="active-status">Exam is ACTIVE</div>
+                      <div className="active-detail">Click to start</div>
+                    </div>
                   </div>
                   <button 
                     onClick={() => handleStartExam(exam)}
-                    style={styles.startExamButtonDesktop}
+                    className="desktop-start-exam-btn"
+                    disabled={!isCleared}
                   >
                     <i className="fas fa-play"></i>
-                    START ONLINE EXAM
+                    {isCleared ? 'START ONLINE EXAM' : 'CLEARANCE REQUIRED'}
                   </button>
                 </>
               ) : status === 'upcoming' ? (
                 <>
-                  <div style={styles.upcomingInfo}>
+                  <div className="desktop-upcoming-info">
                     <i className="fas fa-clock"></i>
-                    Starts in {timeUntilStart}
+                    <div>
+                      <div className="upcoming-status">Starts in {timeUntilStart}</div>
+                      <div className="upcoming-detail">
+                        {isOnlineExam ? 'Online Exam' : 'Physical Exam'}
+                      </div>
+                    </div>
                   </div>
                   <button 
                     disabled
-                    style={styles.disabledButtonDesktop}
+                    className="desktop-disabled-btn"
                   >
                     <i className="fas fa-lock"></i>
                     {isOnlineExam ? 'Not Available Yet' : 'Physical Exam'}
@@ -800,13 +1154,20 @@ const Examinations = () => {
                 </>
               ) : (
                 <>
-                  <div style={styles.endedInfo}>
+                  <div className="desktop-ended-info">
                     <i className="fas fa-ban"></i>
-                    {isOnlineExam ? 'Exam period has ended' : 'Physical Exam - Attend at Venue'}
+                    <div>
+                      <div className="ended-status">
+                        {isOnlineExam ? 'Exam period has ended' : 'Physical Exam'}
+                      </div>
+                      <div className="ended-detail">
+                        {isOnlineExam ? 'Closed' : 'Attend at Venue'}
+                      </div>
+                    </div>
                   </div>
                   <button 
                     disabled
-                    style={styles.disabledButtonDesktop}
+                    className="desktop-disabled-btn"
                   >
                     <i className="fas fa-times-circle"></i>
                     {isOnlineExam ? 'Closed' : 'Physical'}
@@ -820,46 +1181,44 @@ const Examinations = () => {
     );
   };
 
-  // =================== LOADING STATE ===================
+  // Loading State
   if (loading) {
     return (
-      <div className="content" style={styles.content}>
-        <div className="dashboard-header" style={styles.dashboardHeader}>
-          <h2 style={styles.pageTitle}>
-            <i className="fas fa-clipboard-check" style={{ marginRight: '10px', color: '#dc3545' }}></i>
+      <div className="examinations-container">
+        <div className="examinations-header">
+          <h2>
+            <i className="fas fa-clipboard-check"></i>
             Examinations
           </h2>
-          <div className="date-display" style={styles.dateDisplay}>
+          <div className="examinations-loading">
             Loading examinations...
           </div>
         </div>
-        <div style={styles.loadingContainer}>
-          <div style={styles.spinner}></div>
+        <div className="examinations-loading-spinner">
+          <div className="loading-spinner"></div>
+          <p>Checking your exam clearance status...</p>
         </div>
       </div>
     );
   }
 
+  // Error State
   if (error) {
     return (
-      <div className="content" style={styles.content}>
-        <div className="dashboard-header" style={styles.dashboardHeader}>
-          <h2 style={styles.pageTitle}>
-            <i className="fas fa-clipboard-check" style={{ marginRight: '10px', color: '#dc3545' }}></i>
+      <div className="examinations-container">
+        <div className="examinations-header">
+          <h2>
+            <i className="fas fa-clipboard-check"></i>
             Examinations
           </h2>
-          <div className="date-display" style={styles.dateDisplay}>
-            Error
-          </div>
         </div>
-        <div style={styles.errorContainer}>
-          <i className="fas fa-exclamation-triangle" style={styles.errorIcon}></i>
-          <p style={styles.errorMessage}>
-            {error}
-          </p>
+        <div className="examinations-error-container">
+          <i className="fas fa-exclamation-triangle"></i>
+          <h3>Something went wrong</h3>
+          <p>{error}</p>
           <button 
             onClick={refreshExams}
-            style={styles.retryButton}
+            className="examinations-retry-btn"
           >
             <i className="fas fa-sync-alt"></i>
             Try Again
@@ -870,39 +1229,47 @@ const Examinations = () => {
   }
 
   return (
-    <div className="content" style={styles.content}>
+    <div className="examinations-container">
       {/* Header */}
-      <div style={styles.headerContainer}>
-        <div style={styles.headerContent}>
-          <div style={{
-            display: 'flex',
-            flexDirection: isMobile ? 'column' : 'row',
-            justifyContent: 'space-between',
-            alignItems: isMobile ? 'flex-start' : 'center',
-            gap: '15px'
-          }}>
+      <div className="examinations-header-container">
+        <div className="examinations-header-content">
+          <div className={`examinations-header-row ${isMobile ? 'mobile' : 'desktop'}`}>
             <div>
-              <h2 style={styles.mainTitle}>
-                <i className="fas fa-clipboard-check" style={{ marginRight: '10px', color: '#dc3545' }}></i>
+              <h2 className="examinations-main-title">
+                <i className="fas fa-clipboard-check"></i>
                 Examinations
               </h2>
-              <div style={styles.studentInfo}>
-                <span>Academic Year: {studentInfo?.academic_year || '2024/2025'}</span>
+              <div className="examinations-student-info">
+                <span>Academic Year: {studentInfo?.academic_year || '2025/2029'}</span>
                 <span>Student ID: {studentInfo?.student_id || 'N/A'}</span>
                 <span>Program: {studentInfo?.program || 'N/A'}</span>
+                {studentInfo?.program_code && (
+                  <span>Program Code: {studentInfo.program_code}</span>
+                )}
               </div>
             </div>
-            <div style={styles.headerButtons}>
+            <div className="examinations-header-buttons">
               <button 
                 onClick={refreshExams}
-                style={styles.refreshButton}
+                className="examinations-refresh-btn"
+                disabled={checkingClearance}
               >
-                <i className="fas fa-sync-alt"></i>
-                Refresh
+                {checkingClearance ? (
+                  <>
+                    <i className="fas fa-spinner fa-spin"></i>
+                    Checking...
+                  </>
+                ) : (
+                  <>
+                    <i className="fas fa-sync-alt"></i>
+                    Refresh
+                  </>
+                )}
               </button>
               <button 
                 onClick={downloadExamPermit}
-                style={styles.downloadPermitButton}
+                className="examinations-download-permit-btn"
+                disabled={!clearanceStatus?.cleared}
               >
                 <i className="fas fa-download"></i>
                 Download Permit
@@ -912,18 +1279,27 @@ const Examinations = () => {
         </div>
       </div>
 
+      {/* Clearance Status Banner */}
+      {renderClearanceBanner()}
+
       {/* Stats Overview */}
-      <div style={styles.statsGrid}>
+      <div className="examinations-stats-grid">
         {[
           { 
-            label: 'Upcoming Exams', 
-            value: exams.filter(e => e.status === 'upcoming').length,
+            label: 'All Exams', 
+            value: exams.length,
+            icon: 'fas fa-clipboard-list',
+            color: '#6c757d'
+          },
+          { 
+            label: 'Upcoming', 
+            value: exams.filter(e => e.status === 'upcoming' || e.isUpcoming).length,
             icon: 'fas fa-calendar-alt',
             color: '#007bff'
           },
           { 
             label: 'Active Now', 
-            value: exams.filter(e => e.status === 'active').length,
+            value: exams.filter(e => e.status === 'active' || e.canStart || e.canResume).length,
             icon: 'fas fa-play-circle',
             color: '#dc3545'
           },
@@ -940,20 +1316,20 @@ const Examinations = () => {
             color: '#28a745'
           },
           { 
-            label: 'Incomplete', 
-            value: exams.filter(e => e.hasIncompleteSubmission && !e.submitted).length,
-            icon: 'fas fa-history',
-            color: '#ffc107'
+            label: 'Clearance', 
+            value: clearanceStatus?.cleared ? '✓ Cleared' : '✗ Required',
+            icon: clearanceStatus?.cleared ? 'fas fa-check' : 'fas fa-ban',
+            color: clearanceStatus?.cleared ? '#28a745' : '#dc3545'
           }
         ].map((stat, index) => (
           <div 
             key={index}
-            style={styles.statCard}
+            className="examinations-stat-card"
           >
-            <div style={{...styles.statValue, color: stat.color}}>
+            <div className="examinations-stat-value" style={{ color: stat.color }}>
               {stat.value}
             </div>
-            <div style={styles.statLabel}>
+            <div className="examinations-stat-label">
               <i className={stat.icon} style={{ color: stat.color }}></i>
               {stat.label}
             </div>
@@ -961,623 +1337,120 @@ const Examinations = () => {
         ))}
       </div>
 
+      {/* Exams Filter Tabs */}
+      <div className="examinations-tabs">
+        <button 
+          className={`exam-tab ${activeTab === 'all' ? 'active' : ''}`}
+          onClick={() => setActiveTab('all')}
+        >
+          <i className="fas fa-list"></i>
+          All Exams ({exams.length})
+        </button>
+        <button 
+          className={`exam-tab ${activeTab === 'upcoming' ? 'active' : ''}`}
+          onClick={() => setActiveTab('upcoming')}
+        >
+          <i className="fas fa-calendar-alt"></i>
+          Upcoming ({exams.filter(e => e.status === 'upcoming' || e.isUpcoming).length})
+        </button>
+        <button 
+          className={`exam-tab ${activeTab === 'active' ? 'active' : ''}`}
+          onClick={() => setActiveTab('active')}
+        >
+          <i className="fas fa-play-circle"></i>
+          Active ({exams.filter(e => e.status === 'active' || e.canStart || e.canResume).length})
+        </button>
+        <button 
+          className={`exam-tab ${activeTab === 'submitted' ? 'active' : ''}`}
+          onClick={() => setActiveTab('submitted')}
+        >
+          <i className="fas fa-check-circle"></i>
+          Submitted ({exams.filter(e => e.submitted && !e.graded).length})
+        </button>
+        <button 
+          className={`exam-tab ${activeTab === 'graded' ? 'active' : ''}`}
+          onClick={() => setActiveTab('graded')}
+        >
+          <i className="fas fa-check-double"></i>
+          Graded ({exams.filter(e => e.graded).length})
+        </button>
+      </div>
+
       {/* Exams List */}
-      <div style={styles.examsListContainer}>
-        <div style={styles.examsListHeader}>
-          <h3 style={styles.examsListTitle}>
-            <i className="fas fa-list-alt" style={{ marginRight: '10px', color: '#dc3545' }}></i>
-            Available Examinations
+      <div className="examinations-list-container">
+        <div className="examinations-list-header">
+          <h3 className="examinations-list-title">
+            <i className="fas fa-list-alt"></i>
+            {activeTab === 'all' && 'All Examinations'}
+            {activeTab === 'upcoming' && 'Upcoming Examinations'}
+            {activeTab === 'active' && 'Active Examinations'}
+            {activeTab === 'submitted' && 'Submitted Examinations'}
+            {activeTab === 'graded' && 'Graded Examinations'}
           </h3>
-          <div style={styles.examsCount}>
-            Showing {exams.length} exam{exams.length !== 1 ? 's' : ''}
+          <div className="examinations-count">
+            {clearanceStatus && !clearanceStatus.cleared ? (
+              <span className="clearance-warning">
+                <i className="fas fa-exclamation-triangle"></i>
+                Clearance Required
+              </span>
+            ) : (
+              <span>
+                Showing {filteredExams.length} of {exams.length} exam{exams.length !== 1 ? 's' : ''}
+              </span>
+            )}
           </div>
         </div>
 
-        {exams.length === 0 ? (
-          <div style={styles.emptyState}>
-            <i className="fas fa-clipboard-list" style={styles.emptyStateIcon}></i>
-            <h3 style={styles.emptyStateTitle}>
-              No Examinations Scheduled
+        {filteredExams.length === 0 ? (
+          <div className="examinations-empty-state">
+            <i className="fas fa-clipboard-list"></i>
+            <h3 className="examinations-empty-state-title">
+              {activeTab === 'all' && 'No Examinations Found'}
+              {activeTab === 'upcoming' && 'No Upcoming Examinations'}
+              {activeTab === 'active' && 'No Active Examinations'}
+              {activeTab === 'submitted' && 'No Submitted Examinations'}
+              {activeTab === 'graded' && 'No Graded Examinations'}
             </h3>
-            <p style={styles.emptyStateMessage}>
-              Examinations will appear here once they are scheduled by your department.
+            <p className="examinations-empty-state-message">
+              {clearanceStatus && !clearanceStatus.cleared 
+                ? 'Please resolve clearance issues to view examinations.'
+                : activeTab === 'all'
+                ? 'No examinations scheduled for your courses.'
+                : `No ${activeTab} examinations found.`
+              }
             </p>
+            {clearanceStatus && !clearanceStatus.cleared && (
+              <button 
+                onClick={() => setShowClearanceModal(true)}
+                className="examinations-clearance-btn"
+              >
+                <i className="fas fa-info-circle"></i>
+                View Clearance Issues
+              </button>
+            )}
             <button 
               onClick={refreshExams}
-              style={styles.emptyStateButton}
+              className="examinations-empty-state-btn"
             >
               <i className="fas fa-sync-alt"></i>
               Refresh List
             </button>
           </div>
         ) : (
-          <div style={styles.examsList}>
-            {exams.map((exam, index) => (
+          <div className="examinations-list">
+            {filteredExams.map((exam) => (
               isMobile ? 
-                renderMobileExamCard(exam, index) : 
-                renderDesktopExamCard(exam, index)
+                renderMobileExamCard(exam) : 
+                renderDesktopExamCard(exam)
             ))}
           </div>
         )}
       </div>
 
-      <style>{`
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-        
-        button:hover:not(:disabled) {
-          opacity: 0.9;
-          transform: translateY(-2px);
-          transition: all 0.2s ease;
-        }
-        
-        button:active:not(:disabled) {
-          transform: translateY(0);
-        }
-        
-        /* Mobile-specific optimizations */
-        @media (max-width: 480px) {
-          .stats-grid {
-            gap: 10px !important;
-          }
-          
-          .stats-grid > div {
-            padding: 12px !important;
-          }
-        }
-        
-        /* Improve touch targets on mobile */
-        @media (max-width: 768px) {
-          button {
-            min-height: 44px;
-            min-width: 44px;
-          }
-          
-          .mobile-exam-card button {
-            width: 100%;
-          }
-        }
-        
-        /* Hover effects only on desktop */
-        @media (hover: hover) {
-          .desktop-exam-card:hover {
-            transform: translateY(-4px);
-            transition: transform 0.2s ease;
-            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
-          }
-        }
-      `}</style>
+      {/* Clearance Modal */}
+      {renderClearanceModal()}
     </div>
   );
-};
-
-// Styles
-const styles = {
-  content: {
-    padding: 'clamp(10px, 3vw, 20px)'
-  },
-  dashboardHeader: {
-    marginBottom: 'clamp(20px, 4vw, 30px)'
-  },
-  pageTitle: {
-    margin: '0',
-    fontSize: 'clamp(1.3rem, 3.5vw, 1.8rem)',
-    lineHeight: '1.2'
-  },
-  dateDisplay: {
-    color: '#666',
-    fontSize: 'clamp(0.85rem, 2vw, 1rem)',
-    marginTop: '5px'
-  },
-  loadingContainer: {
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    height: '300px'
-  },
-  spinner: {
-    width: '50px',
-    height: '50px',
-    border: '5px solid #f3f3f3',
-    borderTop: '5px solid #3498db',
-    borderRadius: '50%',
-    animation: 'spin 1s linear infinite'
-  },
-  errorContainer: {
-    padding: '30px',
-    backgroundColor: '#fee',
-    border: '1px solid #f99',
-    borderRadius: '12px',
-    margin: '20px 0',
-    textAlign: 'center'
-  },
-  errorIcon: {
-    fontSize: '48px',
-    color: '#dc3545',
-    marginBottom: '20px'
-  },
-  errorMessage: {
-    color: '#d33',
-    marginBottom: '20px',
-    fontSize: 'clamp(14px, 2vw, 16px)',
-    lineHeight: '1.4'
-  },
-  retryButton: {
-    padding: '12px 24px',
-    backgroundColor: '#007bff',
-    color: 'white',
-    border: 'none',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    fontSize: 'clamp(14px, 2vw, 16px)',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '8px'
-  },
-  headerContainer: {
-    marginBottom: 'clamp(20px, 4vw, 30px)'
-  },
-  headerContent: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 'clamp(8px, 1.5vw, 12px)'
-  },
-  mainTitle: {
-    margin: '0 0 5px 0',
-    fontSize: 'clamp(1.3rem, 3.5vw, 1.8rem)',
-    lineHeight: '1.2'
-  },
-  studentInfo: {
-    color: '#666',
-    fontSize: 'clamp(0.85rem, 2vw, 1rem)',
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '10px'
-  },
-  headerButtons: {
-    display: 'flex',
-    gap: 'clamp(8px, 1.5vw, 10px)',
-    flexDirection: window.innerWidth < 768 ? 'column' : 'row',
-    width: window.innerWidth < 768 ? '100%' : 'auto'
-  },
-  refreshButton: {
-    padding: 'clamp(10px, 1.8vw, 12px) clamp(16px, 2.5vw, 20px)',
-    backgroundColor: '#28a745',
-    color: 'white',
-    border: 'none',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '8px',
-    fontSize: 'clamp(14px, 1.8vw, 16px)',
-    width: window.innerWidth < 768 ? '100%' : 'auto',
-    minHeight: '44px'
-  },
-  downloadPermitButton: {
-    padding: 'clamp(10px, 1.8vw, 12px) clamp(16px, 2.5vw, 20px)',
-    backgroundColor: '#007bff',
-    color: 'white',
-    border: 'none',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '8px',
-    fontSize: 'clamp(14px, 1.8vw, 16px)',
-    fontWeight: '500',
-    width: window.innerWidth < 768 ? '100%' : 'auto',
-    minHeight: '44px'
-  },
-  statsGrid: {
-    display: 'grid',
-    gridTemplateColumns: window.innerWidth < 768 ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))',
-    gap: 'clamp(12px, 2.5vw, 15px)',
-    marginBottom: 'clamp(25px, 4vw, 30px)'
-  },
-  statCard: {
-    backgroundColor: 'white',
-    borderRadius: '12px',
-    padding: 'clamp(15px, 3vw, 20px)',
-    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-    textAlign: 'center',
-    borderTop: '4px solid'
-  },
-  statValue: {
-    fontSize: 'clamp(24px, 5vw, 36px)',
-    fontWeight: 'bold',
-    marginBottom: '8px'
-  },
-  statLabel: {
-    fontSize: 'clamp(12px, 2vw, 14px)',
-    color: '#666',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '8px',
-    flexWrap: 'wrap'
-  },
-  examsListContainer: {
-    backgroundColor: 'white',
-    borderRadius: '12px',
-    padding: 'clamp(15px, 3vw, 25px)',
-    boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-  },
-  examsListHeader: {
-    display: 'flex',
-    flexDirection: window.innerWidth < 768 ? 'column' : 'row',
-    justifyContent: 'space-between',
-    alignItems: window.innerWidth < 768 ? 'flex-start' : 'center',
-    marginBottom: 'clamp(15px, 3vw, 25px)',
-    paddingBottom: 'clamp(12px, 2.5vw, 15px)',
-    borderBottom: '2px solid #dee2e6',
-    gap: window.innerWidth < 768 ? '10px' : '0'
-  },
-  examsListTitle: {
-    margin: 0,
-    color: '#333',
-    fontSize: 'clamp(1.1rem, 2.5vw, 1.3rem)'
-  },
-  examsCount: {
-    fontSize: 'clamp(13px, 2vw, 14px)',
-    color: '#6c757d'
-  },
-  emptyState: {
-    padding: 'clamp(40px, 8vw, 60px) clamp(20px, 4vw, 30px)',
-    textAlign: 'center',
-    backgroundColor: '#f8f9fa',
-    borderRadius: '12px'
-  },
-  emptyStateIcon: {
-    fontSize: 'clamp(48px, 10vw, 64px)',
-    color: '#dee2e6',
-    marginBottom: '20px'
-  },
-  emptyStateTitle: {
-    color: '#6c757d',
-    marginBottom: '15px',
-    fontSize: 'clamp(1.1rem, 2.5vw, 1.3rem)'
-  },
-  emptyStateMessage: {
-    color: '#999',
-    marginBottom: '25px',
-    maxWidth: '500px',
-    margin: '0 auto',
-    fontSize: 'clamp(14px, 2vw, 16px)',
-    lineHeight: '1.5'
-  },
-  emptyStateButton: {
-    padding: '12px 24px',
-    backgroundColor: '#007bff',
-    color: 'white',
-    border: 'none',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    fontSize: '16px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '8px',
-    margin: '0 auto'
-  },
-  examsList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 'clamp(16px, 3vw, 20px)'
-  },
-  // Mobile Card Styles
-  mobileCard: {
-    border: '1px solid #dee2e6',
-    borderRadius: '12px',
-    overflow: 'hidden',
-    marginBottom: '16px',
-    backgroundColor: 'white'
-  },
-  mobileCardHeader: {
-    padding: '16px',
-    backgroundColor: '#f8f9fa',
-    borderBottom: '1px solid #dee2e6'
-  },
-  mobileCardStatusRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: '10px',
-    flexWrap: 'wrap',
-    gap: '8px'
-  },
-  statusBadge: {
-    padding: '4px 12px',
-    color: 'white',
-    borderRadius: '20px',
-    fontSize: '12px',
-    fontWeight: 'bold',
-    flexShrink: '0'
-  },
-  typeBadge: {
-    padding: '4px 10px',
-    backgroundColor: '#e9ecef',
-    borderRadius: '20px',
-    fontSize: '11px',
-    fontWeight: '500',
-    color: '#495057',
-    flexShrink: '0'
-  },
-  mobileCardTitle: {
-    margin: '0 0 6px 0',
-    fontSize: '16px',
-    color: '#333',
-    lineHeight: '1.3'
-  },
-  mobileCourseInfo: {
-    fontSize: '14px',
-    color: '#666',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px'
-  },
-  mobileCardBody: {
-    padding: '16px'
-  },
-  mobileDetailsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(2, 1fr)',
-    gap: '12px',
-    marginBottom: '16px'
-  },
-  mobileDetailLabel: {
-    fontSize: '11px',
-    color: '#6c757d',
-    marginBottom: '4px'
-  },
-  mobileDetailValue: {
-    fontSize: '13px',
-    fontWeight: '500',
-    color: '#495057',
-    lineHeight: '1.3'
-  },
-  mobileButtonGroup: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '10px'
-  },
-  viewResultsButton: {
-    width: '100%',
-    padding: '12px',
-    backgroundColor: '#6f42c1',
-    color: 'white',
-    border: 'none',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: '500',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '8px'
-  },
-  resumeExamButton: {
-    width: '100%',
-    padding: '14px',
-    backgroundColor: '#ffc107',
-    color: '#212529',
-    border: 'none',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    fontSize: '15px',
-    fontWeight: 'bold',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '10px'
-  },
-  startExamButton: {
-    width: '100%',
-    padding: '14px',
-    backgroundColor: '#dc3545',
-    color: 'white',
-    border: 'none',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    fontSize: '15px',
-    fontWeight: 'bold',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '10px'
-  },
-  disabledButton: {
-    width: '100%',
-    padding: '12px',
-    backgroundColor: '#e9ecef',
-    color: '#6c757d',
-    border: 'none',
-    borderRadius: '8px',
-    fontSize: '14px',
-    fontWeight: '500',
-    cursor: 'not-allowed'
-  },
-  // Desktop Card Styles
-  desktopCard: {
-    border: '1px solid #dee2e6',
-    borderRadius: '12px',
-    overflow: 'hidden',
-    marginBottom: '20px',
-    backgroundColor: 'white',
-    transition: 'transform 0.2s ease, box-shadow 0.2s ease'
-  },
-  desktopCardHeader: {
-    padding: '20px',
-    backgroundColor: '#f8f9fa',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center'
-  },
-  desktopStatusRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '15px',
-    marginBottom: '10px'
-  },
-  desktopStatusBadge: {
-    padding: '4px 12px',
-    color: 'white',
-    borderRadius: '20px',
-    fontSize: '12px',
-    fontWeight: 'bold'
-  },
-  desktopTypeBadge: {
-    padding: '4px 12px',
-    backgroundColor: '#e9ecef',
-    borderRadius: '20px',
-    fontSize: '12px',
-    fontWeight: '500',
-    color: '#495057'
-  },
-  desktopCardTitle: {
-    margin: 0,
-    fontSize: '18px',
-    color: '#333'
-  },
-  desktopCardHeaderRight: {
-    textAlign: 'right'
-  },
-  desktopCourseInfo: {
-    fontSize: '14px',
-    color: '#666',
-    marginBottom: '5px'
-  },
-  examId: {
-    fontSize: '12px',
-    color: '#6c757d'
-  },
-  desktopCardBody: {
-    padding: '20px'
-  },
-  examDescription: {
-    color: '#666',
-    marginBottom: '20px',
-    lineHeight: '1.6'
-  },
-  desktopDetailsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-    gap: '15px',
-    marginBottom: '20px'
-  },
-  desktopDetailLabel: {
-    fontSize: '12px',
-    color: '#6c757d',
-    marginBottom: '5px'
-  },
-  desktopDetailValue: {
-    fontWeight: '500',
-    color: '#495057'
-  },
-  desktopActionArea: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: '20px',
-    borderTop: '1px solid #dee2e6'
-  },
-  rightActions: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '15px'
-  },
-  gradedInfo: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    color: '#6f42c1'
-  },
-  submittedInfo: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    color: '#28a745'
-  },
-  viewResultsButtonDesktop: {
-    padding: '8px 20px',
-    backgroundColor: '#6f42c1',
-    color: 'white',
-    border: 'none',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    fontSize: '14px',
-    fontWeight: '500'
-  },
-  resumeInfo: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    color: '#ffc107',
-    fontWeight: 'bold'
-  },
-  activeInfo: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    color: '#dc3545',
-    fontWeight: 'bold'
-  },
-  resumeExamButtonDesktop: {
-    padding: '10px 25px',
-    backgroundColor: '#ffc107',
-    color: '#212529',
-    border: 'none',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontSize: '16px',
-    fontWeight: 'bold',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px'
-  },
-  startExamButtonDesktop: {
-    padding: '10px 25px',
-    backgroundColor: '#dc3545',
-    color: 'white',
-    border: 'none',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontSize: '16px',
-    fontWeight: 'bold',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px'
-  },
-  upcomingInfo: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    color: '#007bff'
-  },
-  disabledButtonDesktop: {
-    padding: '10px 25px',
-    backgroundColor: '#e9ecef',
-    color: '#6c757d',
-    border: 'none',
-    borderRadius: '6px',
-    fontSize: '14px',
-    fontWeight: '500',
-    cursor: 'not-allowed'
-  },
-  endedInfo: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    color: '#6c757d'
-  }
 };
 
 export default Examinations;

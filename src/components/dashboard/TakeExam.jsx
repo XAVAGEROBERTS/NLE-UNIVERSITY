@@ -12,8 +12,6 @@ const TakeExam = () => {
   const [exam, setExam] = useState(null);
   const [examQuestions, setExamQuestions] = useState([]);
   const [examAnswers, setExamAnswers] = useState({});
-  const [remainingTime, setRemainingTime] = useState(0);
-  const [timerInterval, setTimerInterval] = useState(null);
   const [submittingExam, setSubmittingExam] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [examFiles, setExamFiles] = useState([]);
@@ -28,8 +26,206 @@ const TakeExam = () => {
   const [showDownloadDropdown, setShowDownloadDropdown] = useState(false);
   const [studentInfo, setStudentInfo] = useState(null);
   
-  const fileInputRef = useRef(null);
+  // Timer states
+  const [timeRemaining, setTimeRemaining] = useState({ hours: 0, minutes: 0, seconds: 0 });
+  const [totalDurationMinutes, setTotalDurationMinutes] = useState(0);
+  const [timeElapsed, setTimeElapsed] = useState({ hours: 0, minutes: 0 });
+  const [examStartTime, setExamStartTime] = useState(null);
+  const [examEndTime, setExamEndTime] = useState(null);
+  const [timeUntilStart, setTimeUntilStart] = useState({ hours: 0, minutes: 0, seconds: 0 });
+  const [isExamStarted, setIsExamStarted] = useState(false);
+  const [isExamEnded, setIsExamEnded] = useState(false);
+  const [isTimeUp, setIsTimeUp] = useState(false);
   
+  // New state for showing start confirmation
+  const [showStartConfirmation, setShowStartConfirmation] = useState(false);
+  
+  const fileInputRef = useRef(null);
+  const timerIntervalRef = useRef(null);
+  const timeRemainingIntervalRef = useRef(null);
+  
+  // Cleanup intervals on unmount
+  useEffect(() => {
+    return () => {
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+      }
+      if (timeRemainingIntervalRef.current) {
+        clearInterval(timeRemainingIntervalRef.current);
+      }
+      if (window.autoSaveInterval) {
+        clearInterval(window.autoSaveInterval);
+        delete window.autoSaveInterval;
+      }
+    };
+  }, []);
+
+  // Get current time in EAT (East Africa Time)
+  const getCurrentEATTime = () => {
+    // EAT is UTC+3
+    const now = new Date();
+    const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+    const eat = new Date(utc + (3 * 3600000)); // UTC+3
+    return eat;
+  };
+
+  // Format date in EAT timezone
+  const formatEATDate = (dateString) => {
+    if (!dateString) return 'Not set';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+      timeZone: 'Africa/Nairobi' // EAT timezone
+    }) + ' EAT';
+  };
+
+  // Format time only (no date)
+  const formatEATTimeOnly = (dateString) => {
+    if (!dateString) return 'Not set';
+    const date = new Date(dateString);
+    return date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) + ' EAT';
+  };
+
+  // Calculate time remaining until exam start
+  const calculateTimeUntilStart = () => {
+    if (!examStartTime) return;
+    
+    const now = getCurrentEATTime();
+    const startTime = new Date(examStartTime);
+    const diffMs = startTime - now;
+    
+    if (diffMs <= 0) {
+      setIsExamStarted(true);
+      return { hours: 0, minutes: 0, seconds: 0 };
+    }
+    
+    const hours = Math.floor(diffMs / (1000 * 60 * 60));
+    const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
+    
+    return { hours, minutes, seconds };
+  };
+
+  // Calculate time remaining and elapsed
+  const calculateTimeRemaining = () => {
+    if (!examStartTime || !examEndTime) return;
+    
+    const now = getCurrentEATTime();
+    const startTime = new Date(examStartTime);
+    const endTime = new Date(examEndTime);
+    
+    // Check if exam has ended
+    if (now >= endTime) {
+      setIsExamEnded(true);
+      setIsTimeUp(true);
+      return { hours: 0, minutes: 0, seconds: 0 };
+    }
+    
+    // Check if exam has started
+    if (now >= startTime) {
+      setIsExamStarted(true);
+      
+      // Calculate time remaining
+      const diffMs = endTime - now;
+      const hours = Math.floor(diffMs / (1000 * 60 * 60));
+      const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
+      
+      // Calculate time elapsed
+      const elapsedMs = now - startTime;
+      const elapsedHours = Math.floor(elapsedMs / (1000 * 60 * 60));
+      const elapsedMinutes = Math.floor((elapsedMs % (1000 * 60 * 60)) / (1000 * 60));
+      
+      setTimeElapsed({ hours: elapsedHours, minutes: elapsedMinutes });
+      
+      return { hours, minutes, seconds };
+    }
+    
+    return { hours: 0, minutes: 0, seconds: 0 };
+  };
+
+  // Start the countdown timer
+  const startTimer = () => {
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+    }
+    
+    timerIntervalRef.current = setInterval(() => {
+      const remaining = calculateTimeRemaining();
+      if (remaining) {
+        setTimeRemaining(remaining);
+        
+        // Check if time is up
+        if (remaining.hours === 0 && remaining.minutes === 0 && remaining.seconds === 0) {
+          setIsTimeUp(true);
+          if (timerIntervalRef.current) {
+            clearInterval(timerIntervalRef.current);
+          }
+        }
+      }
+    }, 1000);
+  };
+
+  // Start time until start countdown
+  const startTimeUntilStartTimer = () => {
+    if (timeRemainingIntervalRef.current) {
+      clearInterval(timeRemainingIntervalRef.current);
+    }
+    
+    timeRemainingIntervalRef.current = setInterval(() => {
+      const untilStart = calculateTimeUntilStart();
+      if (untilStart) {
+        setTimeUntilStart(untilStart);
+        
+        // Check if exam has started
+        if (untilStart.hours === 0 && untilStart.minutes === 0 && untilStart.seconds === 0) {
+          setIsExamStarted(true);
+          if (timeRemainingIntervalRef.current) {
+            clearInterval(timeRemainingIntervalRef.current);
+          }
+          startTimer();
+        }
+      }
+    }, 1000);
+  };
+
+  // Start exam based on scheduled time
+  const startExamBasedOnSchedule = () => {
+    if (!examStartTime) return;
+    
+    const now = getCurrentEATTime();
+    const startTime = new Date(examStartTime);
+    const endTime = new Date(examEndTime);
+    
+    // Check if exam has ended
+    if (now >= endTime) {
+      setIsExamEnded(true);
+      setIsTimeUp(true);
+      return;
+    }
+    
+    // Check if exam is currently active
+    if (now >= startTime && now < endTime) {
+      setIsExamStarted(true);
+      
+      // If there's an existing submission in 'started' status, use it
+      if (examSubmission?.status === 'started') {
+        setIsResuming(true);
+        // Don't show start confirmation when resuming
+        setShowStartConfirmation(false);
+      }
+    } else if (now < startTime) {
+      // Exam hasn't started yet
+      setIsExamStarted(false);
+      startTimeUntilStartTimer();
+    }
+  };
+
   useEffect(() => {
     if (examId && user) {
       fetchStudentInfo();
@@ -37,27 +233,37 @@ const TakeExam = () => {
   }, [examId, user]);
 
   useEffect(() => {
-    return () => {
-      if (timerInterval) {
-        clearInterval(timerInterval);
-      }
-      if (window.autoSaveInterval) {
-        clearInterval(window.autoSaveInterval);
-        delete window.autoSaveInterval;
+    if (examStartTime && examEndTime) {
+      startExamBasedOnSchedule();
+    }
+  }, [examStartTime, examEndTime]);
+
+  // Save progress when leaving tab
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (isExamActive && examSubmission) {
+        saveProgressSilently();
+        e.preventDefault();
+        e.returnValue = 'Your exam progress will be saved.';
+        return 'Your exam progress will be saved.';
       }
     };
-  }, [timerInterval]);
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isExamActive, examSubmission]);
 
   const fetchStudentInfo = async () => {
     try {
-      // Use the auth user's ID as student_id (matches your CSV)
       const studentId = user?.id;
       
       if (!studentId) {
         throw new Error('User not authenticated');
       }
       
-      // Create student info from auth user
       const studentData = {
         student_id: studentId,
         email: user?.email || 'unknown@example.com',
@@ -129,38 +335,33 @@ const TakeExam = () => {
         console.log('No submission found');
       }
 
-      if (submission && submission.status === 'started') {
-        setIsResuming(true);
-        setExamSubmission(submission);
-        
-        // Restore answers if any
-        if (submission.answers) {
-          try {
-            const answers = typeof submission.answers === 'string' 
-              ? JSON.parse(submission.answers) 
-              : submission.answers;
-            setExamAnswers(answers);
-          } catch (e) {
-            console.log('Could not parse answers');
-          }
-        }
-        if (submission.answer_text) {
-          setAnswerText(submission.answer_text);
-        }
-        
-        // Calculate remaining time
-        if (submission.started_at) {
-          const startedAt = new Date(submission.started_at);
-          const now = new Date();
-          const elapsedSeconds = Math.floor((now - startedAt) / 1000);
-          const totalSeconds = (examData.duration_minutes || 60) * 60;
-          const remaining = Math.max(0, totalSeconds - elapsedSeconds);
+      if (submission) {
+        if (submission.status === 'started') {
+          setIsResuming(true);
+          setExamSubmission(submission);
           
-          setRemainingTime(remaining);
+          // Restore answers if any
+          if (submission.answers) {
+            try {
+              const answers = typeof submission.answers === 'string' 
+                ? JSON.parse(submission.answers) 
+                : submission.answers;
+              setExamAnswers(answers);
+            } catch (e) {
+              console.log('Could not parse answers');
+            }
+          }
+          if (submission.answer_text) {
+            setAnswerText(submission.answer_text);
+          }
+        } else if (submission.status === 'submitted') {
+          setExamSubmission(submission);
+          alert('This exam has already been submitted.');
+          navigate('/examinations');
         }
       }
 
-      // Try to fetch exam questions (ignore if fails)
+      // Try to fetch exam questions
       try {
         const { data: questions } = await supabase
           .from('exam_questions')
@@ -196,6 +397,26 @@ const TakeExam = () => {
       };
 
       setExam(processedExam);
+      setExamStartTime(examData.start_time);
+      setExamEndTime(examData.end_time);
+      setTotalDurationMinutes(examData.duration_minutes || 60);
+
+      // Calculate initial times
+      const now = getCurrentEATTime();
+      const startTime = new Date(examData.start_time);
+      const endTime = new Date(examData.end_time);
+      
+      if (now >= endTime) {
+        setIsExamEnded(true);
+        setIsTimeUp(true);
+      } else if (now >= startTime && now < endTime) {
+        setIsExamStarted(true);
+        const remaining = calculateTimeRemaining();
+        if (remaining) setTimeRemaining(remaining);
+      } else if (now < startTime) {
+        const untilStart = calculateTimeUntilStart();
+        if (untilStart) setTimeUntilStart(untilStart);
+      }
 
     } catch (error) {
       console.error('Error fetching exam data:', error);
@@ -205,355 +426,29 @@ const TakeExam = () => {
     }
   };
 
-  const startTimer = () => {
-    if (timerInterval) {
-      clearInterval(timerInterval);
-    }
-
-    const interval = setInterval(() => {
-      setRemainingTime(prev => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          handleAutoSubmit();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    
-    setTimerInterval(interval);
-  };
-
-  const handleStartExam = async () => {
-    try {
-      if (!studentInfo) {
-        throw new Error('Student information not available');
-      }
-      
-      // Check if student has confirmed they started the exam
-      const hasConfirmed = localStorage.getItem(`exam_confirmed_${examId}`);
-      
-      if (!hasConfirmed) {
-        const startConfirmation = window.confirm(
-          `Have you started the ${exam.title} exam?\n\n` +
-          `Duration: ${exam.duration} minutes\n` +
-          `Total Marks: ${exam.totalMarks}\n\n` +
-          `Only confirm "OK" when you have physically started the exam.\n\n` +
-          `Click "OK" to proceed to download exam papers.`
-        );
-        
-        if (!startConfirmation) {
-          return;
-        }
-        
-        localStorage.setItem(`exam_confirmed_${examId}`, 'true');
-      }
-      
-      const confirmed = window.confirm(
-        `Are you ready to start the ${exam.title} exam?\n\n` +
-        `Duration: ${exam.duration} minutes\n` +
-        `Total Marks: ${exam.totalMarks}\n\n` +
-        `Once started, the timer will begin. You can exit and resume later.\n\n` +
-        `Do you want to continue?`
-      );
-      
-      if (!confirmed) return;
-
-      // Prepare submission data - NO registration_number
-      const submissionData = {
-        exam_id: exam.id,
-        student_id: studentInfo.student_id,
-        status: 'started',
-        started_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-
-      let submissionId;
-      if (examSubmission) {
-        // Update existing submission
-        const { data, error } = await supabase
-          .from('exam_submissions')
-          .update(submissionData)
-          .eq('id', examSubmission.id)
-          .select()
-          .single();
-        
-        if (error) throw error;
-        
-        setExamSubmission(data);
-        submissionId = data.id;
-      } else {
-        // Create new submission - NO registration_number
-        try {
-          const { data, error } = await supabase
-            .from('exam_submissions')
-            .insert({
-              exam_id: exam.id,
-              student_id: studentInfo.student_id,
-              status: 'started',
-              started_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            })
-            .select()
-            .single();
-          
-          if (error) throw error;
-          
-          setExamSubmission(data);
-          submissionId = data.id;
-        } catch (insertError) {
-          console.error('Insert failed:', insertError);
-          
-          // Try simpler insert - NO registration_number
-          const { data, error } = await supabase
-            .from('exam_submissions')
-            .insert({
-              exam_id: exam.id,
-              student_id: studentInfo.student_id,
-              status: 'started'
-            })
-            .select()
-            .single();
-          
-          if (error) throw error;
-          
-          setExamSubmission(data);
-          submissionId = data.id;
-        }
-      }
-
-      setIsResuming(false);
-      setIsExamActive(true);
-      setRemainingTime(exam.duration * 60);
-      startTimer();
-      
-      // Start auto-save
-      startAutoSave(submissionId);
-      
-    } catch (error) {
-      console.error('Error starting exam:', error);
-      alert(`Failed to start exam. Please try again.\n\nError: ${error.message}`);
-    }
-  };
-
-  const handleSubmitExam = async () => {
-    if (!exam || !studentInfo) return;
-    
-    const confirmed = window.confirm(
-      'Are you sure you want to submit the exam?\n\n' +
-      'Once submitted, you cannot make changes.'
-    );
-    
-    if (!confirmed) return;
-    
-    await submitExamToServer();
-  };
-
-  const handleAutoSubmit = async () => {
-    if (!exam || !studentInfo) return;
-    
-    alert('Time is up! Your exam is being submitted automatically.');
-    await submitExamToServer();
-  };
-
-  const submitExamToServer = async () => {
-    if (!studentInfo) {
-      alert('Student information not available. Please try again.');
-      return;
-    }
-    
-    setSubmittingExam(true);
+  const saveProgressSilently = async () => {
+    if (!examSubmission || !isExamActive || !studentInfo) return;
     
     try {
-      // Upload answer files if any - they will return FULL PUBLIC URLs
-      let answerFileUrls = [];
-      if (examFiles.length > 0) {
-        try {
-          answerFileUrls = await uploadExamFiles(exam.id, studentInfo.student_id);
-        } catch (uploadError) {
-          console.error('File upload error:', uploadError);
-        }
-      }
-
-      // Prepare submission data
       const submissionData = {
-        status: 'submitted',
-        submitted_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
+        answers: examAnswers,
+        answer_text: answerText
       };
 
-      // Add answers based on exam type
-      if (exam.examType === 'online' && examQuestions.length > 0) {
-        submissionData.answers = examAnswers;
-      } else if (exam.examType === 'written_online') {
-        if (answerText) {
-          submissionData.answer_text = answerText;
-        }
-      }
-
-      // Add FULL PUBLIC URLs to answer_files (like assignment submissions)
-      if (answerFileUrls.length > 0) {
-        submissionData.answer_files = answerFileUrls; // Array of full URLs
-      }
-
-      // Update submission record
       const { error } = await supabase
         .from('exam_submissions')
         .update(submissionData)
-        .eq('exam_id', exam.id)
-        .eq('student_id', studentInfo.student_id);
+        .eq('id', examSubmission.id);
 
       if (error) {
-        console.error('Submission update error:', error);
-        if (error.message.includes('answer_text')) {
-          delete submissionData.answer_text;
-          const { error: retryError } = await supabase
-            .from('exam_submissions')
-            .update(submissionData)
-            .eq('exam_id', exam.id)
-            .eq('student_id', studentInfo.student_id);
-          
-          if (retryError) throw retryError;
-        } else {
-          throw error;
-        }
+        console.error('Error saving progress:', error);
+      } else {
+        console.log('Progress saved silently');
       }
-
-      // Clear timer
-      if (timerInterval) {
-        clearInterval(timerInterval);
-        setTimerInterval(null);
-      }
-
-      // Clear auto-save interval
-      if (window.autoSaveInterval) {
-        clearInterval(window.autoSaveInterval);
-        delete window.autoSaveInterval;
-      }
-
-      // Clear confirmation
-      localStorage.removeItem(`exam_confirmed_${examId}`);
-
-      setIsExamActive(false);
-      alert('Exam submitted successfully!');
-      navigate('/examinations');
     } catch (error) {
-      console.error('Error submitting exam:', error);
-      alert(`Failed to submit exam: ${error.message}\n\nPlease save your work and contact support.`);
-    } finally {
-      setSubmittingExam(false);
+      console.error('Error saving progress:', error);
     }
-  };
-
-  const uploadExamFiles = async (examId, studentId) => {
-    const uploadedUrls = [];
-    
-    for (let i = 0; i < examFiles.length; i++) {
-      const file = examFiles[i];
-      const timestamp = Date.now();
-      const randomStr = Math.random().toString(36).substring(2, 8);
-      const safeName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
-      const fileName = `${timestamp}_${randomStr}_${safeName}`;
-      
-      // Create the path structure: student_id/exam_id/filename
-      const filePath = `${studentId}/${examId}/${fileName}`;
-      
-      setUploadProgress(Math.round(((i + 1) / examFiles.length) * 100));
-
-      try {
-        // Upload to 'exam_files' bucket
-        const bucketName = 'Student exam'; // Adjust to your bucket name
-        const { error: uploadError } = await supabase.storage
-          .from(bucketName)
-          .upload(filePath, file, { upsert: false });
-
-        if (uploadError) {
-          console.error('File upload error:', uploadError);
-          continue;
-        }
-
-        // Generate FULL PUBLIC URL like assignment submissions
-        const { data: { publicUrl } } = supabase.storage
-          .from(bucketName)
-          .getPublicUrl(filePath);
-
-        // Store the full URL
-        uploadedUrls.push(publicUrl);
-      } catch (uploadError) {
-        console.error('Upload failed:', uploadError);
-      }
-    }
-
-    return uploadedUrls;
-  };
-
-  const downloadExamPaper = async (filePath) => {
-    try {
-      // Download from storage
-      const { data, error } = await supabase.storage
-        .from('Lecturer exam')
-        .download(filePath);
-
-      if (error) {
-        throw error;
-      }
-
-      // Create download link
-      const url = window.URL.createObjectURL(data);
-      const link = document.createElement('a');
-      link.href = url;
-      
-      // Extract filename from path
-      const fileName = filePath.split('/').pop();
-      link.download = fileName;
-      
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-
-      // Add to downloaded papers list
-      setDownloadedPapers(prev => [...prev, filePath]);
-      
-      // Close dropdown after download
-      setShowDownloadDropdown(false);
-      
-      alert(`Downloaded: ${fileName}`);
-    } catch (error) {
-      console.error('Error downloading exam paper:', error);
-      alert(`Failed to download file: ${error.message}`);
-    }
-  };
-
-  const handleFileSelect = (e) => {
-    const files = Array.from(e.target.files);
-    if (files.length + examFiles.length > 5) {
-      alert('Maximum 5 files allowed');
-      return;
-    }
-    setExamFiles([...examFiles, ...files]);
-  };
-
-  const handleRemoveFile = (index) => {
-    setExamFiles(examFiles.filter((_, i) => i !== index));
-  };
-
-  const handleAnswerChange = (questionId, value) => {
-    setExamAnswers(prev => ({
-      ...prev,
-      [questionId]: value
-    }));
-  };
-
-  const formatTime = (seconds) => {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    
-    if (hours > 0) {
-      return `${hours}h ${minutes.toString().padStart(2, '0')}m ${secs.toString().padStart(2, '0')}s`;
-    }
-    return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
   const saveProgress = async (showAlert = false) => {
@@ -584,16 +479,338 @@ const TakeExam = () => {
     }
   };
 
+  const handleStartConfirmation = async () => {
+    try {
+      if (!studentInfo) {
+        throw new Error('Student information not available');
+      }
+      
+      // Check if exam has ended
+      if (isExamEnded) {
+        alert('This exam has already ended. Please contact your lecturer.');
+        return;
+      }
+      
+      // Check if exam has started based on schedule
+      if (!isExamStarted) {
+        alert(`Exam has not started yet. It starts at ${formatEATDate(examStartTime)}`);
+        return;
+      }
+      
+      // Check if student has confirmed they started the exam
+      const hasConfirmed = localStorage.getItem(`exam_confirmed_${examId}`);
+      
+      if (!hasConfirmed) {
+        const startConfirmation = window.confirm(
+          `Have you started the ${exam.title} exam?\n\n` +
+          `Exam ends at: ${formatEATTimeOnly(exam.endTime)}\n` +
+          `Total Marks: ${exam.totalMarks}\n\n` +
+          `Only confirm "OK" when you have physically started the exam.\n\n` +
+          `Click "OK" to proceed to download exam papers.`
+        );
+        
+        if (!startConfirmation) {
+          return;
+        }
+        
+        localStorage.setItem(`exam_confirmed_${examId}`, 'true');
+      }
+      
+      const confirmed = window.confirm(
+        `Are you ready to start the ${exam.title} exam?\n\n` +
+        `Exam ends at: ${formatEATTimeOnly(exam.endTime)}\n` +
+        `Total Marks: ${exam.totalMarks}\n\n` +
+        `Do you want to continue?`
+      );
+      
+      if (!confirmed) return;
+
+      // Prepare submission data
+      const submissionData = {
+        exam_id: exam.id,
+        student_id: studentInfo.student_id,
+        status: 'started',
+        started_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      let submissionId;
+      if (examSubmission) {
+        // Update existing submission
+        const { data, error } = await supabase
+          .from('exam_submissions')
+          .update(submissionData)
+          .eq('id', examSubmission.id)
+          .select()
+          .single();
+        
+        if (error) throw error;
+        
+        setExamSubmission(data);
+        submissionId = data.id;
+      } else {
+        // Create new submission
+        try {
+          const { data, error } = await supabase
+            .from('exam_submissions')
+            .insert({
+              exam_id: exam.id,
+              student_id: studentInfo.student_id,
+              status: 'started',
+              started_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+            .select()
+            .single();
+          
+          if (error) throw error;
+          
+          setExamSubmission(data);
+          submissionId = data.id;
+        } catch (insertError) {
+          console.error('Insert failed:', insertError);
+          
+          // Try simpler insert
+          const { data, error } = await supabase
+            .from('exam_submissions')
+            .insert({
+              exam_id: exam.id,
+              student_id: studentInfo.student_id,
+              status: 'started'
+            })
+            .select()
+            .single();
+          
+          if (error) throw error;
+          
+          setExamSubmission(data);
+          submissionId = data.id;
+        }
+      }
+
+      // Hide the start confirmation and start the exam
+      setShowStartConfirmation(false);
+      setIsResuming(false);
+      setIsExamActive(true);
+      
+      // Start auto-save
+      startAutoSave(submissionId);
+      startTimer();
+      
+    } catch (error) {
+      console.error('Error starting exam:', error);
+      alert(`Failed to start exam. Please try again.\n\nError: ${error.message}`);
+    }
+  };
+
+  const handleSubmitExam = async () => {
+    if (!exam || !studentInfo) return;
+    
+    const confirmed = window.confirm(
+      'Are you sure you want to submit the exam?\n\n' +
+      'Once submitted, you cannot make changes.'
+    );
+    
+    if (!confirmed) return;
+    
+    await submitExamToServer();
+  };
+
+  const submitExamToServer = async () => {
+    if (!studentInfo) {
+      alert('Student information not available. Please try again.');
+      return;
+    }
+    
+    setSubmittingExam(true);
+    
+    try {
+      // Upload answer files if any
+      let answerFileUrls = [];
+      if (examFiles.length > 0) {
+        try {
+          answerFileUrls = await uploadExamFiles(exam.id, studentInfo.student_id);
+        } catch (uploadError) {
+          console.error('File upload error:', uploadError);
+        }
+      }
+
+      // Prepare submission data
+      const submissionData = {
+        status: 'submitted',
+        submitted_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      // Add answers based on exam type
+      if (exam.examType === 'online' && examQuestions.length > 0) {
+        submissionData.answers = examAnswers;
+      } else if (exam.examType === 'written_online') {
+        if (answerText) {
+          submissionData.answer_text = answerText;
+        }
+      }
+
+      // Add file URLs
+      if (answerFileUrls.length > 0) {
+        submissionData.answer_files = answerFileUrls;
+      }
+
+      // Update submission record
+      const { error } = await supabase
+        .from('exam_submissions')
+        .update(submissionData)
+        .eq('exam_id', exam.id)
+        .eq('student_id', studentInfo.student_id);
+
+      if (error) {
+        console.error('Submission update error:', error);
+        if (error.message.includes('answer_text')) {
+          delete submissionData.answer_text;
+          const { error: retryError } = await supabase
+            .from('exam_submissions')
+            .update(submissionData)
+            .eq('exam_id', exam.id)
+            .eq('student_id', studentInfo.student_id);
+          
+          if (retryError) throw retryError;
+        } else {
+          throw error;
+        }
+      }
+
+      // Clear intervals
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+      }
+      if (timeRemainingIntervalRef.current) {
+        clearInterval(timeRemainingIntervalRef.current);
+      }
+      if (window.autoSaveInterval) {
+        clearInterval(window.autoSaveInterval);
+        delete window.autoSaveInterval;
+      }
+
+      // Clear confirmation
+      localStorage.removeItem(`exam_confirmed_${examId}`);
+
+      setIsExamActive(false);
+      alert('Exam submitted successfully!');
+      navigate('/examinations');
+    } catch (error) {
+      console.error('Error submitting exam:', error);
+      alert(`Failed to submit exam: ${error.message}\n\nPlease save your work and contact support.`);
+    } finally {
+      setSubmittingExam(false);
+    }
+  };
+
+  const uploadExamFiles = async (examId, studentId) => {
+    const uploadedUrls = [];
+    
+    for (let i = 0; i < examFiles.length; i++) {
+      const file = examFiles[i];
+      const timestamp = Date.now();
+      const randomStr = Math.random().toString(36).substring(2, 8);
+      const safeName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
+      const fileName = `${timestamp}_${randomStr}_${safeName}`;
+      
+      const filePath = `${studentId}/${examId}/${fileName}`;
+      
+      setUploadProgress(Math.round(((i + 1) / examFiles.length) * 100));
+
+      try {
+        const bucketName = 'Student exam';
+        const { error: uploadError } = await supabase.storage
+          .from(bucketName)
+          .upload(filePath, file, { upsert: false });
+
+        if (uploadError) {
+          console.error('File upload error:', uploadError);
+          continue;
+        }
+
+        const { data: { publicUrl } } = supabase.storage
+          .from(bucketName)
+          .getPublicUrl(filePath);
+
+        uploadedUrls.push(publicUrl);
+      } catch (uploadError) {
+        console.error('Upload failed:', uploadError);
+      }
+    }
+
+    return uploadedUrls;
+  };
+
+  const downloadExamPaper = async (filePath) => {
+    try {
+      const { data, error } = await supabase.storage
+        .from('Lecturer exam')
+        .download(filePath);
+
+      if (error) {
+        throw error;
+      }
+
+      const url = window.URL.createObjectURL(data);
+      const link = document.createElement('a');
+      link.href = url;
+      
+      const fileName = filePath.split('/').pop();
+      link.download = fileName;
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      setTimeout(() => {
+        window.URL.revokeObjectURL(url);
+      }, 100);
+
+      setDownloadedPapers(prev => [...prev, filePath]);
+      setShowDownloadDropdown(false);
+      
+      alert(`Downloaded: ${fileName}`);
+    } catch (error) {
+      console.error('Error downloading exam paper:', error);
+      alert(`Failed to download file: ${error.message}`);
+    }
+  };
+
+  const handleFileSelect = (e) => {
+    const files = Array.from(e.target.files);
+    if (files.length + examFiles.length > 5) {
+      alert('Maximum 5 files allowed');
+      return;
+    }
+    setExamFiles([...examFiles, ...files]);
+  };
+
+  const handleRemoveFile = (index) => {
+    setExamFiles(examFiles.filter((_, i) => i !== index));
+  };
+
+  const handleAnswerChange = (questionId, value) => {
+    setExamAnswers(prev => ({
+      ...prev,
+      [questionId]: value
+    }));
+  };
+
+  const formatEndTime = (endTime) => {
+    if (!endTime) return 'Not set';
+    return formatEATTimeOnly(endTime);
+  };
+
   const startAutoSave = (submissionId) => {
-    // Clear any existing auto-save interval
     if (window.autoSaveInterval) {
       clearInterval(window.autoSaveInterval);
     }
     
-    // Auto-save every 30 seconds
     window.autoSaveInterval = setInterval(() => {
       if (isExamActive && examSubmission) {
-        saveProgress(false);
+        saveProgressSilently();
       }
     }, 30000);
   };
@@ -612,20 +829,15 @@ const TakeExam = () => {
     
     if (!confirmed) return;
 
-    // Save current progress
     try {
-      await saveProgress(false);
+      await saveProgressSilently();
     } catch (error) {
       console.error('Error saving on exit:', error);
     }
     
-    // Clear timer but keep exam active for resume
-    if (timerInterval) {
-      clearInterval(timerInterval);
-      setTimerInterval(null);
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
     }
-    
-    // Clear auto-save interval
     if (window.autoSaveInterval) {
       clearInterval(window.autoSaveInterval);
       delete window.autoSaveInterval;
@@ -637,15 +849,47 @@ const TakeExam = () => {
   };
 
   const handleResumeExam = () => {
+    // Check if exam has ended
+    if (isExamEnded) {
+      alert('Exam time has ended. Please contact your lecturer.');
+      return;
+    }
+    
+    // Check if exam has started based on schedule
+    if (!isExamStarted) {
+      alert(`Exam has not started yet. It starts at ${formatEATDate(examStartTime)}`);
+      return;
+    }
+    
     setIsResuming(false);
     setIsExamActive(true);
-    startTimer();
     
-    // Restart auto-save
     if (examSubmission) {
       startAutoSave(examSubmission.id);
     }
+    startTimer();
   };
+
+  const handleStartExam = () => {
+    // Show the start confirmation screen
+    setShowStartConfirmation(true);
+  };
+
+  const handleCancelStart = () => {
+    // Go back to examinations page
+    navigate('/examinations');
+  };
+
+  // Auto-submit when time is up
+  useEffect(() => {
+    if (isTimeUp && isExamActive) {
+      const autoSubmit = async () => {
+        alert('Time is up! Your exam will be submitted automatically.');
+        await submitExamToServer();
+      };
+      autoSubmit();
+    }
+  }, [isTimeUp, isExamActive]);
 
   // Render loading state
   if (loading) {
@@ -684,7 +928,90 @@ const TakeExam = () => {
     );
   }
 
-  // Render start/resume screen (exam not active)
+  // Render START CONFIRMATION SCREEN (shown only when starting NEW exam)
+  if (showStartConfirmation) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.startContainer}>
+          <div style={styles.startHeader}>
+            <h1 style={styles.startTitle}>{exam.title}</h1>
+            <p style={styles.startSubtitle}>
+              <i className="fas fa-book"></i> {exam.courseCode}: {exam.courseName}
+            </p>
+            {studentInfo && (
+              <div style={styles.studentBadge}>
+                <i className="fas fa-user"></i> {studentInfo.name} ({studentInfo.student_id.slice(0, 8)}...)
+              </div>
+            )}
+          </div>
+
+          <div style={styles.startContent}>
+            <div style={styles.instructions}>
+              <h3><i className="fas fa-info-circle"></i> Instructions</h3>
+              <ul style={styles.instructionsList}>
+                <li>Exam ends at: {formatEndTime(exam.endTime)}</li>
+                <li>Once started, you can exit and resume later</li>
+                <li>You can either use the online answer sheet or upload files</li>
+                <li>Your progress is auto-saved every 30 seconds</li>
+                <li>Make sure you have a stable internet connection</li>
+                {isExamEnded && (
+                  <li style={{color: '#dc3545', fontWeight: 'bold'}}>
+                    <i className="fas fa-exclamation-triangle"></i> Exam period has ended
+                  </li>
+                )}
+              </ul>
+            </div>
+
+            <div style={styles.examInfo}>
+              <div style={styles.infoRow}>
+                <i className="fas fa-clock"></i>
+                <span>End Time: {formatEndTime(exam.endTime)}</span>
+              </div>
+              <div style={styles.infoRow}>
+                <i className="fas fa-chart-bar"></i>
+                <span>Total Marks: {exam.totalMarks}</span>
+              </div>
+              {exam.passingMarks && (
+                <div style={styles.infoRow}>
+                  <i className="fas fa-check-circle"></i>
+                  <span>Passing Marks: {exam.passingMarks}</span>
+                </div>
+              )}
+              <div style={styles.infoRow}>
+                <i className="fas fa-question-circle"></i>
+                <span>Type: {exam.examType === 'written_online' ? 'Written' : 'Online'} Exam</span>
+              </div>
+              <div style={styles.infoRow}>
+                <i className="fas fa-user"></i>
+                <span>Student: {studentInfo?.name || 'Unknown'}</span>
+              </div>
+            </div>
+
+            <div style={styles.buttonGroup}>
+              <button 
+                onClick={handleStartConfirmation}
+                style={{
+                  ...styles.startButton,
+                  backgroundColor: !isExamStarted || isExamEnded ? '#6c757d' : '#28a745',
+                  cursor: !isExamStarted || isExamEnded ? 'not-allowed' : 'pointer'
+                }}
+                disabled={!isExamStarted || isExamEnded}
+              >
+                <i className="fas fa-play"></i>
+                Start Exam
+              </button>
+              <button onClick={handleCancelStart} style={styles.cancelButton}>
+                <i className="fas fa-times"></i>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Render start/resume screen (exam not active, no start confirmation shown)
   if (!isExamActive) {
     return (
       <div style={styles.container}>
@@ -702,75 +1029,144 @@ const TakeExam = () => {
           </div>
 
           <div style={styles.startContent}>
+            {/* Exam Schedule Info */}
+            <div style={styles.scheduleInfo}>
+              <h3><i className="fas fa-calendar-alt"></i> Exam Schedule</h3>
+              <div style={styles.scheduleGrid}>
+                <div style={styles.scheduleItem}>
+                  <i className="fas fa-play-circle" style={styles.scheduleIcon}></i>
+                  <div>
+                    <div style={styles.scheduleLabel}>Start Time</div>
+                    <div style={styles.scheduleValue}>{formatEATDate(exam.startTime)}</div>
+                  </div>
+                </div>
+                <div style={styles.scheduleItem}>
+                  <i className="fas fa-stop-circle" style={styles.scheduleIcon}></i>
+                  <div>
+                    <div style={styles.scheduleLabel}>End Time</div>
+                    <div style={styles.scheduleValue}>{formatEATDate(exam.endTime)}</div>
+                  </div>
+                </div>
+                <div style={styles.scheduleItem}>
+                  <i className="fas fa-clock" style={styles.scheduleIcon}></i>
+                  <div>
+                    <div style={styles.scheduleLabel}>Duration</div>
+                    <div style={styles.scheduleValue}>{exam.duration} minutes</div>
+                  </div>
+                </div>
+                <div style={styles.scheduleItem}>
+                  <i className="fas fa-globe-africa" style={styles.scheduleIcon}></i>
+                  <div>
+                    <div style={styles.scheduleLabel}>Time Zone</div>
+                    <div style={styles.scheduleValue}>East Africa Time (EAT)</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Timer Display - Shows either countdown to start or exam ended */}
+            {!isExamStarted && !isExamEnded && (
+              <div style={styles.timeUntilStartContainer}>
+                <div style={styles.timeUntilStartHeader}>
+                  <i className="fas fa-hourglass-start"></i>
+                  <span>Exam Starts In</span>
+                </div>
+                <div style={styles.timeUntilStartDisplay}>
+                  <div style={styles.timeUnit}>
+                    <div style={styles.timeNumber}>{timeUntilStart.hours.toString().padStart(2, '0')}</div>
+                    <div style={styles.timeLabel}>HOURS</div>
+                  </div>
+                  <div style={styles.timeSeparator}>:</div>
+                  <div style={styles.timeUnit}>
+                    <div style={styles.timeNumber}>{timeUntilStart.minutes.toString().padStart(2, '0')}</div>
+                    <div style={styles.timeLabel}>MINUTES</div>
+                  </div>
+                  <div style={styles.timeSeparator}>:</div>
+                  <div style={styles.timeUnit}>
+                    <div style={styles.timeNumber}>{timeUntilStart.seconds.toString().padStart(2, '0')}</div>
+                    <div style={styles.timeLabel}>SECONDS</div>
+                  </div>
+                </div>
+                <div style={styles.currentTime}>
+                  <i className="fas fa-clock"></i>
+                  Current Time (EAT): {getCurrentEATTime().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}
+                </div>
+              </div>
+            )}
+
+            {isExamEnded && (
+              <div style={styles.examEndedAlert}>
+                <i className="fas fa-exclamation-triangle" style={styles.examEndedIcon}></i>
+                <h3>Exam Period Has Ended</h3>
+                <p>The scheduled exam time has passed. Please contact your lecturer for further instructions.</p>
+                <div style={styles.examEndedInfo}>
+                  <div>Exam ended at: {formatEATDate(exam.endTime)}</div>
+                  <div>Current time (EAT): {getCurrentEATTime().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}</div>
+                </div>
+              </div>
+            )}
+
             {/* Resume section */}
-            {isResuming && remainingTime > 0 ? (
+            {isResuming ? (
               <div style={styles.resumeAlert}>
                 <i className="fas fa-history" style={styles.resumeIcon}></i>
                 <h3>Resume Exam</h3>
                 <p>You have an incomplete exam session. You can resume where you left off.</p>
-                <div style={styles.timeInfo}>
-                  <i className="fas fa-hourglass-half"></i>
-                  <span>Time remaining: {formatTime(remainingTime)}</span>
-                </div>
+                
+                {isExamEnded ? (
+                  <div style={styles.timeUpWarning}>
+                    <i className="fas fa-exclamation-triangle"></i>
+                    <span>Exam time has ended. Please contact your lecturer.</span>
+                  </div>
+                ) : !isExamStarted ? (
+                  <div style={styles.timeInfo}>
+                    <i className="fas fa-clock"></i>
+                    <span>Exam starts at: {formatEATDate(exam.startTime)}</span>
+                  </div>
+                ) : (
+                  <div style={styles.timeInfo}>
+                  
+                  </div>
+                )}
                 
                 <div style={styles.buttonGroup}>
-                  <button onClick={handleResumeExam} style={styles.resumeButton}>
-                    <i className="fas fa-play-circle"></i>
-                    Resume Exam
-                  </button>
-                  <button onClick={handleCancelExam} style={styles.cancelButton}>
-                    <i className="fas fa-times"></i>
-                    Cancel
+                  {!isExamEnded && isExamStarted && (
+                    <button onClick={handleResumeExam} style={styles.resumeButton}>
+                      <i className="fas fa-play-circle"></i>
+                      Resume Exam
+                    </button>
+                  )}
+                  {!isExamEnded && isExamStarted && (
+                    <button onClick={handleCancelExam} style={styles.cancelButton}>
+                      <i className="fas fa-times"></i>
+                      Cancel
+                    </button>
+                  )}
+                  <button onClick={handleSubmitExam} style={styles.submitButton}>
+                    <i className="fas fa-paper-plane"></i>
+                    Submit Now
                   </button>
                 </div>
               </div>
             ) : (
-              /* Start new exam section */
+                
+                
+              /* Start new exam section - Shows button to go to confirmation screen */
               <div>
-                <div style={styles.instructions}>
-                  <h3><i className="fas fa-info-circle"></i> Instructions</h3>
-                  <ul style={styles.instructionsList}>
-                    <li>You have {exam.duration} minutes to complete the exam</li>
-                    <li>Once started, the timer will begin automatically</li>
-                    <li>You can exit and resume the exam later</li>
-                    <li>Your progress is auto-saved every 30 seconds</li>
-                    <li>Make sure you have a stable internet connection</li>
-                    <li>The exam will auto-submit when time expires</li>
-                    <li>Submit files will be stored as full public URLs</li>
-                  </ul>
-                </div>
-
-                <div style={styles.examInfo}>
-                  <div style={styles.infoRow}>
-                    <i className="fas fa-clock"></i>
-                    <span>Duration: {exam.duration} minutes</span>
-                  </div>
-                  <div style={styles.infoRow}>
-                    <i className="fas fa-chart-bar"></i>
-                    <span>Total Marks: {exam.totalMarks}</span>
-                  </div>
-                  {exam.passingMarks && (
-                    <div style={styles.infoRow}>
-                      <i className="fas fa-check-circle"></i>
-                      <span>Passing Marks: {exam.passingMarks}</span>
-                    </div>
-                  )}
-                  <div style={styles.infoRow}>
-                    <i className="fas fa-question-circle"></i>
-                    <span>Type: {exam.examType === 'written_online' ? 'Written' : 'Online'} Exam</span>
-                  </div>
-                  <div style={styles.infoRow}>
-                    <i className="fas fa-user"></i>
-                    <span>Student: {studentInfo?.name || 'Unknown'}</span>
-                  </div>
-                </div>
-
                 <div style={styles.buttonGroup}>
-                  <button onClick={handleStartExam} style={styles.startButton}>
+                  <button 
+                    onClick={handleStartExam}
+                    style={{
+                      ...styles.startButton,
+                      backgroundColor: !isExamStarted || isExamEnded ? '#6c757d' : '#28a745',
+                      cursor: !isExamStarted || isExamEnded ? 'not-allowed' : 'pointer'
+                    }}
+                    disabled={!isExamStarted || isExamEnded}
+                  >
                     <i className="fas fa-play"></i>
-                    Start Exam
+                    {!isExamStarted ? 'Waiting for Start Time' : isExamEnded ? 'Exam Ended' : 'Proceed to Exam'}
                   </button>
-                  <button onClick={handleCancelExam} style={styles.cancelButton}>
+                  <button onClick={() => navigate('/examinations')} style={styles.cancelButton}>
                     <i className="fas fa-times"></i>
                     Cancel
                   </button>
@@ -791,14 +1187,14 @@ const TakeExam = () => {
 
   return (
     <div style={styles.container}>
-      {/* Exam Header */}
+      {/* Exam Header with Timer */}
       <div style={styles.examHeader}>
         <div style={styles.headerLeft}>
           <div style={styles.courseInfo}>
             <h1 style={styles.courseCode}>{exam.courseCode}</h1>
             <div style={styles.examMeta}>
               <span style={styles.metaItem}>
-                <i className="fas fa-clock"></i> {exam.duration} minutes
+                <i className="fas fa-clock"></i> Ends: {formatEndTime(exam.endTime)}
               </span>
               <span style={styles.metaItem}>
                 <i className="fas fa-chart-bar"></i> {exam.totalMarks} marks
@@ -811,6 +1207,43 @@ const TakeExam = () => {
         </div>
         
         <div style={styles.headerRight}>
+          {/* Timer Display */}
+          <div style={styles.timerContainer}>
+            <div style={styles.timer}>
+              <div style={styles.timerDisplay}>
+                <div style={styles.timeUnit}>
+                  <div style={styles.timeNumber}>{timeRemaining.hours.toString().padStart(2, '0')}</div>
+                  <div style={styles.timeLabel}>HOURS</div>
+                </div>
+                <div style={styles.timeSeparator}>:</div>
+                <div style={styles.timeUnit}>
+                  <div style={styles.timeNumber}>{timeRemaining.minutes.toString().padStart(2, '0')}</div>
+                  <div style={styles.timeLabel}>MINUTES</div>
+                </div>
+                <div style={styles.timeSeparator}>:</div>
+                <div style={styles.timeUnit}>
+                  <div style={styles.timeNumber}>{timeRemaining.seconds.toString().padStart(2, '0')}</div>
+                  <div style={styles.timeLabel}>SECONDS</div>
+                </div>
+              </div>
+              <div style={styles.timerProgress}>
+                <div style={styles.progressBarContainer}>
+                  <div style={{
+                    ...styles.progressBarFill,
+                    width: `${((totalDurationMinutes - (timeRemaining.hours * 60 + timeRemaining.minutes)) / totalDurationMinutes) * 100}%`
+                  }} />
+                </div>
+                <div style={styles.progressText}>
+                  Elapsed: {timeElapsed.hours}h {timeElapsed.minutes}m / {totalDurationMinutes}m
+                </div>
+              </div>
+              <div style={styles.currentTimeDisplay}>
+                <i className="fas fa-clock"></i>
+                EAT: {getCurrentEATTime().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+              </div>
+            </div>
+          </div>
+          
           {/* Download Button */}
           {exam.examFiles && exam.examFiles.length > 0 && (
             <div style={styles.downloadSection}>
@@ -868,21 +1301,16 @@ const TakeExam = () => {
               )}
             </div>
           )}
-          
-          {/* Timer */}
-          <div style={styles.timerContainer}>
-            <div style={styles.timerDisplay}>
-              <div style={{
-                ...styles.timer,
-                color: remainingTime < 300 ? '#e74c3c' : '#2ecc71'
-              }}>
-                {formatTime(remainingTime)}
-              </div>
-              <div style={styles.timerLabel}>Time Remaining</div>
-            </div>
-          </div>
         </div>
       </div>
+
+      {/* Time Warning Alert */}
+      {timeRemaining.hours === 0 && timeRemaining.minutes < 10 && timeRemaining.minutes > 0 && (
+        <div style={styles.timeWarningAlert}>
+          <i className="fas fa-exclamation-triangle"></i>
+          <span>Time Alert: Less than {timeRemaining.minutes} minute{timeRemaining.minutes !== 1 ? 's' : ''} remaining!</span>
+        </div>
+      )}
 
       {/* Main Exam Content */}
       <div style={styles.examContent}>
@@ -1001,7 +1429,7 @@ const TakeExam = () => {
                       <textarea
                         value={examAnswers[activeQuestion.id] || ''}
                         onChange={(e) => handleAnswerChange(activeQuestion.id, e.target.value)}
-                        placeholder="Type your answer here..."
+                        placeholder="Type your answer here...\n\nYou can write essays, short answers, or calculations.\n\nUse the full space available for your response."
                         style={styles.answerTextarea}
                       />
                     )}
@@ -1052,7 +1480,7 @@ const TakeExam = () => {
                 </h3>
                 
                 <div style={styles.writtenInstructions}>
-                  {exam.instructions || 'Please write your answers below. You can also upload files if needed.'}
+                  {exam.instructions || 'Please write your answers below or upload files.'}
                   <div style={styles.bucketNote}>
                     <i className="fas fa-info-circle"></i>
                     Your submitted files will be stored as full public URLs
@@ -1062,7 +1490,7 @@ const TakeExam = () => {
                 <textarea
                   value={answerText}
                   onChange={(e) => setAnswerText(e.target.value)}
-                  placeholder="Write your exam answers here...\n\nYou can type your responses, essays, calculations, etc.\n\nMake sure to save your work periodically."
+                  placeholder="Write your exam answers here...\n\nYou can type your responses, essays, calculations, etc.\n\nMake sure to save your work periodically.\n\nThis text area is large to give you plenty of space for writing comprehensive answers."
                   style={styles.writtenTextarea}
                 />
                 
@@ -1279,7 +1707,7 @@ const styles = {
     padding: '25px',
     borderRadius: '12px 12px 0 0',
     width: '100%',
-    maxWidth: '800px',
+    maxWidth: '900px',
     textAlign: 'center'
   },
   startTitle: {
@@ -1307,11 +1735,50 @@ const styles = {
     padding: '30px',
     borderRadius: '0 0 12px 12px',
     width: '100%',
-    maxWidth: '800px',
+    maxWidth: '900px',
     boxShadow: '0 4px 20px rgba(0,0,0,0.1)'
   },
   
-  resumeAlert: {
+  // Schedule Info
+  scheduleInfo: {
+    backgroundColor: '#f8f9fa',
+    border: '1px solid #e9ecef',
+    borderRadius: '8px',
+    padding: '20px',
+    marginBottom: '25px'
+  },
+  scheduleGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+    gap: '15px',
+    marginTop: '15px'
+  },
+  scheduleItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    padding: '10px',
+    backgroundColor: 'white',
+    borderRadius: '6px',
+    border: '1px solid #dee2e6'
+  },
+  scheduleIcon: {
+    fontSize: '24px',
+    color: '#007bff'
+  },
+  scheduleLabel: {
+    fontSize: '12px',
+    color: '#6c757d',
+    marginBottom: '2px'
+  },
+  scheduleValue: {
+    fontSize: '14px',
+    fontWeight: '500',
+    color: '#2c3e50'
+  },
+  
+  // Time until start display
+  timeUntilStartContainer: {
     backgroundColor: '#fff3cd',
     border: '1px solid #ffc107',
     borderRadius: '8px',
@@ -1319,22 +1786,79 @@ const styles = {
     marginBottom: '25px',
     textAlign: 'center'
   },
-  resumeIcon: {
-    fontSize: '48px',
-    color: '#ffc107',
-    marginBottom: '15px'
-  },
-  timeInfo: {
+  timeUntilStartHeader: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     gap: '10px',
-    marginTop: '15px',
-    marginBottom: '20px',
+    marginBottom: '15px',
     fontSize: '18px',
     fontWeight: '600',
     color: '#856404'
   },
+  timeUntilStartDisplay: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '10px',
+    marginBottom: '15px'
+  },
+  timeUnit: {
+    textAlign: 'center'
+  },
+  timeNumber: {
+    fontSize: '36px',
+    fontWeight: 'bold',
+    color: '#856404',
+    backgroundColor: 'white',
+    padding: '10px',
+    borderRadius: '8px',
+    minWidth: '70px',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+  },
+  timeLabel: {
+    fontSize: '10px',
+    color: '#856404',
+    marginTop: '5px',
+    fontWeight: '500',
+    textTransform: 'uppercase'
+  },
+  timeSeparator: {
+    fontSize: '24px',
+    color: '#856404',
+    fontWeight: 'bold',
+    marginBottom: '15px'
+  },
+  currentTime: {
+    fontSize: '14px',
+    color: '#856404',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px'
+  },
+  
+  // Exam ended alert
+  examEndedAlert: {
+    backgroundColor: '#f8d7da',
+    border: '1px solid #f5c6cb',
+    borderRadius: '8px',
+    padding: '20px',
+    marginBottom: '25px',
+    textAlign: 'center'
+  },
+  examEndedIcon: {
+    fontSize: '36px',
+    color: '#dc3545',
+    marginBottom: '15px'
+  },
+  examEndedInfo: {
+    marginTop: '15px',
+    fontSize: '14px',
+    color: '#721c24'
+  },
+  
+  // Start Confirmation Screen Styles
   instructions: {
     backgroundColor: '#f8f9fa',
     border: '1px solid #e9ecef',
@@ -1366,7 +1890,8 @@ const styles = {
   buttonGroup: {
     display: 'flex',
     gap: '15px',
-    justifyContent: 'center'
+    justifyContent: 'center',
+    flexWrap: 'wrap'
   },
   startButton: {
     padding: '14px 32px',
@@ -1381,6 +1906,19 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     gap: '10px'
+  },
+  resumeAlert: {
+    backgroundColor: '#fff3cd',
+    border: '1px solid #ffc107',
+    borderRadius: '8px',
+    padding: '25px',
+    marginBottom: '25px',
+    textAlign: 'center'
+  },
+  resumeIcon: {
+    fontSize: '48px',
+    color: '#ffc107',
+    marginBottom: '15px'
   },
   resumeButton: {
     padding: '14px 32px',
@@ -1410,8 +1948,47 @@ const styles = {
     justifyContent: 'center',
     gap: '10px'
   },
+  submitButton: {
+    padding: '14px 32px',
+    backgroundColor: '#28a745',
+    color: 'white',
+    border: 'none',
+    borderRadius: '8px',
+    fontSize: '16px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '10px'
+  },
+  timeInfo: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '10px',
+    marginTop: '15px',
+    marginBottom: '20px',
+    fontSize: '18px',
+    fontWeight: '600',
+    color: '#856404'
+  },
+  timeUpWarning: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '10px',
+    marginTop: '15px',
+    marginBottom: '20px',
+    fontSize: '16px',
+    fontWeight: '500',
+    color: '#dc3545',
+    backgroundColor: '#f8d7da',
+    padding: '10px',
+    borderRadius: '6px'
+  },
   
-  // Active exam header styles
+  // Active exam header styles with Timer
   examHeader: {
     backgroundColor: 'white',
     padding: '15px 30px',
@@ -1455,6 +2032,73 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: '20px'
+  },
+  
+  // Timer styles
+  timerContainer: {
+    backgroundColor: '#f8f9fa',
+    border: '1px solid #dee2e6',
+    borderRadius: '8px',
+    padding: '10px',
+    minWidth: '280px'
+  },
+  timer: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center'
+  },
+  timerDisplay: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '5px',
+    marginBottom: '8px'
+  },
+  timeWarning: {
+    color: '#dc3545',
+    fontWeight: 'bold'
+  },
+  timerProgress: {
+    width: '100%',
+    marginBottom: '5px'
+  },
+  progressBarContainer: {
+    width: '100%',
+    height: '6px',
+    backgroundColor: '#e9ecef',
+    borderRadius: '3px',
+    overflow: 'hidden',
+    marginBottom: '3px'
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#28a745',
+    transition: 'width 1s linear'
+  },
+  progressText: {
+    fontSize: '11px',
+    color: '#6c757d',
+    textAlign: 'center'
+  },
+  currentTimeDisplay: {
+    fontSize: '11px',
+    color: '#6c757d',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '5px'
+  },
+  
+  // Time warning alert
+  timeWarningAlert: {
+    backgroundColor: '#dc3545',
+    color: 'white',
+    padding: '10px 20px',
+    textAlign: 'center',
+    fontWeight: 'bold',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '10px'
   },
   
   // Download section in header
@@ -1554,30 +2198,6 @@ const styles = {
     alignItems: 'center',
     gap: '5px',
     flexShrink: 0
-  },
-  
-  timerContainer: {
-    textAlign: 'center',
-    minWidth: '160px'
-  },
-  timerDisplay: {
-    backgroundColor: '#f8f9fa',
-    padding: '10px 15px',
-    borderRadius: '8px',
-    border: '2px solid #e9ecef'
-  },
-  timer: {
-    fontSize: '24px',
-    fontWeight: '700',
-    fontFamily: "'Roboto Mono', monospace",
-    marginBottom: '4px',
-    color: '#2ecc71'
-  },
-  timerLabel: {
-    fontSize: '11px',
-    color: '#6c757d',
-    textTransform: 'uppercase',
-    letterSpacing: '1px'
   },
   
   // Exam content styles
@@ -1754,17 +2374,21 @@ const styles = {
     fontSize: '15px'
   },
   
-  // Text answer area
+  // Text answer area - ENHANCED SIZE
   answerTextarea: {
     width: '100%',
-    minHeight: '150px',
-    padding: '16px',
+    minHeight: '300px', // Increased from 150px
+    maxHeight: '600px', // Added max height
+    padding: '20px', // Increased padding
     border: '2px solid #e0e0e0',
     borderRadius: '8px',
-    fontSize: '15px',
-    lineHeight: '1.5',
+    fontSize: '16px', // Slightly larger font
+    lineHeight: '1.6',
     resize: 'vertical',
-    fontFamily: "'Inter', sans-serif"
+    fontFamily: "'Inter', sans-serif",
+    backgroundColor: '#fafafa',
+    boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.1)',
+    transition: 'border-color 0.2s ease'
   },
   
   // Navigation buttons
@@ -1793,7 +2417,7 @@ const styles = {
     color: 'white'
   },
   
-  // Written exam styles
+  // Written exam styles - ENHANCED TEXTAREA
   writtenExamCard: {
     backgroundColor: 'white',
     borderRadius: '12px',
@@ -1827,15 +2451,19 @@ const styles = {
   },
   writtenTextarea: {
     width: '100%',
-    minHeight: '300px',
-    padding: '20px',
+    minHeight: '500px', // Increased from 300px
+    maxHeight: '800px', // Added max height
+    padding: '25px', // Increased padding
     border: '2px solid #e0e0e0',
     borderRadius: '8px',
-    fontSize: '15px',
-    lineHeight: '1.6',
+    fontSize: '16px', // Slightly larger font
+    lineHeight: '1.7', // Increased line height
     resize: 'vertical',
     fontFamily: "'Inter', sans-serif",
-    marginBottom: '25px'
+    marginBottom: '25px',
+    backgroundColor: '#fafafa',
+    boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.1)',
+    transition: 'border-color 0.2s ease'
   },
   
   // File upload styles
@@ -2016,6 +2644,23 @@ styleSheet.textContent = `
   @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
+  }
+  
+  @keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+  }
+  
+  .time-warning {
+    animation: pulse 1s infinite;
+  }
+  
+  /* Enhanced textarea focus effect */
+  textarea:focus {
+    outline: none;
+    border-color: #3498db;
+    box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
   }
 `;
 document.head.appendChild(styleSheet);
