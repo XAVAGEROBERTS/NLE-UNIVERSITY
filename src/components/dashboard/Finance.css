@@ -1,4 +1,4 @@
-/* Finance.css - Styles for Finance Component */
+/* Finance.css - Fully Responsive Styles with Original Design */
 
 /* Base container */
 .finance-container {
@@ -200,13 +200,14 @@
   line-height: 1.3;
 }
 
-/* Semester Containers */
+/* Semester Containers - Desktop Only */
 .semester-container {
   background-color: white;
   border-radius: 12px;
   padding: 20px;
   margin-bottom: 30px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  display: none;
 }
 
 .semester-header {
@@ -232,12 +233,13 @@
   gap: 10px;
 }
 
-/* Tables */
+/* Tables - Desktop Only */
 .table-responsive {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   border-radius: 8px;
   border: 1px solid #dee2e6;
+  display: none;
 }
 
 .semester-table, 
@@ -417,7 +419,7 @@
   color: #0f5132;
 }
 
-/* Payment History */
+/* Payment History Container */
 .payment-history-container {
   background-color: white;
   border-radius: 12px;
@@ -499,6 +501,12 @@
   animation: spin 1s linear infinite;
 }
 
+.loading-spinner p {
+  color: #6c757d;
+  font-size: 1rem;
+  margin-left: 15px;
+}
+
 /* Error Container */
 .error-container {
   padding: 30px;
@@ -515,11 +523,24 @@
   margin-bottom: 20px;
 }
 
+.error-container h3 {
+  margin: 0 0 15px 0;
+  color: #dc3545;
+  font-size: 1.3rem;
+}
+
 .error-container p {
   color: #d33;
   margin-bottom: 20px;
   font-size: 16px;
   line-height: 1.5;
+}
+
+.error-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
 }
 
 .retry-button {
@@ -530,13 +551,18 @@
   border-radius: 6px;
   cursor: pointer;
   font-size: 14px;
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 8px;
   font-weight: 500;
+  transition: all 0.2s ease;
 }
 
-/* Mobile Styles */
+.retry-button:hover {
+  background-color: #0056b3;
+}
+
+/* Mobile Styles - Visible by default */
 .mobile-semester-summary {
   background-color: white;
   border-radius: 12px;
@@ -544,6 +570,7 @@
   margin-bottom: 20px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   border-top: 4px solid;
+  display: block;
 }
 
 .mobile-semester-header {
@@ -571,6 +598,27 @@
   border-radius: 12px;
   font-size: 12px;
   margin-left: 10px;
+}
+
+.mobile-pay-button {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  background-color: #28a745;
+  color: white;
+  min-height: 44px;
+}
+
+.mobile-pay-button:hover {
+  background-color: #218838;
 }
 
 .mobile-semester-totals {
@@ -710,7 +758,7 @@
   color: #2c3e50;
 }
 
-.mobile-payment-date {
+.mobile-due-date {
   font-size: 11px;
   color: #95a5a6;
   padding-top: 8px;
@@ -736,30 +784,49 @@
   font-size: 13px;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   white-space: nowrap;
   width: 100%;
-  justify-content: center;
+  min-height: 40px;
+  transition: all 0.2s;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.mobile-no-items {
+.mobile-receipt-button:hover {
+  background-color: #e9e9e9;
+}
+
+.mobile-no-items,
+.mobile-no-fees {
   padding: 20px;
   text-align: center;
   background-color: #f8f9fa;
   border-radius: 8px;
   border: 2px dashed #dee2e6;
+  margin: 10px 0;
 }
 
-.mobile-no-items i {
+.mobile-no-items i,
+.mobile-no-fees i {
   font-size: 32px;
   color: #bdc3c7;
   margin-bottom: 10px;
+  display: block;
 }
 
-.mobile-no-items p {
-  margin: 0;
+.mobile-no-items p,
+.mobile-no-fees p {
+  margin: 0 0 8px 0;
   color: #95a5a6;
   font-size: 14px;
+}
+
+.mobile-no-fees-note {
+  font-size: 12px !important;
+  color: #bdc3c7 !important;
+  line-height: 1.3;
 }
 
 /* Mobile Payment History */
@@ -795,6 +862,9 @@
   margin: 0;
   font-size: 13px;
   color: #7f8c8d;
+  display: flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .mobile-semester-badge {
@@ -812,6 +882,13 @@
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
   margin-bottom: 12px;
+}
+
+.mobile-payment-amount,
+.mobile-payment-method {
+  background-color: #f8f9fa;
+  padding: 10px;
+  border-radius: 6px;
 }
 
 .mobile-payment-details p:first-child {
@@ -834,6 +911,8 @@
   align-items: center;
   padding-top: 12px;
   border-top: 1px solid #eee;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .mobile-payment-status {
@@ -844,22 +923,216 @@
   font-weight: 500;
 }
 
+/* Finance Footer */
+.finance-footer {
+  margin-top: 20px;
+  padding: 20px;
+  background-color: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.footer-info,
+.footer-notes {
+  font-size: 0.9rem;
+  color: #6c757d;
+  line-height: 1.5;
+}
+
+.footer-info p,
+.footer-notes p {
+  margin: 0 0 10px 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.footer-info p:last-child,
+.footer-notes p:last-child {
+  margin-bottom: 0;
+}
+
+.footer-notes {
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid #eee;
+}
+
 /* Animations */
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }
 
-/* Responsive Breakpoints */
-@media (max-width: 768px) {
-  .finance-header {
-    flex-direction: column;
-    align-items: flex-start;
+/* Enhanced Responsive Breakpoints */
+
+/* Small mobile devices (320px - 374px) */
+@media (max-width: 374px) {
+  .finance-container {
+    padding: 0.75rem;
+  }
+  
+  .finance-header,
+  .currency-selector,
+  .annual-summary,
+  .mobile-semester-summary,
+  .payment-history-container,
+  .finance-footer {
+    padding: 15px;
+    margin-bottom: 15px;
+  }
+  
+  .finance-header h2 {
+    font-size: 1.3rem;
+    gap: 6px;
+  }
+  
+  .finance-header h2 i {
+    font-size: 1.2rem;
+  }
+  
+  .student-info {
+    font-size: 0.8rem;
+    gap: 6px;
+  }
+  
+  .student-info span {
+    margin-bottom: 2px;
   }
   
   .header-actions {
     width: 100%;
-    justify-content: flex-start;
+    flex-direction: column;
+  }
+  
+  .refresh-button,
+  .statement-button,
+  .mobile-pay-button,
+  .retry-button {
+    width: 100%;
+    justify-content: center;
+    padding: 10px;
+    font-size: 0.9rem;
+  }
+  
+  .currency-selector {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  
+  .currency-selector label {
+    width: 100%;
+  }
+  
+  .currency-dropdown {
+    width: 100%;
+    min-width: auto;
+  }
+  
+  .exchange-rate {
+    margin-left: 0;
+    width: 100%;
+    text-align: center;
+    padding-top: 8px;
+    border-top: 1px solid #eee;
+  }
+  
+  .summary-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  
+  .summary-item {
+    padding: 12px;
+  }
+  
+  .summary-amount {
+    font-size: 18px;
+  }
+  
+  .mobile-semester-totals {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  
+  .mobile-total-item {
+    padding: 12px;
+  }
+  
+  .mobile-total-item p:last-child {
+    font-size: 16px;
+  }
+  
+  .progress-circle-container {
+    width: 80px;
+    height: 80px;
+  }
+  
+  .progress-circle-text div:first-child {
+    font-size: 16px;
+  }
+  
+  .progress-circle-text div:last-child {
+    font-size: 11px;
+  }
+  
+  .mobile-fee-amounts,
+  .mobile-payment-details {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  
+  .mobile-fee-item,
+  .mobile-payment-card {
+    padding: 14px;
+  }
+  
+  .mobile-fee-header,
+  .mobile-payment-header {
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-start;
+  }
+  
+  .mobile-fee-status,
+  .mobile-semester-badge {
+    align-self: flex-start;
+  }
+  
+  .mobile-payment-footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  
+  .mobile-payment-status {
+    align-self: flex-start;
+  }
+  
+  .error-actions {
+    flex-direction: column;
+  }
+  
+  .retry-button {
+    width: 100%;
+  }
+}
+
+/* Medium mobile devices (375px - 424px) */
+@media (min-width: 375px) and (max-width: 424px) {
+  .finance-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .header-actions {
+    flex-direction: column;
+  }
+  
+  .refresh-button,
+  .statement-button {
+    width: 100%;
   }
   
   .currency-selector {
@@ -871,80 +1144,191 @@
   .exchange-rate {
     margin-left: 0;
     width: 100%;
+    text-align: center;
   }
   
   .summary-grid {
-    grid-template-columns: 1fr;
-  }
-  
-  .semester-header, 
-  .payment-history-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 12px;
-  }
-  
-  .semester-header h3, 
-  .payment-history-header h3 {
-    font-size: 1.2rem;
-  }
-  
-  .header-buttons {
-    width: 100%;
-    flex-direction: column;
-  }
-  
-  .header-buttons button {
-    width: 100%;
+    grid-template-columns: repeat(2, 1fr);
   }
   
   .mobile-semester-totals {
-    grid-template-columns: 1fr;
-    gap: 10px;
+    grid-template-columns: repeat(3, 1fr);
   }
   
-  .mobile-fee-amounts, 
+  .mobile-fee-amounts,
   .mobile-payment-details {
-    grid-template-columns: 1fr;
-    gap: 8px;
-  }
-  
-  .mobile-pay-button, 
-  .refresh-button, 
-  .retry-button,
-  .statement-button {
-    width: 100%;
-    justify-content: center;
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 
-@media (max-width: 480px) {
+/* Large mobile devices (425px - 767px) */
+@media (min-width: 425px) and (max-width: 767px) {
+  .finance-header {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+  
+  .header-actions {
+    flex-direction: row;
+    justify-content: flex-start;
+    width: 100%;
+  }
+  
+  .refresh-button,
+  .statement-button {
+    width: auto;
+  }
+  
+  .currency-selector {
+    flex-direction: row;
+    align-items: center;
+  }
+  
+  .exchange-rate {
+    margin-left: auto;
+    text-align: right;
+  }
+  
+  .summary-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* Tablets and small laptops (768px - 1023px) */
+@media (min-width: 768px) {
   .finance-container {
-    padding: 0.75rem;
+    padding: 1.5rem;
+  }
+  
+  .finance-header {
+    flex-direction: row;
+    align-items: center;
+  }
+  
+  .header-actions {
+    width: auto;
+    flex-wrap: nowrap;
+  }
+  
+  .currency-selector {
+    flex-direction: row;
+    align-items: center;
+  }
+  
+  .exchange-rate {
+    margin-left: auto;
+  }
+  
+  /* Hide mobile views, show desktop views */
+  .mobile-semester-summary,
+  .mobile-payment-history,
+  .mobile-payment-card {
+    display: none !important;
+  }
+  
+  .semester-container,
+  .table-responsive {
+    display: block;
+  }
+  
+  .summary-grid {
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  }
+  
+  .semester-header {
+    flex-direction: row;
+    align-items: center;
+  }
+  
+  .payment-history-header {
+    flex-direction: row;
+    align-items: center;
+  }
+}
+
+/* Large laptops and desktops (1024px and up) */
+@media (min-width: 1024px) {
+  .finance-container {
+    max-width: 1200px;
+    margin: 0 auto;
   }
   
   .finance-header h2 {
-    font-size: 1.3rem;
+    font-size: 1.8rem;
   }
   
-  .semester-container, 
-  .payment-history-container, 
-  .mobile-semester-summary,
-  .annual-summary {
-    padding: 16px;
-    margin-bottom: 16px;
+  .student-info {
+    font-size: 0.95rem;
   }
   
-  button, select, .mobile-receipt-button {
-    min-height: 44px;
+  .summary-grid {
+    gap: 20px;
   }
   
   .summary-item {
-    padding: 12px;
+    padding: 20px;
   }
   
   .summary-amount {
-    font-size: 18px;
+    font-size: 24px;
+  }
+  
+  .semester-table th,
+  .semester-table td,
+  .payment-history-table th,
+  .payment-history-table td {
+    padding: 15px 20px;
+  }
+}
+
+/* Touch-friendly enhancements */
+button,
+select,
+.mobile-receipt-button {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:active,
+.mobile-receipt-button:active {
+  transform: scale(0.98);
+}
+
+/* Accessibility: High contrast mode */
+@media (prefers-contrast: high) {
+  .finance-header,
+  .currency-selector,
+  .annual-summary,
+  .semester-container,
+  .mobile-semester-summary,
+  .payment-history-container,
+  .finance-footer {
+    border: 2px solid #000;
+  }
+  
+  button,
+  .mobile-receipt-button {
+    border: 2px solid currentColor;
+  }
+}
+
+/* Accessibility: Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  
+  .spinner {
+    animation: none;
+    border-top-color: #3498db;
+  }
+  
+  .summary-item:hover,
+  button:hover,
+  .mobile-receipt-button:hover {
+    transform: none;
   }
 }
 
@@ -957,7 +1341,9 @@
   .refresh-button,
   .statement-button,
   .receipt-link,
-  button {
+  button,
+  .mobile-pay-button,
+  .mobile-receipt-button {
     display: none !important;
   }
   
@@ -966,15 +1352,27 @@
     background-color: white !important;
   }
   
-  .semester-container, 
-  .payment-history-container, 
-  .annual-summary {
+  .semester-container,
+  .payment-history-container,
+  .annual-summary,
+  .mobile-semester-summary,
+  .finance-footer {
     box-shadow: none !important;
     border: 1px solid #ddd !important;
     break-inside: avoid;
+    margin: 10px 0 !important;
   }
   
   .table-responsive {
-    overflow: visible;
+    overflow: visible !important;
+  }
+  
+  .mobile-semester-summary,
+  .mobile-payment-history {
+    display: block !important;
+  }
+  
+  .progress-circle-container {
+    display: none !important;
   }
 }
