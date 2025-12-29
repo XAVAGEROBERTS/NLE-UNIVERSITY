@@ -371,7 +371,7 @@ const Results = () => {
       // Add header with institution info
       doc.setFontSize(20);
       doc.setTextColor(41, 128, 185);
-      doc.text('UNIVERSITY EXAMINATION SYSTEM', 105, 20, null, null, 'center');
+      doc.text('NLE UNIVERSITY EXAMINATION SYSTEM', 105, 20, null, null, 'center');
       
       doc.setFontSize(16);
       doc.setTextColor(52, 73, 94);
