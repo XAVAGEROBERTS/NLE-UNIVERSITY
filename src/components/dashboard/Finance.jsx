@@ -663,25 +663,25 @@ const Finance = () => {
     );
   };
 
-  if (loading) {
-    return (
-      <div className="finance-container">
-        <div className="finance-header">
-          <div>
-            <h2>
-              <i className="fas fa-file-invoice-dollar" style={{ color: '#28a745' }}></i>
-              Financial Statements
-            </h2>
-            <div>Loading financial data...</div>
-          </div>
-        </div>
-        <div className="loading-spinner">
-          <div className="spinner"></div>
-          <p>Fetching your financial information...</p>
+ if (loading) {
+  return (
+    <div className="finance-container">
+      <div className="finance-header">
+        <div>
+          <h2>
+            <i className="fas fa-file-invoice-dollar" style={{ color: '#28a745' }}></i>
+            Financial Statements
+          </h2>
+          <div>Loading financial data...</div>
         </div>
       </div>
-    );
-  }
+      <div className="finance-loading-spinner">
+        <div className="finance-spinner"></div>
+        <p>Fetching your financial information...</p>
+      </div>
+    </div>
+  );
+}
 
   if (error) {
     return (

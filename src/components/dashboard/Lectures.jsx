@@ -391,18 +391,31 @@ const Lectures = () => {
   };
 
   const refreshLectures = () => fetchAllLectures();
-
-  if (loading) {
-    return (
-      <div style={{ padding: '1rem', textAlign: 'center' }}>
-        <h2>Live Lectures</h2>
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '200px' }}>
-          <div style={{ width: '40px', height: '40px', border: '4px solid #f3f3f3', borderTop: '4px solid #3498db', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
-        </div>
-        <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+if (loading) {
+  return (
+    <div style={{ padding: '1rem', textAlign: 'center' }}>
+      <h2>Live Lectures</h2>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '200px' }}>
+        <div className="lectures-spinner"></div>
       </div>
-    );
-  }
+      <style>{`
+        .lectures-spinner {
+          width: 40px;
+          height: 40px;
+          border: 4px solid #f3f3f3;
+          border-top: 4px solid #3498db;
+          border-radius: 50%;
+          animation: lectures-spin 1s linear infinite;
+        }
+        
+        @keyframes lectures-spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
+    </div>
+  );
+}
 
   if (error) {
     return (

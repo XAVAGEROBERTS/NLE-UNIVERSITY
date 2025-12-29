@@ -100,7 +100,7 @@
   gap: 1.5rem;
 }
 
-.student-info {
+.student-infoResults {
   flex: 1;
 }
 
@@ -453,13 +453,13 @@
   text-align: center;
 }
 
-.spinner {
+.results-spinner {
   width: 3rem;
   height: 3rem;
   border: 3px solid #e2e8f0;
   border-top-color: #4299e1;
   border-radius: 50%;
-  animation: spin 1s linear infinite;
+  animation: results-spin 1s linear infinite;
   margin-bottom: 1rem;
 }
 
@@ -875,7 +875,8 @@
 }
 
 /* Animations */
-@keyframes spin {
+/* Animations */
+@keyframes results-spin {
   to {
     transform: rotate(360deg);
   }

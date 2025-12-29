@@ -698,15 +698,14 @@ const Results = () => {
   };
 
   const renderGeneralResults = () => {
-    if (loading) {
-      return (
-        <div className="loading-container">
-          <div className="spinner"></div>
-          <p className="loading-text">Loading results...</p>
-        </div>
-      );
-    }
-
+  if (loading) {
+  return (
+    <div className="loading-container">
+      <div className="results-spinner"></div>
+      <p className="loading-text">Loading results...</p>
+    </div>
+  );
+}
     if (error) {
       return (
         <div className="error-container">
@@ -723,7 +722,7 @@ const Results = () => {
       <div className="general-results-container">
         {/* Student Info & CGPA Card */}
         <div className="student-summary-card">
-          <div className="student-info">
+          <div className="student-infoResults">
             <div className="student-name">{studentInfo?.full_name || 'Student Name'}</div>
             <div className="student-details">
               <span className="student-id">ID: {studentInfo?.student_id || 'N/A'}</span>
