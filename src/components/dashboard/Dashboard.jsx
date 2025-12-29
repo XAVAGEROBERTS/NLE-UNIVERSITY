@@ -1405,48 +1405,7 @@ const getGradeFromMarks = (marks) => {
           </div>
         </div>
 
-        {/* Current CGPA */}
-        <div className="stat-card" style={{
-          backgroundColor: 'white',
-          padding: 'clamp(15px, 3vw, 20px)',
-          borderRadius: '12px',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div>
-              <h4 style={{ 
-                margin: '0 0 5px 0', 
-                color: '#666',
-                fontSize: 'clamp(0.9rem, 2.2vw, 1rem)'
-              }}>
-                Current CGPA
-              </h4>
-              <p style={{ 
-                margin: 0, 
-                fontSize: 'clamp(1.5rem, 4vw, 1.8rem)', 
-                fontWeight: 'bold', 
-                color: '#9b59b6' 
-              }}>
-                {dashboardStats.cgpa.toFixed(2)}
-              </p>
-            </div>
-            <div style={{
-              width: 'clamp(36px, 8vw, 44px)',
-              height: 'clamp(36px, 8vw, 44px)',
-              borderRadius: '50%',
-              backgroundColor: '#f3e5f5',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: '0'
-            }}>
-              <i className="fas fa-chart-line" style={{ 
-                color: '#9b59b6', 
-                fontSize: 'clamp(16px, 3vw, 20px)' 
-              }}></i>
-            </div>
-          </div>
-        </div>
+        
       </div>
 
       {/* Upcoming Lectures - Responsive View */}
