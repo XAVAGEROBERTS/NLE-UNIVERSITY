@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../services/supabase';
 import { useStudentAuth } from '../../context/StudentAuthContext';
+import './CourseUnits.css';
 
 const CourseUnits = () => {
   const [activeTab, setActiveTab] = useState('current');
@@ -199,54 +200,49 @@ const CourseUnits = () => {
               data.yearNumber === course.year
             );
             
-           if (tabEntry) {
-  const [tabKey, yearData] = tabEntry;
+            if (tabEntry) {
+              const [tabKey, yearData] = tabEntry;
 
-  // Skip non-current semester courses in the current year
-  // if (yearData.isCurrent && course.semester !== currentSemester) {
-  //   return; // Do not add Semester 2 courses to current tab
-  // }
+              let semesterGroup = yearData.semesters.find(s => 
+                s.semesterNumber === course.semester
+              );
+              
+              if (!semesterGroup) {
+                semesterGroup = {
+                  semesterNumber: course.semester,
+                  semester: `Semester ${course.semester}`,
+                  courses: []
+                };
+                yearData.semesters.push(semesterGroup);
+              }
+              
+              const courseExists = semesterGroup.courses.some(c => c.id === course.id);
+              
+              if (!courseExists) {
+                const courseInfo = {
+                  id: course.id,
+                  code: course.course_code,
+                  name: course.course_name,
+                  credits: course.credits,
+                  isCore: course.is_core,
+                  year: course.year,
+                  semester: course.semester,
+                  program: course.program,
+                  program_code: course.program_code,
+                  department: course.department
+                };
 
-  let semesterGroup = yearData.semesters.find(s => 
-    s.semesterNumber === course.semester
-  );
-  
-  if (!semesterGroup) {
-    semesterGroup = {
-      semesterNumber: course.semester,
-      semester: `Semester ${course.semester}`,
-      courses: []
-    };
-    yearData.semesters.push(semesterGroup);
-  }
-  
-  const courseExists = semesterGroup.courses.some(c => c.id === course.id);
-  
-  if (!courseExists) {
-    const courseInfo = {
-      id: course.id,
-      code: course.course_code,
-      name: course.course_name,
-      credits: course.credits,
-      isCore: course.is_core,
-      year: course.year,
-      semester: course.semester,
-      program: course.program,
-      program_code: course.program_code,
-      department: course.department
-    };
+                if (completedMap[course.id]) {
+                  courseInfo.grade = completedMap[course.id].grade;
+                  courseInfo.marks = completedMap[course.id].marks;
+                  courseInfo.completed = true;
+                } else {
+                  courseInfo.completed = false;
+                }
 
-    if (completedMap[course.id]) {
-      courseInfo.grade = completedMap[course.id].grade;
-      courseInfo.marks = completedMap[course.id].marks;
-      courseInfo.completed = true;
-    } else {
-      courseInfo.completed = false;
-    }
-
-    semesterGroup.courses.push(courseInfo);
-  }
-}
+                semesterGroup.courses.push(courseInfo);
+              }
+            }
           }
         });
       }
@@ -298,159 +294,58 @@ const CourseUnits = () => {
     const isCompleted = completedCourses[course.id]?.completed || false;
     const grade = completedCourses[course.id]?.grade;
     const marks = completedCourses[course.id]?.marks;
+    const gradeClass = grade === 'B+' ? 'b-plus' : grade === 'B' ? 'b' : 'other';
 
     return (
-      <div key={course.id} className="mobile-course-card" style={{
-        backgroundColor: 'white',
-        borderRadius: '12px',
-        padding: '16px',
-        marginBottom: '12px',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
-        borderLeft: `4px solid ${isCompleted ? '#28a745' : '#007bff'}`
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '6px' }}>
-              <i className="fa-solid fa-folder-minus" style={{ 
-                color: isCompleted ? '#28a745' : '#6c757d',
-                marginRight: '10px',
-                fontSize: '16px'
-              }}></i>
-              <span style={{
-                fontWeight: 'bold',
-                color: '#007bff',
-                fontSize: '14px',
-                marginRight: '8px'
-              }}>{course.code}</span>
+      <div key={course.id} className={`cu-mobile-course-card ${isCompleted ? 'completed' : ''}`}>
+        <div className="cu-mobile-card-header">
+          <div className="cu-mobile-card-left">
+            <div className="cu-mobile-code-row">
+              <i className={`fa-solid fa-folder-minus cu-mobile-folder-icon ${isCompleted ? 'completed' : ''}`}></i>
+              <span className="cu-mobile-course-code">{course.code}</span>
             </div>
-            <h4 style={{ 
-              margin: '0 0 8px 0', 
-              fontSize: '16px',
-              color: '#333',
-              lineHeight: '1.3'
-            }}>
-              {course.name}
-            </h4>
+            <h4 className="cu-mobile-course-title">{course.name}</h4>
           </div>
-          <div style={{
-            padding: '6px 12px',
-            backgroundColor: isCompleted ? '#28a745' : '#f8f9fa',
-            color: isCompleted ? 'white' : '#6c757d',
-            border: isCompleted ? 'none' : '1px solid #dee2e6',
-            borderRadius: '6px',
-            fontSize: '13px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            whiteSpace: 'nowrap',
-            minWidth: '100px',
-            justifyContent: 'center',
-            cursor: isCompleted ? 'default' : 'not-allowed' 
-
-          }}>
+          <div className={`cu-mobile-status-badge ${isCompleted ? 'completed' : ''}`}>
             {isCompleted ? (
               <>
-                <i className="fas fa-check" style={{ fontSize: '12px' }}></i>
+                <i className="fas fa-check"></i>
                 <span>Completed</span>
               </>
             ) : (
               <>
-                <i className="fas fa-clock" style={{ fontSize: '12px' }}></i>
+                <i className="fas fa-clock"></i>
                 <span>In Progress</span>
               </>
             )}
           </div>
         </div>
         
-        <div style={{ 
-          display: 'grid', 
-          gridTemplateColumns: 'repeat(2, 1fr)', 
-          gap: '8px',
-          marginBottom: '12px'
-        }}>
+        <div className="cu-mobile-stats-grid">
           <div>
-            <p style={{ 
-              margin: '0 0 2px 0',
-              fontSize: '11px',
-              color: '#999',
-              textTransform: 'uppercase'
-            }}>
-              Credits
-            </p>
-            <p style={{ 
-              margin: '0',
-              fontSize: '14px',
-              fontWeight: '500',
-              color: '#333'
-            }}>
-              {course.credits} Credits
-            </p>
+            <p className="cu-mobile-stat-label">Credits</p>
+            <p className="cu-mobile-stat-value">{course.credits} Credits</p>
           </div>
-          <div>
-            <p style={{ 
-              display: 'none',
-              margin: '0 0 2px 0',
-              fontSize: '11px',
-              color: '#999',
-              textTransform: 'uppercase'
-            }}>
-              Type
-            </p>
-            <p style={{ 
-              display: 'none',
-              margin: '0',
-              fontSize: '14px',
-              fontWeight: '500',
-              color: course.isCore ? '#ffc107' : '#333'
-            }}>
+          <div style={{ display: 'none' }}>
+            <p className="cu-mobile-stat-label">Type</p>
+            <p className="cu-mobile-stat-value" style={{ color: course.isCore ? '#ffc107' : '#333' }}>
               {course.isCore ? 'Core' : 'Elective'}
             </p>
           </div>
         </div>
         
-        <div style={{ 
-          display: 'flex', 
-          flexWrap: 'wrap', 
-          gap: '6px',
-          marginBottom: '8px',
-          fontSize: '11px'
-        }}>
-          <span style={{
-            backgroundColor: '#e9ecef',
-            padding: '2px 6px',
-            borderRadius: '4px',
-            color: '#666'
-          }}>
+        <div className="cu-mobile-tags-container">
+          <span className="cu-mobile-tag">
             Prog: {course.program_code}
           </span>
-          <span style={{
-            backgroundColor: '#e9ecef',
-            padding: '2px 6px',
-            borderRadius: '4px',
-            color: '#666'
-          }}>
+          <span className="cu-mobile-tag">
             Dept: {course.department}
           </span>
         </div>
         
-        <div style={{ 
-          display: 'flex', 
-          flexWrap: 'wrap', 
-          gap: '6px',
-          paddingTop: '8px',
-          borderTop: '1px solid #eee'
-        }}>
+        <div className="cu-mobile-grade-container">
           {grade && (
-            <span style={{
-              backgroundColor: grade === 'A' ? '#28a745' : 
-                            grade === 'B+' ? '#20c997' : 
-                            grade === 'B' ? '#17a2b8' : '#6c757d',
-              color: 'white',
-              padding: '4px 8px',
-              borderRadius: '12px',
-              fontSize: '12px',
-              fontWeight: '500'
-            }}>
+            <span className={`cu-mobile-grade-badge ${gradeClass}`}>
               Grade: {grade} {marks && `(${marks}%)`}
             </span>
           )}
@@ -464,123 +359,44 @@ const CourseUnits = () => {
     const isCompleted = completedCourses[course.id]?.completed || false;
     const grade = completedCourses[course.id]?.grade;
     const marks = completedCourses[course.id]?.marks;
+    const gradeClass = grade === 'B+' ? 'b-plus' : grade === 'B' ? 'b' : 'other';
 
     return (
-      <div key={`${course.id}-${courseIndex}`} className="course-item" style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: 'clamp(12px, 2vw, 16px)',
-        marginBottom: 'clamp(10px, 2vw, 12px)',
-        backgroundColor: 'white',
-        borderRadius: '10px',
-        boxShadow: '0 2px 6px rgba(0,0,0,0.08)',
-        borderLeft: `4px solid ${isCompleted ? '#28a745' : '#007bff'}`
-      }}>
-        <div className="course-info" style={{ flex: 1 }}>
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            marginBottom: 'clamp(6px, 1.2vw, 8px)',
-            flexWrap: 'wrap',
-            gap: '8px'
-          }}>
-            <i className="fa-solid fa-folder-minus course-folder-icon" style={{ 
-              color: isCompleted ? '#28a745' : '#6c757d',
-              marginRight: 'clamp(8px, 1.5vw, 10px)',
-              fontSize: 'clamp(16px, 2vw, 18px)'
-            }}></i>
-            <span className="course-code" style={{
-              fontWeight: 'bold',
-              color: '#007bff',
-              marginRight: 'clamp(8px, 1.5vw, 10px)',
-              minWidth: '80px',
-              fontSize: 'clamp(14px, 1.8vw, 16px)'
-            }}>{course.code}</span>
-            <h4 style={{ 
-              margin: 0, 
-              fontSize: 'clamp(15px, 2vw, 17px)',
-              lineHeight: '1.3'
-            }}>{course.name}</h4>
+      <div key={`${course.id}-${courseIndex}`} className={`cu-desktop-course-item ${isCompleted ? 'completed' : ''}`}>
+        <div className="cu-desktop-course-info">
+          <div className="cu-desktop-header-row">
+            <i className={`fa-solid fa-folder-minus cu-desktop-folder-icon ${isCompleted ? 'completed' : ''}`}></i>
+            <span className="cu-desktop-course-code">{course.code}</span>
+            <h4 className="cu-desktop-course-title">{course.name}</h4>
           </div>
-          <div className="course-details" style={{ 
-            display: 'flex',
-            gap: 'clamp(6px, 1.2vw, 8px)',
-            flexWrap: 'wrap',
-            fontSize: 'clamp(13px, 1.6vw, 14px)',
-            color: '#666',
-            marginLeft: 'clamp(30px, 4vw, 34px)'
-          }}>
-            <span className="course-credits" style={{
-              backgroundColor: '#f8f9fa',
-              padding: '4px 10px',
-              borderRadius: '12px'
-            }}>{course.credits} Credits</span>
-            <span className="course-program" style={{
-              backgroundColor: '#e7f3ff',
-              padding: '4px 10px',
-              borderRadius: '12px'
-            }}>
+          <div className="cu-desktop-details-container">
+            <span className="cu-desktop-detail-badge cu-desktop-credits-badge">
+              {course.credits} Credits
+            </span>
+            <span className="cu-desktop-detail-badge cu-desktop-program-badge">
               {course.program_code}
             </span>
-            <span className="course-dept" style={{
-              backgroundColor: '#e9ecef',
-              padding: '4px 10px',
-              borderRadius: '12px',
-              color: '#666'
-            }}>
+            <span className="cu-desktop-detail-badge cu-desktop-dept-badge">
               {course.department}
             </span>
-            {course.isCore && <span className="course-core" style={{
-              backgroundColor: '#ffc107',
-              color: '#212529',
-              padding: '4px 10px',
-              borderRadius: '12px',
-              fontWeight: '500',
-              display: 'none'
-            }}>Core</span>}
+            {course.isCore && <span className="cu-desktop-detail-badge cu-desktop-core-badge">Core</span>}
             {grade && (
-              <span className={`course-grade grade-${grade}`} style={{
-                backgroundColor: grade === 'A' ? '#28a745' : 
-                                grade === 'B+' ? '#20c997' : 
-                                grade === 'B' ? '#17a2b8' : '#6c757d',
-                color: 'white',
-                padding: '4px 10px',
-                borderRadius: '12px',
-                fontWeight: '500'
-              }}>
+              <span className={`cu-desktop-detail-badge cu-desktop-grade-badge ${gradeClass}`}>
                 Grade: {grade} {marks && `(${marks}%)`}
               </span>
             )}
           </div>
         </div>
-        <div 
-          className={`course-status-display ${isCompleted ? 'completed' : ''}`}
-          style={{
-            padding: 'clamp(8px, 1.5vw, 10px) clamp(12px, 2vw, 16px)',
-            backgroundColor: isCompleted ? '#28a745' : '#f8f9fa',
-            color: isCompleted ? 'white' : '#6c757d',
-            border: isCompleted ? 'none' : '1px solid #dee2e6',
-            borderRadius: '6px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            minWidth: 'clamp(120px, 15vw, 140px)',
-            justifyContent: 'center',
-            fontSize: 'clamp(13px, 1.6vw, 14px)',
-            whiteSpace: 'nowrap',
-            cursor: isCompleted ? 'default' : 'not-allowed' 
-          }}
-        >
+        <div className={`cu-desktop-status-display ${isCompleted ? 'completed' : ''}`}>
           {isCompleted ? (
             <>
               <i className="fas fa-check"></i>
-              <span className="status-text">Completed</span>
+              <span>Completed</span>
             </>
           ) : (
             <>
               <i className="fas fa-clock"></i>
-              <span className="status-text">In Progress</span>
+              <span>In Progress</span>
             </>
           )}
         </div>
@@ -590,27 +406,15 @@ const CourseUnits = () => {
 
   if (loading) {
     return (
-      <div className="content">
-        <div className="dashboard-header" style={{ marginBottom: '20px' }}>
-          <h2 style={{ fontSize: 'clamp(1.3rem, 3.5vw, 1.8rem)' }}>Course Units</h2>
-          <div className="date-display" style={{ fontSize: 'clamp(0.85rem, 2vw, 1rem)' }}>
+      <div className="course-units-page">
+        <div className="cu-dashboard-header">
+          <h2 className="cu-header-title">Course Units</h2>
+          <div className="cu-loading-text">
             Loading courses...
           </div>
         </div>
-        <div className="loading-spinner" style={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          height: '200px'
-        }}>
-          <div style={{
-            width: '40px',
-            height: '40px',
-            border: '4px solid #f3f3f3',
-            borderTop: '4px solid #3498db',
-            borderRadius: '50%',
-            animation: 'spin 1s linear infinite'
-          }}></div>
+        <div className="cu-loading-spinner">
+          <div className="cu-spinner"></div>
         </div>
       </div>
     );
@@ -618,32 +422,18 @@ const CourseUnits = () => {
 
   if (error) {
     return (
-      <div className="content">
-        <div className="dashboard-header" style={{ marginBottom: '20px' }}>
-          <h2 style={{ fontSize: 'clamp(1.3rem, 3.5vw, 1.8rem)' }}>Course Units</h2>
-          <div className="date-display" style={{ fontSize: 'clamp(0.85rem, 2vw, 1rem)' }}>
+      <div className="course-units-page">
+        <div className="cu-dashboard-header">
+          <h2 className="cu-header-title">Course Units</h2>
+          <div className="cu-loading-text">
             Error
           </div>
         </div>
-        <div className="error-message" style={{
-          padding: '20px',
-          backgroundColor: '#fee',
-          border: '1px solid #f99',
-          borderRadius: '8px',
-          margin: '20px 0'
-        }}>
-          <p style={{ color: '#d33', margin: '0 0 15px 0' }}>{error}</p>
+        <div className="cu-error-container">
+          <p className="cu-error-message">{error}</p>
           <button 
             onClick={fetchStudentData}
-            style={{
-              padding: '10px 20px',
-              backgroundColor: '#007bff',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '14px'
-            }}
+            className="cu-retry-button"
           >
             Retry
           </button>
@@ -656,60 +446,27 @@ const CourseUnits = () => {
                          Object.values(courseData)[0];
 
   return (
-    <div className="content" style={{ padding: 'clamp(10px, 3vw, 20px)' }}>
-      <div className="dashboard-header" style={{ 
-        marginBottom: 'clamp(20px, 4vw, 30px)',
-        padding: isMobile ? '10px 0' : '0'
-      }}>
+    <div className="course-units-page">
+      <div className="cu-dashboard-header">
         <div style={{ 
           display: 'flex', 
           flexDirection: 'column', 
           gap: 'clamp(6px, 1.5vw, 10px)',
           width: '100%'
         }}>
-          <h2 style={{ 
-            margin: '0',
-            fontSize: 'clamp(1.3rem, 3.5vw, 1.8rem)',
-            lineHeight: '1.2'
-          }}>
+          <h2 className="cu-header-title">
             Course Units
           </h2>
           {studentInfo && (
-            <div style={{ 
-              display: 'flex', 
-              flexDirection: isMobile ? 'column' : 'row',
-              gap: 'clamp(8px, 1.5vw, 12px)',
-              flexWrap: 'wrap'
-            }}>
-              <div style={{
-                fontSize: 'clamp(0.85rem, 2vw, 1rem)',
-                color: '#666',
-                backgroundColor: '#f8f9fa',
-                padding: 'clamp(6px, 1.2vw, 8px) clamp(10px, 2vw, 12px)',
-                borderRadius: '6px',
-                flex: isMobile ? '1' : '0 1 auto'
-              }}>
+            <div className="cu-header-info-row">
+              <div className="cu-info-card cu-info-year">
                Year {studentInfo.year_of_study} (Current), Semester {studentInfo.semester} 
                 ({studentInfo.academic_year || 'N/A'})
               </div>
-              <div style={{ 
-                fontSize: 'clamp(0.85rem, 2vw, 1rem)',
-                color: '#666',
-                backgroundColor: '#e9f7fe',
-                padding: 'clamp(6px, 1.2vw, 8px) clamp(10px, 2vw, 12px)',
-                borderRadius: '6px',
-                flex: isMobile ? '1' : '0 1 auto'
-              }}>
+              <div className="cu-info-card cu-info-program">
                 <strong>Program:</strong> {studentInfo.program}
               </div>
-              <div style={{ 
-                fontSize: 'clamp(0.85rem, 2vw, 1rem)',
-                color: '#666',
-                backgroundColor: '#e9ecef',
-                padding: 'clamp(6px, 1.2vw, 8px) clamp(10px, 2vw, 12px)',
-                borderRadius: '6px',
-                flex: isMobile ? '1' : '0 1 auto'
-              }}>
+              <div className="cu-info-card cu-info-code">
                 <strong>Code:</strong> {studentInfo.program_code}
               </div>
             </div>
@@ -718,48 +475,20 @@ const CourseUnits = () => {
       </div>
 
       {Object.keys(courseData).length === 0 ? (
-        <div className="no-courses" style={{
-          textAlign: 'center',
-          padding: 'clamp(30px, 6vw, 40px)',
-          backgroundColor: 'white',
-          borderRadius: '12px',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
-        }}>
-          <i className="fas fa-book-open" style={{
-            fontSize: 'clamp(2.5rem, 6vw, 3rem)',
-            color: '#dee2e6',
-            marginBottom: '20px'
-          }}></i>
-          <p style={{ 
-            margin: '0 0 10px 0',
-            fontSize: 'clamp(1.1rem, 2.5vw, 1.3rem)',
-            color: '#333'
-          }}>
+        <div className="cu-no-courses-container">
+          <i className="fas fa-book-open cu-no-courses-icon"></i>
+          <p className="cu-no-courses-title">
             No course data available for your program
           </p>
           {studentInfo && (
-            <div style={{ 
-              backgroundColor: '#fff3cd',
-              border: '1px solid #ffeaa7',
-              borderRadius: '8px',
-              padding: 'clamp(12px, 2.5vw, 16px)',
-              margin: '20px 0',
-              maxWidth: '600px',
-              marginLeft: 'auto',
-              marginRight: 'auto'
-            }}>
-              <p style={{ margin: '0 0 8px 0', color: '#856404' }}>
+            <div className="cu-no-courses-info">
+              <p>
                 <strong>Student Info:</strong> {studentInfo.program} ({studentInfo.program_code})
               </p>
-              <p style={{ margin: '0 0 8px 0', color: '#856404' }}>
+              <p>
                 <strong>Year:</strong> {studentInfo.year_of_study}, <strong>Semester:</strong> {studentInfo.semester}
               </p>
-              <p style={{ 
-                margin: '0', 
-                fontSize: 'clamp(0.85rem, 2vw, 0.95rem)', 
-                color: '#856404',
-                lineHeight: '1.4'
-              }}>
+              <p>
                 The system couldn't find courses for your program code: <strong>{studentInfo.program_code}</strong>
                 in Year {studentInfo.year_of_study}, Semester {studentInfo.semester}.
                 Please contact your department if this seems incorrect.
@@ -768,16 +497,7 @@ const CourseUnits = () => {
           )}
           <button 
             onClick={fetchStudentData}
-            style={{
-              padding: 'clamp(10px, 2vw, 12px) clamp(20px, 3vw, 24px)',
-              backgroundColor: '#28a745',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: 'clamp(14px, 2vw, 16px)',
-              fontWeight: '500'
-            }}
+            className="cu-try-again-button"
           >
             Try Again
           </button>
@@ -785,32 +505,12 @@ const CourseUnits = () => {
       ) : (
         <>
           {/* Tabs - Responsive */}
-          <div className="tabs" style={{
-            display: 'flex',
-            overflowX: 'auto',
-            gap: 'clamp(4px, 1vw, 8px)',
-            padding: 'clamp(8px, 1.5vw, 10px) 0',
-            marginBottom: 'clamp(20px, 3vw, 25px)',
-            WebkitOverflowScrolling: 'touch'
-          }}>
+          <div className="cu-tabs-container">
             {Object.keys(courseData).map(key => (
               <div 
                 key={key}
-                className={`tab ${activeTab === key ? 'active' : ''}`}
+                className={`cu-tab ${activeTab === key ? 'cu-tab-active' : ''}`}
                 onClick={() => setActiveTab(key)}
-                style={{
-                  padding: 'clamp(8px, 1.5vw, 12px) clamp(12px, 2vw, 16px)',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                  fontSize: 'clamp(0.85rem, 1.8vw, 0.95rem)',
-                  backgroundColor: activeTab === key ? '#007bff' : '#f8f9fa',
-                  color: activeTab === key ? 'white' : '#666',
-                  border: `1px solid ${activeTab === key ? '#007bff' : '#dee2e6'}`,
-                  transition: 'all 0.3s ease',
-                  flexShrink: '0'
-
-                }}
               >
                 {courseData[key].title}
               </div>
@@ -819,65 +519,27 @@ const CourseUnits = () => {
 
           <div className="tab-content active">
             {courseData[activeTab]?.semesters?.length === 0 ? (
-              <div className="no-courses" style={{
-                textAlign: 'center',
-                padding: 'clamp(30px, 5vw, 40px)',
-                backgroundColor: 'white',
-                borderRadius: '12px',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
-              }}>
-                <p style={{ 
-                  margin: 0,
-                  fontSize: 'clamp(1rem, 2.2vw, 1.1rem)',
-                  color: '#666'
-                }}>
+              <div className="cu-no-courses-container">
+                <p className="cu-no-courses-title">
                   No courses found for {courseData[activeTab].title}
                 </p>
               </div>
             ) : (
               courseData[activeTab]?.semesters?.map((semester, semIndex) => (
-                <div key={semIndex} style={{ 
-                  marginBottom: 'clamp(25px, 4vw, 35px)'
-                }}>
-<h3 style={{ 
-  marginBottom: 'clamp(12px, 2.5vw, 16px)', 
-  marginTop: semIndex > 0 ? 'clamp(25px, 4vw, 35px)' : '0',
-  color: '#333',
-  borderBottom: '2px solid #eee',
-  paddingBottom: 'clamp(8px, 1.5vw, 12px)',
-  fontSize: 'clamp(1.1rem, 2.5vw, 1.3rem)',
-  display: 'flex',
-  alignItems: 'center',
-  gap: '10px'
-}}>
-  <span>{semester.semester}</span>
-  {courseData[activeTab].isCurrent && semester.semesterNumber === studentInfo.semester && (
-    <span style={{
-      backgroundColor: '#28a745',
-      color: 'white',
-      padding: '4px 10px',
-      borderRadius: '20px',
-      fontSize: '0.8em',
-      fontWeight: 'bold'
-    }}>
-      CURRENT SEMESTER
-    </span>
-  )}
-  {courseData[activeTab].isCurrent && semester.semesterNumber !== studentInfo.semester && (
-    <span style={{
-      backgroundColor: '#ffc107',
-      color: '#212529',
-      padding: '4px 10px',
-      borderRadius: '20px',
-      fontSize: '0.8em',
-      fontWeight: 'bold',
-      display: 'none'
-      
-    }}>
-      NEXT SEMESTER
-    </span>
-  )}
-</h3>
+                <div key={semIndex} className="cu-semester-section">
+                  <h3 className="cu-semester-header">
+                    <span>{semester.semester}</span>
+                    {courseData[activeTab].isCurrent && semester.semesterNumber === studentInfo.semester && (
+                      <span className="cu-current-badge">
+                        CURRENT SEMESTER
+                      </span>
+                    )}
+                    {courseData[activeTab].isCurrent && semester.semesterNumber !== studentInfo.semester && (
+                      <span className="cu-next-badge">
+                        NEXT SEMESTER
+                      </span>
+                    )}
+                  </h3>
                   <div className="courses-list">
                     {isMobile ? (
                       // Mobile View: Compact Cards
@@ -897,91 +559,6 @@ const CourseUnits = () => {
           </div>
         </>
       )}
-
-      {/* Responsive CSS */}
-      <style>{`
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-        
-        .tabs::-webkit-scrollbar {
-          height: 4px;
-        }
-        
-        .tabs::-webkit-scrollbar-track {
-          background: #f1f1f1;
-          border-radius: 2px;
-        }
-        
-        .tabs::-webkit-scrollbar-thumb {
-          background: #c1c1c1;
-          border-radius: 2px;
-        }
-        
-        .tabs::-webkit-scrollbar-thumb:hover {
-          background: #a8a8a8;
-        }
-        
-        /* Mobile-specific optimizations */
-        @media (max-width: 768px) {
-          .mobile-course-card:hover {
-            transform: translateY(-2px);
-            transition: transform 0.3s ease;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.12);
-          }
-          
-          .tabs {
-            margin-left: -10px;
-            margin-right: -10px;
-            padding-left: 10px;
-            padding-right: 10px;
-          }
-        }
-        
-        @media (max-width: 480px) {
-          .dashboard-header {
-            padding: 0 !important;
-          }
-          
-          .mobile-course-card {
-            padding: 14px !important;
-          }
-          
-          .tabs div {
-            padding: 8px 12px !important;
-            font-size: 14px !important;
-          }
-        }
-        
-        /* Hover effects for desktop */
-        @media (hover: hover) {
-          .tab:hover {
-            background-color: #e9ecef !important;
-            color: #333 !important;
-            border-color: #dee2e6 !important;
-          }
-          
-          .course-item:hover {
-            transform: translateY(-2px);
-            transition: transform 0.3s ease;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.12);
-          }
-        }
-        
-        /* Improve touch targets on mobile */
-        @media (max-width: 768px) {
-          button, .course-status-display {
-            min-height: 44px;
-          }
-          
-          .tab {
-            min-height: 40px;
-            display: flex;
-            align-items: center;
-          }
-        }
-      `}</style>
     </div>
   );
 };

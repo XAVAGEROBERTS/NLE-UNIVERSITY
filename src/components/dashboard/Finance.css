@@ -480,9 +480,8 @@
   color: #95a5a6;
   font-size: 0.9rem;
 }
-
-/* Loading Spinner */
-.loading-spinner {
+/* NEW - Finance-specific spinner */
+.finance-loading-spinner {
   display: flex;
   justify-content: center;
   align-items: center;
@@ -492,19 +491,24 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
-.spinner {
+.finance-spinner {
   width: 50px;
   height: 50px;
   border: 5px solid #f3f3f3;
   border-top: 5px solid #3498db;
   border-radius: 50%;
-  animation: spin 1s linear infinite;
+  animation: finance-spin 1s linear infinite;
 }
 
-.loading-spinner p {
+.finance-loading-spinner p {
   color: #6c757d;
   font-size: 1rem;
   margin-left: 15px;
+}
+
+@keyframes finance-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 
 /* Error Container */
@@ -958,11 +962,6 @@
   border-top: 1px solid #eee;
 }
 
-/* Animations */
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
 
 /* Enhanced Responsive Breakpoints */
 

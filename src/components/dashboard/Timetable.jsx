@@ -503,24 +503,25 @@ const fetchTimetable = async () => {
   );
 
   // Loading state
-  if (loading) {
-    return (
-      <div className="content" style={{ padding: '16px' }}>
-        <div className="dashboard-header" style={{ padding: '0' }}>
-          <h2 style={{ margin: '0 0 8px 0' }}>My Time Table</h2>
-          <div className="date-display" style={{ color: '#666' }}>Loading timetable...</div>
-        </div>
-        <div style={{ 
-          display: 'flex', 
-          justifyContent: 'center', 
-          alignItems: 'center',
-          height: '200px'
-        }}>
-          <div className="loading-spinner"></div>
-        </div>
+ // Loading state
+if (loading) {
+  return (
+    <div className="content" style={{ padding: '16px' }}>
+      <div className="dashboard-header" style={{ padding: '0' }}>
+        <h2 style={{ margin: '0 0 8px 0' }}>My Time Table</h2>
+        <div className="date-display" style={{ color: '#666' }}>Loading timetable...</div>
       </div>
-    );
-  }
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center',
+        height: '200px'
+      }}>
+        <div className="timetable-spinner"></div>
+      </div>
+    </div>
+  );
+}
 
   return (
     <div className="content" style={{ 
@@ -669,20 +670,20 @@ const fetchTimetable = async () => {
         }
         
         /* Loading spinner */
-        .loading-spinner {
-          width: 40px;
-          height: 40px;
-          border: 3px solid #f3f3f3;
-          border-top: 3px solid #3498db;
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-        
+     /* Timetable loading spinner */
+.timetable-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid #f3f3f3;
+  border-top: 3px solid #3498db;
+  border-radius: 50%;
+  animation: timetable-spin 1s linear infinite;
+}
+
+@keyframes timetable-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
         /* Mobile optimizations */
         @media (max-width: 768px) {
           .content {

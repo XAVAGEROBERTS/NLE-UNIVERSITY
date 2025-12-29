@@ -439,113 +439,113 @@ const downloadVideo = (videoUrl, videoTitle) => {
 
 
 
-  // Loading state
-  if (loading) {
-    return (
-      <div className="tutorials-container">
-        <div className="loading-state">
-          <div className="spinner-container">
-            <div className="spinner">
-              <div className="spinner-circle"></div>
-              <div className="spinner-circle"></div>
-              <div className="spinner-circle"></div>
-              <div className="spinner-circle"></div>
-            </div>
+// Loading state
+if (loading) {
+  return (
+    <div className="tutorials-container">
+      <div className="tutorials-loading-state">
+        <div className="tutorials-spinner-container">
+          <div className="tutorials-spinner">
+            <div className="tutorials-spinner-circle"></div>
+            <div className="tutorials-spinner-circle"></div>
+            <div className="tutorials-spinner-circle"></div>
+            <div className="tutorials-spinner-circle"></div>
           </div>
-          <p className="loading-text">Loading tutorials...</p>
         </div>
-        <style jsx>{`
-          .tutorials-container {
-            padding: 24px;
-            min-height: calc(100vh - 80px);
-            background: #f8f9fa;
-          }
-          
-          .loading-state {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 70vh;
-            gap: 24px;
-          }
-          
-          .spinner-container {
-            width: 80px;
-            height: 80px;
-            position: relative;
-          }
-          
-          .spinner {
-            width: 100%;
-            height: 100%;
-            position: relative;
-            animation: rotate 2s linear infinite;
-          }
-          
-          .spinner-circle {
-            position: absolute;
-            width: 20px;
-            height: 20px;
-            background: #007bff;
-            border-radius: 50%;
-            animation: bounce 1.5s ease-in-out infinite;
-          }
-          
-          .spinner-circle:nth-child(1) {
-            top: 0;
-            left: 50%;
-            transform: translateX(-50%);
-            animation-delay: 0s;
-          }
-          
-          .spinner-circle:nth-child(2) {
-            top: 50%;
-            right: 0;
-            transform: translateY(-50%);
-            animation-delay: 0.15s;
-          }
-          
-          .spinner-circle:nth-child(3) {
-            bottom: 0;
-            left: 50%;
-            transform: translateX(-50%);
-            animation-delay: 0.3s;
-          }
-          
-          .spinner-circle:nth-child(4) {
-            top: 50%;
-            left: 0;
-            transform: translateY(-50%);
-            animation-delay: 0.45s;
-          }
-          
-          .loading-text {
-            font-size: 18px;
-            color: #666;
-            font-weight: 500;
-            margin: 0;
-          }
-          
-          @keyframes rotate {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-          }
-          
-          @keyframes bounce {
-            0%, 100% {
-              transform: translate(-50%, -50%) scale(1);
-              opacity: 1;
-            }
-            50% {
-              transform: translate(-50%, -50%) scale(0.5);
-              opacity: 0.5;
-            }
-          }
-        `}</style>
+        <p className="tutorials-loading-text">Loading tutorials...</p>
       </div>
-    );
-  }
+      <style jsx>{`
+        .tutorials-container {
+          padding: 24px;
+          min-height: calc(100vh - 80px);
+          background: #f8f9fa;
+        }
+        
+        .tutorials-loading-state {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          height: 70vh;
+          gap: 24px;
+        }
+        
+        .tutorials-spinner-container {
+          width: 80px;
+          height: 80px;
+          position: relative;
+        }
+        
+        .tutorials-spinner {
+          width: 100%;
+          height: 100%;
+          position: relative;
+          animation: tutorials-spinner-rotate 2s linear infinite;
+        }
+        
+        .tutorials-spinner-circle {
+          position: absolute;
+          width: 20px;
+          height: 20px;
+          background: #007bff;
+          border-radius: 50%;
+          animation: tutorials-spinner-bounce 1.5s ease-in-out infinite;
+        }
+        
+        .tutorials-spinner-circle:nth-child(1) {
+          top: 0;
+          left: 50%;
+          transform: translateX(-50%);
+          animation-delay: 0s;
+        }
+        
+        .tutorials-spinner-circle:nth-child(2) {
+          top: 50%;
+          right: 0;
+          transform: translateY(-50%);
+          animation-delay: 0.15s;
+        }
+        
+        .tutorials-spinner-circle:nth-child(3) {
+          bottom: 0;
+          left: 50%;
+          transform: translateX(-50%);
+          animation-delay: 0.3s;
+        }
+        
+        .tutorials-spinner-circle:nth-child(4) {
+          top: 50%;
+          left: 0;
+          transform: translateY(-50%);
+          animation-delay: 0.45s;
+        }
+        
+        .tutorials-loading-text {
+          font-size: 18px;
+          color: #666;
+          font-weight: 500;
+          margin: 0;
+        }
+        
+        @keyframes tutorials-spinner-rotate {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        
+        @keyframes tutorials-spinner-bounce {
+          0%, 100% {
+            transform: translate(-50%, -50%) scale(1);
+            opacity: 1;
+          }
+          50% {
+            transform: translate(-50%, -50%) scale(0.5);
+            opacity: 0.5;
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
 
   // Error state
   if (error) {

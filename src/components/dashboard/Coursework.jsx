@@ -784,17 +784,17 @@ const handleDownloadSubmittedFiles = async (assignment) => {
   };
 
   // =================== LOADING STATE ===================
-  if (loading) {
-    return (
-      <div className="coursework-page">
-        <div className="cw-header">
-          <h2>Course Work</h2>
-          <div className="cw-date-display">Loading assignments...</div>
-        </div>
-        <div className="cw-loading-spinner"></div>
+ if (loading) {
+  return (
+    <div className="coursework-page">
+      <div className="cw-header">
+        <h2>Course Work</h2>
+        <div className="cw-date-display">Loading assignments...</div>
       </div>
-    );
-  }
+      <div className="coursework-loading-spinner"></div>
+    </div>
+  );
+}
 
   // =================== MAIN RENDER ===================
   return (
@@ -1400,15 +1400,21 @@ const handleDownloadSubmittedFiles = async (assignment) => {
           box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
         }
 
-        .cw-loading-spinner {
-          width: 50px;
-          height: 50px;
-          border: 4px solid #f1f5f9;
-          border-top: 4px solid #3b82f6;
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
-          margin: 40px auto;
-        }
+      .coursework-loading-spinner {
+  width: 50px;
+  height: 50px;
+  border: 4px solid #f1f5f9;
+  border-top: 4px solid #3b82f6;
+  border-radius: 50%;
+  animation: coursework-spin 1s linear infinite;
+  margin: 40px auto;
+}
+
+/* Add a unique animation name to avoid conflicts */
+@keyframes coursework-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
 
         /* =================== MODAL STYLES =================== */
         .coursework-modal-overlay {
@@ -1949,10 +1955,6 @@ const handleDownloadSubmittedFiles = async (assignment) => {
         }
 
         /* =================== ANIMATIONS =================== */
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
 
         @keyframes modalSlideIn {
           from {
