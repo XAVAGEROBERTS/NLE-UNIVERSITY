@@ -1,0 +1,980 @@
+/* Finance.css - Styles for Finance Component */
+
+/* Base container */
+.finance-container {
+  padding: 1rem;
+  max-width: 100%;
+  overflow-x: hidden;
+  box-sizing: border-box;
+  background-color: #f8f9fa;
+  min-height: 100vh;
+}
+
+/* Header */
+.finance-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 15px;
+  margin-bottom: 20px;
+  padding: 20px;
+  background-color: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.finance-header h2 {
+  margin: 0 0 5px 0;
+  font-size: clamp(1.5rem, 4vw, 1.8rem);
+  font-weight: 600;
+  color: #2c3e50;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.student-info {
+  color: #7f8c8d;
+  font-size: clamp(0.85rem, 2.5vw, 0.95rem);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.header-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.refresh-button, 
+.pay-button,
+.statement-button {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.refresh-button {
+  background-color: #6c757d;
+  color: white;
+}
+
+.refresh-button:hover {
+  background-color: #5a6268;
+}
+
+.pay-button {
+  background-color: #28a745;
+  color: white;
+}
+
+.pay-button:hover {
+  background-color: #218838;
+}
+
+.statement-button {
+  background-color: #3498db;
+  color: white;
+}
+
+.statement-button:hover {
+  background-color: #2980b9;
+}
+
+/* Currency Selector */
+.currency-selector {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 25px;
+  padding: 15px 20px;
+  background-color: white;
+  border-radius: 8px;
+  border: 1px solid #dee2e6;
+  flex-wrap: wrap;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.currency-selector label {
+  font-weight: 500;
+  color: #495057;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.currency-dropdown {
+  padding: 8px 15px;
+  border: 2px solid #dee2e6;
+  border-radius: 6px;
+  background-color: white;
+  font-size: 14px;
+  cursor: pointer;
+  min-width: 120px;
+  max-width: 100%;
+  transition: border-color 0.2s;
+}
+
+.currency-dropdown:focus {
+  border-color: #3498db;
+  outline: none;
+}
+
+.exchange-rate {
+  font-size: 12px;
+  color: #6c757d;
+  margin-left: auto;
+  font-style: italic;
+}
+
+/* Annual Summary */
+.annual-summary {
+  background-color: white;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 25px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.annual-summary h3 {
+  margin: 0 0 20px 0;
+  font-size: 18px;
+  color: #2c3e50;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 15px;
+}
+
+.summary-item {
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  padding: 15px;
+  border-left: 4px solid;
+  transition: transform 0.2s;
+}
+
+.summary-item:hover {
+  transform: translateY(-2px);
+}
+
+.total-item {
+  background-color: #e8f4fc;
+  border-left-color: #3498db;
+}
+
+.summary-label {
+  font-size: 12px;
+  color: #7f8c8d;
+  text-transform: uppercase;
+  font-weight: 600;
+  margin-bottom: 5px;
+}
+
+.summary-amount {
+  font-size: 20px;
+  font-weight: 700;
+  color: #2c3e50;
+  margin-bottom: 5px;
+}
+
+.summary-note {
+  font-size: 11px;
+  color: #95a5a6;
+  line-height: 1.3;
+}
+
+/* Semester Containers */
+.semester-container {
+  background-color: white;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 30px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.semester-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 15px;
+}
+
+.semester-header h3 {
+  margin: 0;
+  font-size: clamp(1.1rem, 2.5vw, 1.3rem);
+  color: #2c3e50;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.header-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+/* Tables */
+.table-responsive {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 8px;
+  border: 1px solid #dee2e6;
+}
+
+.semester-table, 
+.payment-history-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 700px;
+}
+
+.semester-table th, 
+.payment-history-table th {
+  padding: 12px 15px;
+  text-align: left;
+  font-weight: 600;
+  color: #495057;
+  font-size: 0.95rem;
+  background-color: #f8f9fa;
+  border-bottom: 2px solid #dee2e6;
+}
+
+.semester-table td, 
+.payment-history-table td {
+  padding: 12px 15px;
+  font-size: 0.95rem;
+  border-bottom: 1px solid #dee2e6;
+  vertical-align: top;
+}
+
+.semester-table tbody tr:hover {
+  background-color: #f8f9fa;
+}
+
+.paid-row {
+  background-color: #f8fff9 !important;
+}
+
+.paid-row:hover {
+  background-color: #e8f6ef !important;
+}
+
+/* Fee Type Badge */
+.fee-type-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Fee Description */
+.fee-description {
+  font-weight: 500;
+  color: #2c3e50;
+}
+
+.payment-date {
+  font-size: 0.8rem;
+  color: #6c757d;
+  margin-top: 4px;
+}
+
+/* Amounts */
+.fee-amount, 
+.payment-amount {
+  text-align: right;
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.paid-amount {
+  text-align: right;
+  color: #28a745;
+  font-weight: 600;
+}
+
+.has-balance {
+  color: #dc3545;
+  font-weight: 600;
+  text-align: right;
+}
+
+.no-balance {
+  color: #28a745;
+  text-align: right;
+}
+
+/* Status Badge */
+.status-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 20px;
+  color: white;
+  font-weight: bold;
+  font-size: 0.85rem;
+  min-width: 70px;
+  text-align: center;
+}
+
+/* Receipt Link */
+.receipt-link {
+  background: none;
+  border: none;
+  color: #007bff;
+  cursor: pointer;
+  text-decoration: underline;
+  display: block;
+  font-size: 0.85rem;
+  padding: 4px 0;
+  margin-top: 4px;
+  text-align: left;
+}
+
+.receipt-link:hover {
+  color: #0056b3;
+}
+
+/* Summary Row */
+.summary-row {
+  background-color: #e8f4fc;
+  font-weight: bold;
+  border-top: 2px solid #3498db;
+}
+
+.semester-total {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1rem;
+}
+
+.semester-total i {
+  font-size: 1.2rem;
+}
+
+.total-amount,
+.total-paid,
+.total-balance {
+  text-align: right;
+  font-size: 1rem;
+}
+
+.semester-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.status-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.percentage {
+  font-weight: bold;
+  color: #3498db;
+}
+
+/* Semester Badges */
+.semester-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.sem-1 {
+  background-color: #cfe2ff;
+  color: #084298;
+}
+
+.sem-2 {
+  background-color: #d1e7dd;
+  color: #0f5132;
+}
+
+/* Payment History */
+.payment-history-container {
+  background-color: white;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.payment-history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.payment-history-header h3 {
+  margin: 0;
+  font-size: clamp(1.1rem, 2.5vw, 1.3rem);
+  color: #2c3e50;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.payment-count {
+  font-size: 0.95rem;
+  color: #6c757d;
+  white-space: nowrap;
+}
+
+.payment-method {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Empty History */
+.empty-history {
+  padding: 40px 20px;
+  text-align: center;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  border: 2px dashed #dee2e6;
+}
+
+.empty-history i {
+  font-size: 3rem;
+  color: #bdc3c7;
+  margin-bottom: 20px;
+}
+
+.empty-history p {
+  color: #7f8c8d;
+  margin: 0 0 10px 0;
+  font-size: 1rem;
+}
+
+.empty-history p:last-child {
+  color: #95a5a6;
+  font-size: 0.9rem;
+}
+
+/* Loading Spinner */
+.loading-spinner {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 300px;
+  background-color: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.spinner {
+  width: 50px;
+  height: 50px;
+  border: 5px solid #f3f3f3;
+  border-top: 5px solid #3498db;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* Error Container */
+.error-container {
+  padding: 30px;
+  background-color: #fee;
+  border: 1px solid #f99;
+  border-radius: 8px;
+  margin: 20px 0;
+  text-align: center;
+}
+
+.error-container i {
+  font-size: 48px;
+  color: #dc3545;
+  margin-bottom: 20px;
+}
+
+.error-container p {
+  color: #d33;
+  margin-bottom: 20px;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.retry-button {
+  padding: 12px 24px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+/* Mobile Styles */
+.mobile-semester-summary {
+  background-color: white;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  border-top: 4px solid;
+}
+
+.mobile-semester-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.mobile-semester-header h3 {
+  margin: 0;
+  font-size: 18px;
+  color: #2c3e50;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.no-fees-badge {
+  background-color: #f8f9fa;
+  color: #6c757d;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  margin-left: 10px;
+}
+
+.mobile-semester-totals {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.mobile-total-item {
+  background-color: #f8f9fa;
+  padding: 15px;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.mobile-total-item p:first-child {
+  margin: 0 0 6px 0;
+  font-size: 12px;
+  color: #7f8c8d;
+  text-transform: uppercase;
+}
+
+.mobile-total-item p:last-child {
+  margin: 0;
+  font-size: 18px;
+  font-weight: bold;
+}
+
+.mobile-progress-circle {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 20px 0;
+}
+
+.progress-circle-container {
+  position: relative;
+  width: 100px;
+  height: 100px;
+}
+
+.progress-circle-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
+
+.progress-circle-text div:first-child {
+  font-size: 18px;
+  font-weight: bold;
+  color: #2c3e50;
+}
+
+.progress-circle-text div:last-child {
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.mobile-fee-items-section {
+  margin-top: 20px;
+}
+
+.mobile-fee-items-section h4 {
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  color: #2c3e50;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobile-fee-item {
+  background-color: white;
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 12px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  border-left: 4px solid;
+}
+
+.mobile-fee-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.mobile-fee-title h4 {
+  margin: 0 0 6px 0;
+  font-size: 15px;
+  color: #2c3e50;
+  line-height: 1.3;
+}
+
+.mobile-fee-title p {
+  margin: 0;
+  font-size: 12px;
+  color: #7f8c8d;
+}
+
+.fee-category {
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.mobile-fee-status {
+  padding: 4px 10px;
+  color: white;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.mobile-fee-amounts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.mobile-amount-item p:first-child {
+  margin: 0 0 4px 0;
+  font-size: 11px;
+  color: #95a5a6;
+  text-transform: uppercase;
+}
+
+.mobile-amount-item p:last-child {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.mobile-payment-date {
+  font-size: 11px;
+  color: #95a5a6;
+  padding-top: 8px;
+  border-top: 1px solid #eee;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.mobile-receipt-info {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #eee;
+}
+
+.mobile-receipt-button {
+  background-color: #f4f4f4;
+  color: #333;
+  border: 1px solid #ddd;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  width: 100%;
+  justify-content: center;
+}
+
+.mobile-no-items {
+  padding: 20px;
+  text-align: center;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  border: 2px dashed #dee2e6;
+}
+
+.mobile-no-items i {
+  font-size: 32px;
+  color: #bdc3c7;
+  margin-bottom: 10px;
+}
+
+.mobile-no-items p {
+  margin: 0;
+  color: #95a5a6;
+  font-size: 14px;
+}
+
+/* Mobile Payment History */
+.mobile-payment-history {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mobile-payment-card {
+  background-color: white;
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border-left: 4px solid;
+}
+
+.mobile-payment-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.mobile-payment-title h4 {
+  margin: 0 0 6px 0;
+  font-size: 15px;
+  color: #2c3e50;
+  line-height: 1.3;
+}
+
+.mobile-payment-title p {
+  margin: 0;
+  font-size: 13px;
+  color: #7f8c8d;
+}
+
+.mobile-semester-badge {
+  background-color: #e8f4fd;
+  color: #3498db;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.mobile-payment-details {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.mobile-payment-details p:first-child {
+  margin: 0 0 4px 0;
+  font-size: 12px;
+  color: #95a5a6;
+  text-transform: uppercase;
+}
+
+.mobile-payment-details p:last-child {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.mobile-payment-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 12px;
+  border-top: 1px solid #eee;
+}
+
+.mobile-payment-status {
+  padding: 4px 10px;
+  color: white;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Animations */
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Responsive Breakpoints */
+@media (max-width: 768px) {
+  .finance-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  
+  .currency-selector {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  
+  .exchange-rate {
+    margin-left: 0;
+    width: 100%;
+  }
+  
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .semester-header, 
+  .payment-history-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  
+  .semester-header h3, 
+  .payment-history-header h3 {
+    font-size: 1.2rem;
+  }
+  
+  .header-buttons {
+    width: 100%;
+    flex-direction: column;
+  }
+  
+  .header-buttons button {
+    width: 100%;
+  }
+  
+  .mobile-semester-totals {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  
+  .mobile-fee-amounts, 
+  .mobile-payment-details {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  
+  .mobile-pay-button, 
+  .refresh-button, 
+  .retry-button,
+  .statement-button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .finance-container {
+    padding: 0.75rem;
+  }
+  
+  .finance-header h2 {
+    font-size: 1.3rem;
+  }
+  
+  .semester-container, 
+  .payment-history-container, 
+  .mobile-semester-summary,
+  .annual-summary {
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  
+  button, select, .mobile-receipt-button {
+    min-height: 44px;
+  }
+  
+  .summary-item {
+    padding: 12px;
+  }
+  
+  .summary-amount {
+    font-size: 18px;
+  }
+}
+
+/* Print styles */
+@media print {
+  .finance-header,
+  .currency-selector,
+  .header-actions,
+  .pay-button,
+  .refresh-button,
+  .statement-button,
+  .receipt-link,
+  button {
+    display: none !important;
+  }
+  
+  .finance-container {
+    padding: 0 !important;
+    background-color: white !important;
+  }
+  
+  .semester-container, 
+  .payment-history-container, 
+  .annual-summary {
+    box-shadow: none !important;
+    border: 1px solid #ddd !important;
+    break-inside: avoid;
+  }
+  
+  .table-responsive {
+    overflow: visible;
+  }
+}

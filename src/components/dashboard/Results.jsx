@@ -561,9 +561,7 @@ const getGradePoints = (grade) => {
             <button className="btn btn-secondary" onClick={() => navigate('/examinations')}>
               <i className="fas fa-list"></i> <span className="btn-text">All Exams</span>
             </button>
-            <button id="export-pdf" className="btn btn-danger" onClick={exportToPDF}>
-              <i className="fas fa-file-pdf"></i> <span className="btn-text">Export Transcript</span>
-            </button>
+          
           </div>
         </div>
 
