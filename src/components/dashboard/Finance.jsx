@@ -15,7 +15,8 @@ const Finance = () => {
       tuition: 0,
       functional: 0,
       guild: 0,
-      nche: 0
+      nche: 0,
+      registration: 0
     },
     semester2: { 
       total: 0, 
@@ -26,7 +27,8 @@ const Finance = () => {
       tuition: 0,
       functional: 0,
       guild: 0,
-      nche: 0
+      nche: 0,
+      registration: 0
     }
   });
   const [paymentHistory, setPaymentHistory] = useState([]);
@@ -39,6 +41,7 @@ const Finance = () => {
     functional: 0,
     guild: 0,
     nche: 0,
+    registration: 0,
     total: 0
   });
   const { user } = useStudentAuth();
@@ -95,7 +98,8 @@ const Finance = () => {
           tuition: 0,
           functional: 0,
           guild: 0,
-          nche: 0
+          nche: 0,
+          registration: 0
         },
         semester2: { 
           total: 0, 
@@ -106,7 +110,8 @@ const Finance = () => {
           tuition: 0,
           functional: 0,
           guild: 0,
-          nche: 0
+          nche: 0,
+          registration: 0
         }
       };
 
@@ -115,6 +120,7 @@ const Finance = () => {
         functional: 0,
         guild: 0,
         nche: 0,
+        registration: 0,
         total: 0
       };
 
@@ -136,15 +142,43 @@ const Finance = () => {
           const semester = record.semester || 1;
           const semesterKey = `semester${semester}`;
           const amount = parseFloat(record.amount) || 0;
-          const feeType = record.fee_type || 'tuition';
-          const description = record.description || `${feeType.toUpperCase()} Fee`;
+          const category = record.category || 'tuition'; // Use 'category' field instead of 'fee_type'
+          let description = record.description || '';
+          
+          // If description doesn't exist, create it based on category
+          if (!description) {
+            switch(category) {
+              case 'tuition':
+                description = 'Tuition Fee';
+                break;
+              case 'functional':
+                description = 'Functional Fee';
+                break;
+              case 'guild':
+                description = 'Guild Fee';
+                break;
+              case 'nche':
+                description = 'NCHE Fee';
+                break;
+              case 'registration':
+                description = 'Registration Fee';
+                break;
+              default:
+                description = `${category.charAt(0).toUpperCase() + category.slice(1)} Fee`;
+            }
+            
+            // Add semester info if not already in description
+            if (!description.includes('Semester') && !description.includes('Sem')) {
+              description += ` - Semester ${semester}`;
+            }
+          }
           
           // Create fee item
           const feeItem = {
             id: record.id,
             description: description,
-            feeType: feeType,
-            categoryCode: feeType,
+            feeType: category, // Use category as feeType
+            categoryCode: category, // Use category as categoryCode
             amount: amount,
             status: record.status || 'pending',
             balanceDue: parseFloat(record.balance_due) || amount,
@@ -153,7 +187,8 @@ const Finance = () => {
             paymentDate: record.payment_date,
             paymentMethod: record.payment_method,
             receiptNumber: record.receipt_number,
-            dueDate: record.due_date
+            dueDate: record.due_date,
+            createdAt: record.created_at
           };
 
           // Add to semester items
@@ -169,18 +204,27 @@ const Finance = () => {
           semesterData[semesterKey].total += amount;
           
           // Update fee type summaries
-          if (feeType === 'tuition') {
-            semesterData[semesterKey].tuition += amount;
-            feeSummaryInit.tuition += amount;
-          } else if (feeType === 'functional') {
-            semesterData[semesterKey].functional += amount;
-            feeSummaryInit.functional += amount;
-          } else if (feeType === 'guild') {
-            semesterData[semesterKey].guild += amount;
-            feeSummaryInit.guild += amount;
-          } else if (feeType === 'nche') {
-            semesterData[semesterKey].nche += amount;
-            feeSummaryInit.nche += amount;
+          switch(category) {
+            case 'tuition':
+              semesterData[semesterKey].tuition += amount;
+              feeSummaryInit.tuition += amount;
+              break;
+            case 'functional':
+              semesterData[semesterKey].functional += amount;
+              feeSummaryInit.functional += amount;
+              break;
+            case 'guild':
+              semesterData[semesterKey].guild += amount;
+              feeSummaryInit.guild += amount;
+              break;
+            case 'nche':
+              semesterData[semesterKey].nche += amount;
+              feeSummaryInit.nche += amount;
+              break;
+            case 'registration':
+              semesterData[semesterKey].registration += amount;
+              feeSummaryInit.registration += amount;
+              break;
           }
           
           feeSummaryInit.total += amount;
@@ -235,13 +279,13 @@ const Finance = () => {
           month: 'short',
           day: 'numeric'
         }) : 'N/A',
-        description: payment.description || 'Payment',
+        description: payment.description || '',
         amount: parseFloat(payment.amount) || 0,
         method: payment.payment_method || 'Not specified',
         receipt: payment.receipt_number || 'N/A',
         status: payment.status,
         semester: payment.semester || 1,
-        feeType: payment.fee_type || 'tuition'
+        feeType: payment.category || 'tuition' // Use category instead of fee_type
       }));
 
       setPaymentHistory(history);
@@ -290,7 +334,19 @@ const Finance = () => {
       case 'functional': return '#9b59b6';
       case 'guild': return '#2ecc71';
       case 'nche': return '#e74c3c';
+      case 'registration': return '#f39c12'; // Orange color for registration
       default: return '#95a5a6';
+    }
+  };
+
+  const getFeeTypeDisplayName = (feeType) => {
+    switch(feeType) {
+      case 'tuition': return 'TUITION';
+      case 'functional': return 'FUNCTIONAL';
+      case 'guild': return 'GUILD';
+      case 'nche': return 'NCHE';
+      case 'registration': return 'REGISTRATION';
+      default: return feeType.toUpperCase();
     }
   };
 
@@ -328,12 +384,13 @@ const Finance = () => {
       
       Fee Summary (${academicYear}):
       ------------------------------
+      Registration: ${formatCurrency(feeSummary.registration)}
       Tuition: ${formatCurrency(feeSummary.tuition * 2)}
       Functional: ${formatCurrency(feeSummary.functional * 2)}
       Guild: ${formatCurrency(feeSummary.guild * 2)}
       NCHE: ${formatCurrency(feeSummary.nche)}
       
-      Total Annual Fees: ${formatCurrency((feeSummary.tuition + feeSummary.functional + feeSummary.guild) * 2 + feeSummary.nche)}
+      Total Annual Fees: ${formatCurrency(feeSummary.registration + (feeSummary.tuition + feeSummary.functional + feeSummary.guild) * 2 + feeSummary.nche)}
       
       Semester Breakdown:
       ------------------
@@ -459,7 +516,7 @@ const Finance = () => {
                           <h4>{item.description}</h4>
                           <p>
                             <span className="fee-category" style={{ color: getFeeTypeColor(item.categoryCode) }}>
-                              {item.categoryCode.toUpperCase()}
+                              {getFeeTypeDisplayName(item.categoryCode)}
                             </span>
                             {item.paymentDate && ` • Paid on: ${new Date(item.paymentDate).toLocaleDateString()}`}
                           </p>
@@ -559,7 +616,7 @@ const Finance = () => {
             <table className="semester-table">
               <thead>
                 <tr>
-                  <th>Fee Type</th>
+                  <th>Category</th>
                   <th>Description</th>
                   <th>Due Date</th>
                   <th>Amount</th>
@@ -579,7 +636,7 @@ const Finance = () => {
                           color: getFeeTypeColor(item.categoryCode)
                         }}
                       >
-                        {item.categoryCode.toUpperCase()}
+                        {getFeeTypeDisplayName(item.categoryCode)}
                       </div>
                     </td>
                     <td>
@@ -663,25 +720,25 @@ const Finance = () => {
     );
   };
 
- if (loading) {
-  return (
-    <div className="finance-container">
-      <div className="finance-header">
-        <div>
-          <h2>
-            <i className="fas fa-file-invoice-dollar" style={{ color: '#28a745' }}></i>
-            Financial Statements
-          </h2>
-          <div>Loading financial data...</div>
+  if (loading) {
+    return (
+      <div className="finance-container">
+        <div className="finance-header">
+          <div>
+            <h2>
+              <i className="fas fa-file-invoice-dollar" style={{ color: '#28a745' }}></i>
+              Financial Statements
+            </h2>
+            <div>Loading financial data...</div>
+          </div>
+        </div>
+        <div className="finance-loading-spinner">
+          <div className="finance-spinner"></div>
+          <p>Fetching your financial information...</p>
         </div>
       </div>
-      <div className="finance-loading-spinner">
-        <div className="finance-spinner"></div>
-        <p>Fetching your financial information...</p>
-      </div>
-    </div>
-  );
-}
+    );
+  }
 
   if (error) {
     return (
@@ -775,8 +832,6 @@ const Finance = () => {
         </div>
       </div>
 
-     
-
       {isMobile ? (
         <>
           {renderMobileSemesterSummary(financialData.semester1, 1)}
@@ -852,7 +907,7 @@ const Finance = () => {
                       backgroundColor: getFeeTypeColor(payment.feeType) 
                     }}
                   >
-                    {payment.feeType.toUpperCase()}
+                    {getFeeTypeDisplayName(payment.feeType)}
                   </div>
                 </div>
               </div>
@@ -865,7 +920,7 @@ const Finance = () => {
                 <tr>
                   <th>Date</th>
                   <th>Description</th>
-                  <th>Fee Type</th>
+                  <th>Category</th>
                   <th>Amount</th>
                   <th>Payment Method</th>
                   <th>Receipt</th>
@@ -888,7 +943,7 @@ const Finance = () => {
                           color: getFeeTypeColor(payment.feeType)
                         }}
                       >
-                        {payment.feeType.toUpperCase()}
+                        {getFeeTypeDisplayName(payment.feeType)}
                       </div>
                     </td>
                     <td className="payment-amount">{formatCurrency(payment.amount)}</td>

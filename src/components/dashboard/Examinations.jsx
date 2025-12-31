@@ -1329,12 +1329,12 @@ if (clearanceStatus && !clearanceStatus.cleared && !isBypassed) {
             icon: 'fas fa-check-circle',
             color: '#28a745'
           },
-          { 
-            label: 'Clearance', 
-            value: effectiveCleared ? '✓ Cleared (Override Active)' : '✗ Required',
-            icon: clearanceStatus?.cleared ? 'fas fa-check' : 'fas fa-ban',
-            color: effectiveCleared ? '#28a745' : '#dc3545'
-          }
+          // { 
+          //   label: 'Clearance', 
+          //   value: effectiveCleared ? '✓ Cleared (Override Active)' : '✗ Required',
+          //   icon: clearanceStatus?.cleared ? 'fas fa-check' : 'fas fa-ban',
+          //   color: effectiveCleared ? '#28a745' : '#dc3545'
+          // }
         ].map((stat, index) => (
           <div 
             key={index}
