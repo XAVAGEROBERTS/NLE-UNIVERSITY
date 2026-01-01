@@ -855,8 +855,8 @@ const Coursework = () => {
                   </div>
                   
                   <div className="contact-info">
-                    <p><strong>Finance Office:</strong> finance@university.edu</p>
-                    <p><strong>Phone:</strong> +1 (555) 123-4567</p>
+                    <p><strong>Finance Office:</strong> finance@nleuniversity.com</p>
+                    <p><strong>Phone:</strong> +(256) 765673373</p>
                   </div>
                 </div>
               )}
@@ -922,7 +922,7 @@ const Coursework = () => {
                 
                 <div className="contact-support">
                   <p>If you've already paid, please contact the Finance Office:</p>
-                  <p><strong>Email:</strong> finance@university.edu | <strong>Phone:</strong> +1 (555) 123-4567</p>
+                  <p><strong>Email:</strong> finance@nleuniversity.com <strong>Phone:</strong> +(256) 765673373</p>
                 </div>
               </div>
             )}
