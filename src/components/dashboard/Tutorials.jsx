@@ -77,29 +77,38 @@ const fetchTutorials = async () => {
   try {
     setLoading(true);
     setError(null);
-
 const { data: student, error: studentError } = await supabase
   .from('students')
-  .select('id, student_id, program_code, academic_year, year_of_study, semester')
+  .select('id, program_code, academic_year, year_of_study, semester')
   .eq('email', user.email)
   .single();
 
 if (studentError || !student) {
-  throw new Error('Unable to load student profile');
+  throw new Error('Unable to load your profile. Please contact admin.');
 }
 
-if (!student.program_code || !student.academic_year) {
-  throw new Error('Your profile is incomplete: missing program code or academic year. Contact admin.');
+if (!student.program_code || !student.academic_year || !student.year_of_study || !student.semester) {
+  throw new Error('Profile incomplete: missing program, academic year, year, or semester.');
 }
+
+// DESTRUCTURE FIRST
 const {
-  id: studentId, // UUID
+  id: studentId,
   program_code: studentProgramCode,
   academic_year: studentAcademicYear,
   year_of_study: studentYear,
   semester: studentSemester
 } = student;
 
-const studentCohort = `Year${studentYear}_Sem${studentSemester}`;
+// NOW DEFINE FILTER VARIABLES (safe)
+const academicParts = studentAcademicYear.trim().split('/');
+const startYear = academicParts[0]?.toUpperCase() || '';
+const endYear = academicParts[1]?.toUpperCase() || '';
+
+const normProgram = studentProgramCode.toUpperCase().trim();
+const cohortString = `YEAR${studentYear}_SEM${studentSemester}`.toUpperCase();
+
+const studentCohort = cohortString; // for logs if needed
 
 console.log('Student cohort:', {
   programCode: studentProgramCode,
@@ -157,49 +166,16 @@ console.log('Student cohort:', {
     // Only ONE declaration of allFiles
     const allFiles = await scanFolder();
     console.log(`Found ${allFiles.length} ACTUAL FILES in Tutorials bucket:`, allFiles.map(f => f.path));
-
 const matchingFiles = allFiles.filter(file => {
-  const parts = file.path.split('/');
-  if (parts.length < 5) return false; // Need at least program/[course]/year1/year2/cohort/file
+  const upperPath = file.path.toUpperCase();
 
-  const programCode = parts[0].toUpperCase().trim();
+  // Must contain program code, cohort string, and both years from academic_year
+  const hasProgram = upperPath.includes(normProgram);
+  const hasCohort = upperPath.includes(cohortString);
+  const hasStartYear = startYear ? upperPath.includes(startYear) : true;
+  const hasEndYear = endYear ? upperPath.includes(endYear) : true;
 
-  // Determine if there's a course code
-  let startIndex = 1; // default: program/year1/year2/cohort/file
-  if (parts.length >= 6 && /^[A-Z0-9]{4,12}$/.test(parts[1])) {
-    startIndex = 2; // program/course/year1/year2/cohort/file
-  }
-
-  const year1 = parts[startIndex];
-  const year2 = parts[startIndex + 1];
-  const cohortPart = parts[startIndex + 2];
-
-  // Reconstruct academic year as "2025/2029"
-  const folderAcademicYear = `${year1}/${year2}`;
-
-  const normFolderAY = folderAcademicYear
-    .replace(/_/g, '/')
-    .replace(/-/g, '/')
-    .trim()
-    .toUpperCase();
-
-  const normStudentAY = studentAcademicYear.toUpperCase().trim();
-
-  const normCohort = (cohortPart || '').toUpperCase().trim();
-  const normStudentCohort = studentCohort.toUpperCase();
-
-  console.log('ULTIMATE CHECK:', file.path, {
-    programMatch: programCode === studentProgramCode.toUpperCase().trim(),
-    ayMatch: normFolderAY === normStudentAY,
-    cohortMatch: normCohort === normStudentCohort,
-    extracted: { program: programCode, ay: normFolderAY, cohort: normCohort }
-  });
-
-  return (
-    programCode === studentProgramCode.toUpperCase().trim() &&
-    normFolderAY === normStudentAY &&
-    normCohort === normStudentCohort
-  );
+  return hasProgram && hasCohort && hasStartYear && hasEndYear;
 });
 
     console.log(`Filtered to ${matchingFiles.length} matching tutorials`);
@@ -216,7 +192,7 @@ allFiles.forEach(file => {
 const { data: enrollments, error: enrollError } = await supabase
   .from('student_courses')
   .select('courses(course_code)')
-  .eq('student_id', student.id); // Now uses correct UUID
+  .eq('student_id', studentId); // Use the UUID we destructured // Now uses correct UUID
 
 if (enrollError) {
   console.warn('Could not load enrollments:', enrollError);
@@ -225,34 +201,81 @@ if (enrollError) {
 
     const enrolledCourseCodes = enrollments?.map(e => e.courses?.course_code?.toUpperCase()) || [];
 
-    // 5. Create tutorial objects from matching files
-    const studentTutorials = matchingFiles.map(file => {
-      const fileName = file.name.replace(/\.[^.]+$/, ''); // remove extension
-      const cleanTitle = fileName.replace(/[_-]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-
-      // Extract course code if present
-      const parts = file.path.split('/');
-      let displayCourseCode = 'General';
-      if (parts.length >= 5 && parts[1].length <= 10) {
-        displayCourseCode = parts[1];
+      // Collect unique lecturer IDs from file paths
+    const lecturerIdSet = new Set();
+    matchingFiles.forEach(file => {
+      let parts = file.path.split('/');
+      if (parts[0] === 'tutorials') parts = parts.slice(1);
+      if (parts.length >= 1) {
+        lecturerIdSet.add(parts[0]); // lecturer UUID is first folder
       }
+    });
+
+    const lecturerIds = Array.from(lecturerIdSet);
+
+    // Fetch real lecturer names (one efficient query)
+    let lecturerMap = new Map();
+    if (lecturerIds.length > 0) {
+      const { data: lecturers, error: lecturerError } = await supabase
+        .from('lecturers')
+        .select('id, full_name') // ← change 'full_name' to your actual column name if different (e.g. 'name')
+        .in('id', lecturerIds);
+
+      if (lecturerError) {
+        console.warn('Could not load lecturer names:', lecturerError);
+      } else {
+        lecturers.forEach(l => {
+          lecturerMap.set(l.id, l.full_name || 'Lecturer');
+        });
+      }
+    }
+
+    // Create tutorial objects with REAL lecturer names and NO description
+    const studentTutorials = matchingFiles.map(file => {
+      let parts = file.path.split('/');
+      if (parts[0] === 'tutorials') parts = parts.slice(1);
+
+      // Lecturer name
+      const lecturerId = parts.length >= 1 ? parts[0] : null;
+      const lecturerName = lecturerMap.get(lecturerId) || 'Lecturer';
+
+      // Course code
+      let displayCourseCode = 'General';
+      if (parts.length >= 4) {
+        displayCourseCode = parts[2].toUpperCase();
+      }
+
+      // Clean title
+      let cleanTitle = file.name
+        .replace(/\.[^.]+$/, '')
+        .replace(/^\d{10,14}_[a-z0-9]{6,10}_/i, '')
+        .replace(/_+/g, ' ')
+        .trim();
+
+      cleanTitle = cleanTitle
+        .toLowerCase()
+        .replace(/\b\w/g, l => l.toUpperCase()) || 'Untitled Tutorial';
 
       return {
         id: `storage-${file.path.replace(/\//g, '-').replace(/\./g, '_')}`,
         title: cleanTitle,
-        description: 'Tutorial material uploaded by your lecturer',
+        description: '', // Empty — removes the placeholder text
         videoSrc: file.url,
-        hasVideo: true,
-        lecturer: 'Your Lecturer',
+        hasVideo: file.name.match(/\.(mp4|webm|ogg|mov)$/i) !== null,
+        lecturer: lecturerName, // Real name or fallback
         courseCode: displayCourseCode,
-        courseName: displayCourseCode === 'General' ? 'General Tutorial' : `Course ${displayCourseCode}`,
-        fileUrls: [], // no extra materials for now
-        viewCount: 0
+        courseName: displayCourseCode === 'General' ? 'General Tutorial' : displayCourseCode,
+        fileUrls: [],
+        viewCount: 0,
+        created_at: file.created_at
       };
     });
 
-    // Sort by filename/title
-    studentTutorials.sort((a, b) => a.title.localeCompare(b.title));
+    // Sort: newest first, then alphabetical by title
+    studentTutorials.sort((a, b) => {
+      const dateDiff = new Date(b.created_at) - new Date(a.created_at);
+      return dateDiff !== 0 ? dateDiff : a.title.localeCompare(b.title);
+    });
 
     setTutorials(studentTutorials);
 
@@ -267,7 +290,7 @@ if (enrollError) {
     setLoading(false);
   }
   };
-  
+
 const generateThumbnail = (videoSrc) => {
   return new Promise((resolve) => {
     const video = document.createElement('video');
@@ -815,7 +838,7 @@ if (loading) {
               
               <div className="description-content">
                 <p className="description-text">
-                  {activeVideo.description || 'No description available.'}
+                  {activeVideo.description || 'Tutorial material'}
                 </p>
               </div>
 
