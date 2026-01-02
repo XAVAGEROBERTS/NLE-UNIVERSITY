@@ -302,6 +302,7 @@
   text-align: center;
   border-top: 4px solid;
   transition: transform 0.3s ease;
+
 }
 
 .examinations-stat-card:hover {
