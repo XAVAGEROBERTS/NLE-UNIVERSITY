@@ -21,16 +21,16 @@ const Examinations = () => {
   const [checkingClearance, setCheckingClearance] = useState(false);
   const [activeTab, setActiveTab] = useState('all'); // 'all', 'upcoming', 'graded', 'submitted'
   
+  // New state for checking if any exam is scheduled
+  const [hasScheduledExams, setHasScheduledExams] = useState(false);
 
   // Compute bypass status once
-const isBypassed = 
-  studentInfo?.fees_clearance_bypassed || 
-  studentInfo?.attendance_clearance_bypassed || 
+  const isBypassed = 
+    studentInfo?.fees_clearance_bypassed || 
+    studentInfo?.attendance_clearance_bypassed || 
     studentInfo?.exam_clearance_bypassed;
 
-
-const effectiveCleared = (clearanceStatus?.cleared || isBypassed) && !loading;
-
+  const effectiveCleared = (clearanceStatus?.cleared || isBypassed) && !loading;
   
   useEffect(() => {
     const checkMobile = () => {
@@ -54,25 +54,25 @@ const effectiveCleared = (clearanceStatus?.cleared || isBypassed) && !loading;
       setLoading(true);
       setError(null);
 
-const { data: student, error: studentError } = await supabase
-  .from('students')
-  .select(`
-    id, 
-    full_name, 
-    student_id, 
-    program, 
-    program_code,
-    year_of_study, 
-    semester, 
-    academic_year, 
-    program_id, 
-    email, 
-    phone,
-    department_code,
-    fees_clearance_bypassed,
-    attendance_clearance_bypassed,
-    exam_clearance_bypassed
-  `)
+      const { data: student, error: studentError } = await supabase
+        .from('students')
+        .select(`
+          id, 
+          full_name, 
+          student_id, 
+          program, 
+          program_code,
+          year_of_study, 
+          semester, 
+          academic_year, 
+          program_id, 
+          email, 
+          phone,
+          department_code,
+          fees_clearance_bypassed,
+          attendance_clearance_bypassed,
+          exam_clearance_bypassed
+        `)
         .eq('email', user.email)
         .single();
 
@@ -82,33 +82,50 @@ const { data: student, error: studentError } = await supabase
       console.log('Student data loaded:', student);
       setStudentInfo(student);
 
-      // Check exam clearance
-      setCheckingClearance(true);
-      const clearance = await checkExamClearance(
-        student.id,
-        student.academic_year || '2025/2029',
-        student.semester || 1
+      // Always fetch exams first
+      const fetchedExams = await fetchExams(student);
+
+      // Check if any exam is scheduled/active/upcoming (not ended)
+      const hasScheduled = fetchedExams.some(exam => 
+        !exam.isEnded && (exam.status === 'upcoming' || exam.status === 'active')
       );
       
-      console.log('Clearance result:', clearance);
-      setClearanceStatus(clearance);
-      setCheckingClearance(false);
+      console.log('Has scheduled exams:', hasScheduled, 'Exams count:', fetchedExams.length);
+      
+      // Only check clearance if there are scheduled exams
+      if (hasScheduled) {
+        console.log('Checking clearance because there are scheduled exams');
+        setCheckingClearance(true);
+        const clearance = await checkExamClearance(
+          student.id,
+          student.academic_year || '2025/2029',
+          student.semester || 1
+        );
+        
+        console.log('Clearance result:', clearance);
+        setClearanceStatus(clearance);
+        setCheckingClearance(false);
 
-      // Always fetch exams, but mark if not cleared
-      await fetchExams(student);
+        // Only show modal if NOT effectively cleared AND there are scheduled exams
+        if (clearance && !clearance.cleared && !isBypassed) {
+          setTimeout(() => {
+            setShowClearanceModal(true);
+          }, 1000);
+        }
+      } else {
+        // No scheduled exams, don't check clearance
+        console.log('No scheduled exams, skipping clearance check');
+        setClearanceStatus(null);
+      }
 
-   // Only show modal if NOT effectively cleared (i.e., no normal clearance AND no bypass)
-if (clearanceStatus && !effectiveCleared) {
-  setTimeout(() => {
-    setShowClearanceModal(true);
-  }, 1000);
-}
+      setHasScheduledExams(hasScheduled);
 
     } catch (error) {
       console.error('Error fetching student data:', error);
       setError(`Failed to load examinations: ${error.message}`);
       setExams([]);
       setCheckingClearance(false);
+      setHasScheduledExams(false);
     } finally {
       setLoading(false);
     }
@@ -134,7 +151,8 @@ if (clearanceStatus && !effectiveCleared) {
 
       if (courseIds.length === 0) {
         setExams([]);
-        return;
+        setHasScheduledExams(false);
+        return [];
       }
 
       // Fetch exams with cohort targeting
@@ -292,29 +310,45 @@ if (clearanceStatus && !effectiveCleared) {
       }) : [];
 
       console.log('Processed exams:', processedExams);
+      
+      // Check if any exam is scheduled/active/upcoming (not ended)
+      const hasScheduled = processedExams.some(exam => 
+        !exam.isEnded && (exam.status === 'upcoming' || exam.status === 'active')
+      );
+      
+      console.log('Has scheduled exams (in fetchExams):', hasScheduled, 'Total exams:', processedExams.length);
+      
+      // Update state
+      setHasScheduledExams(hasScheduled);
       setExams(processedExams);
+      
+      return processedExams;
+      
     } catch (error) {
       console.error('Error fetching exams:', error);
       setError(`Failed to load examinations: ${error.message}`);
       setExams([]);
+      setHasScheduledExams(false);
+      return [];
     }
   };
 
-const handleStartExam = (exam) => {
-  if (!effectiveCleared) {
-    setShowClearanceModal(true);
-    return;
-  }
+  const handleStartExam = (exam) => {
+    // Check clearance only if there are scheduled exams
+    if (hasScheduledExams && !effectiveCleared) {
+      setShowClearanceModal(true);
+      return;
+    }
 
-  const isOnlineExam = exam.isOnline;
-  
-  if (!isOnlineExam) {
-    alert('This is a physical exam. Please attend at the specified venue.');
-    return;
-  }
+    const isOnlineExam = exam.isOnline;
+    
+    if (!isOnlineExam) {
+      alert('This is a physical exam. Please attend at the specified venue.');
+      return;
+    }
 
-  navigate(`/examinations/take/${exam.id}`);
-};
+    navigate(`/examinations/take/${exam.id}`);
+  };
 
   const formatDate = (dateString) => {
     const date = new Date(dateString);
@@ -384,7 +418,7 @@ const handleStartExam = (exam) => {
   };
 
   const recheckClearance = async () => {
-    if (!studentInfo) return;
+    if (!studentInfo || !hasScheduledExams) return;
     
     setCheckingClearance(true);
     const clearance = await checkExamClearance(
@@ -408,16 +442,17 @@ const handleStartExam = (exam) => {
         return;
       }
 
-      // Check clearance before allowing download
-     // Admin bypass overrides normal clearance
-const isBypassed = studentInfo?.fees_clearance_bypassed || 
-                  studentInfo?.attendance_clearance_bypassed || 
-                  studentInfo?.exam_clearance_bypassed;
+      // Only allow download if there are scheduled exams
+      if (!hasScheduledExams) {
+        alert('No scheduled exams available. The download permit feature is only available when you have upcoming or active exams.');
+        return;
+      }
 
-if (clearanceStatus && !clearanceStatus.cleared && !isBypassed) {
-  setShowClearanceModal(true);
-  return;
-}
+      // Check clearance only if there are scheduled exams
+      if (hasScheduledExams && !effectiveCleared) {
+        setShowClearanceModal(true);
+        return;
+      }
 
       // Filter exams for the permit (only upcoming and active)
       const permitExams = exams.filter(exam => 
@@ -473,8 +508,8 @@ if (clearanceStatus && !clearanceStatus.cleared && !isBypassed) {
             </h3>
             <div style="margin-bottom: 10px;">
               <strong>Clearance Status:</strong> 
-              <span style="color: ${clearanceStatus?.cleared ? '#28a745' : '#dc3545'}; font-weight: bold;">
-                ${clearanceStatus?.cleared ? 'CLEARED ✓' : 'NOT CLEARED ✗'}
+              <span style="color: ${clearanceStatus?.cleared || isBypassed ? '#28a745' : '#dc3545'}; font-weight: bold;">
+                ${clearanceStatus?.cleared || isBypassed ? 'CLEARED ✓' : 'NOT CLEARED ✗'}
               </span>
             </div>
             <div style="margin-bottom: 10px;">
@@ -612,9 +647,9 @@ if (clearanceStatus && !clearanceStatus.cleared && !isBypassed) {
     }
   });
 
-  // Render Clearance Modal
+  // Render Clearance Modal - Only show if there are scheduled exams
   const renderClearanceModal = () => {
-    if (!showClearanceModal || !clearanceStatus) return null;
+    if (!showClearanceModal || !clearanceStatus || !hasScheduledExams) return null;
 
     return (
       <div className="clearance-modal-overlay">
@@ -632,19 +667,19 @@ if (clearanceStatus && !clearanceStatus.cleared && !isBypassed) {
           
           <div className="clearance-modal-body">
             <div className="clearance-status-summary">
-              <div className={`clearance-status-badge ${clearanceStatus.cleared ? 'cleared' : 'not-cleared'}`}>
-                <i className={`fas ${clearanceStatus.cleared ? 'fa-check-circle' : 'fa-ban'}`}></i>
-                <span>{clearanceStatus.cleared ? 'CLEARED' : 'NOT CLEARED'}</span>
+              <div className={`clearance-status-badge ${effectiveCleared ? 'cleared' : 'not-cleared'}`}>
+                <i className={`fas ${effectiveCleared ? 'fa-check-circle' : 'fa-ban'}`}></i>
+                <span>{effectiveCleared ? 'CLEARED' : 'NOT CLEARED'}</span>
               </div>
               <p className="clearance-modal-message">
-                {clearanceStatus.cleared 
+                {effectiveCleared 
                   ? 'You are cleared to take examinations.'
                   : 'You are not cleared to take examinations due to the following:'
                 }
               </p>
             </div>
             
-            {!clearanceStatus.cleared && (
+            {!effectiveCleared && (
               <>
                 <div className="clearance-issues">
                   {!clearanceStatus.financial?.cleared && (
@@ -784,9 +819,26 @@ if (clearanceStatus && !clearanceStatus.cleared && !isBypassed) {
     );
   };
 
-  // Render Clearance Status Banner
+  // Render Clearance Status Banner - Only show if there are scheduled exams
   const renderClearanceBanner = () => {
-    if (!clearanceStatus) return null;
+    if (!hasScheduledExams) return null;
+    
+    // If no clearance status but we have scheduled exams, show a loading or default state
+    if (!clearanceStatus) {
+      return (
+        <div className="clearance-banner not-cleared">
+          <div className="clearance-banner-content">
+            <div className="clearance-status">
+              <i className="fas fa-clock"></i>
+              <div>
+                <h4>EXAM CLEARANCE: CHECKING...</h4>
+                <p>Verifying your exam clearance status</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
 
     const isCleared = effectiveCleared;
 
@@ -838,7 +890,10 @@ if (clearanceStatus && !clearanceStatus.cleared && !isBypassed) {
     const statusColor = getStatusColor(status);
     const timeUntilStart = getTimeUntilStart(exam);
     const isOnlineExam = exam.isOnline;
-    const isCleared = clearanceStatus?.cleared;
+    
+    // Check if user needs clearance for this exam
+    const needsClearanceForThisExam = hasScheduledExams && !effectiveCleared && 
+      (exam.canStart || exam.canResume || exam.status === 'active' || exam.status === 'upcoming');
     
     return (
       <div className="mobile-exam-card" key={exam.id}>
@@ -924,19 +979,19 @@ if (clearanceStatus && !clearanceStatus.cleared && !isBypassed) {
               <button 
                 onClick={() => handleStartExam(exam)}
                 className="mobile-resume-exam-btn"
-                disabled={!effectiveCleared}
+                disabled={needsClearanceForThisExam}
               >
                 <i className="fas fa-history"></i>
-                {effectiveCleared ? 'RESUME EXAM' : 'CLEARANCE REQUIRED'}
+                {needsClearanceForThisExam ? 'CLEARANCE REQUIRED' : 'RESUME EXAM'}
               </button>
             ) : exam.canStart && isOnlineExam ? (
               <button 
                 onClick={() => handleStartExam(exam)}
                 className="mobile-start-exam-btn"
-                disabled={!effectiveCleared}
+                disabled={needsClearanceForThisExam}
               >
                 <i className="fas fa-play"></i>
-                {effectiveCleared ? 'START ONLINE EXAM' : 'CLEARANCE REQUIRED'}
+                {needsClearanceForThisExam ? 'CLEARANCE REQUIRED' : 'START ONLINE EXAM'}
               </button>
             ) : status === 'upcoming' ? (
               <button 
@@ -967,7 +1022,10 @@ if (clearanceStatus && !clearanceStatus.cleared && !isBypassed) {
     const statusColor = getStatusColor(status);
     const timeUntilStart = getTimeUntilStart(exam);
     const isOnlineExam = exam.isOnline;
-    const isCleared = clearanceStatus?.cleared;
+    
+    // Check if user needs clearance for this exam
+    const needsClearanceForThisExam = hasScheduledExams && !effectiveCleared && 
+      (exam.canStart || exam.canResume || exam.status === 'active' || exam.status === 'upcoming');
     
     return (
       <div 
@@ -1123,10 +1181,10 @@ if (clearanceStatus && !clearanceStatus.cleared && !isBypassed) {
                   <button 
                     onClick={() => handleStartExam(exam)}
                     className="desktop-resume-exam-btn"
-                    disabled={!effectiveCleared}
+                    disabled={needsClearanceForThisExam}
                   >
                     <i className="fas fa-history"></i>
-                    {effectiveCleared ? 'RESUME EXAM' : 'CLEARANCE REQUIRED'}
+                    {needsClearanceForThisExam ? 'CLEARANCE REQUIRED' : 'RESUME EXAM'}
                   </button>
                 </>
               ) : exam.canStart && isOnlineExam ? (
@@ -1141,10 +1199,10 @@ if (clearanceStatus && !clearanceStatus.cleared && !isBypassed) {
                   <button 
                     onClick={() => handleStartExam(exam)}
                     className="desktop-start-exam-btn"
-                    disabled={!effectiveCleared}
+                    disabled={needsClearanceForThisExam}
                   >
                     <i className="fas fa-play"></i>
-                    {effectiveCleared ? 'START ONLINE EXAM' : 'CLEARANCE REQUIRED'}
+                    {needsClearanceForThisExam ? 'CLEARANCE REQUIRED' : 'START ONLINE EXAM'}
                   </button>
                 </>
               ) : status === 'upcoming' ? (
@@ -1159,11 +1217,11 @@ if (clearanceStatus && !clearanceStatus.cleared && !isBypassed) {
                     </div>
                   </div>
                   <button 
-                    disabled
-                    className="desktop-disabled-btn"
+                    disabled={needsClearanceForThisExam}
+                    className={needsClearanceForThisExam ? "desktop-resume-exam-btn" : "desktop-disabled-btn"}
                   >
-                    <i className="fas fa-lock"></i>
-                    {isOnlineExam ? 'Not Available Yet' : 'Physical Exam'}
+                    <i className={needsClearanceForThisExam ? "fas fa-ban" : "fas fa-lock"}></i>
+                    {needsClearanceForThisExam ? 'CLEARANCE REQUIRED' : (isOnlineExam ? 'Not Available Yet' : 'Physical Exam')}
                   </button>
                 </>
               ) : (
@@ -1210,7 +1268,7 @@ if (clearanceStatus && !clearanceStatus.cleared && !isBypassed) {
         </div>
         <div className="examinations-loading-spinner">
           <div className="loading-spinner"></div>
-          <p>Checking your exam clearance status...</p>
+          <p>Fetching your exams</p>
         </div>
       </div>
     );
@@ -1280,20 +1338,23 @@ if (clearanceStatus && !clearanceStatus.cleared && !isBypassed) {
                   </>
                 )}
               </button>
-              <button 
-                onClick={downloadExamPermit}
-                className="examinations-download-permit-btn"
-                disabled={!effectiveCleared}
-              >
-                <i className="fas fa-download"></i>
-                Download Permit
-              </button>
+              {/* Only show download permit button if there are scheduled exams */}
+              {hasScheduledExams && (
+                <button 
+                  onClick={downloadExamPermit}
+                  className="examinations-download-permit-btn"
+                  disabled={!effectiveCleared}
+                >
+                  <i className="fas fa-download"></i>
+                  {effectiveCleared ? 'Download Permit' : 'Clearance Required'}
+                </button>
+              )}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Clearance Status Banner */}
+      {/* Clearance Status Banner - Only show if there are scheduled exams */}
       {renderClearanceBanner()}
 
       {/* Stats Overview */}
@@ -1329,12 +1390,13 @@ if (clearanceStatus && !clearanceStatus.cleared && !isBypassed) {
             icon: 'fas fa-check-circle',
             color: '#28a745'
           },
-          // { 
+          // Clearance stat - Only show if there are scheduled exams
+          // ...(hasScheduledExams ? [{
           //   label: 'Clearance', 
-          //   value: effectiveCleared ? '✓ Cleared (Override Active)' : '✗ Required',
-          //   icon: clearanceStatus?.cleared ? 'fas fa-check' : 'fas fa-ban',
+          //   value: effectiveCleared ? '✓ Cleared' : '✗ Required',
+          //   icon: effectiveCleared ? 'fas fa-check' : 'fas fa-ban',
           //   color: effectiveCleared ? '#28a745' : '#dc3545'
-          // }
+          // }] : [])
         ].map((stat, index) => (
           <div 
             key={index}
@@ -1402,7 +1464,8 @@ if (clearanceStatus && !clearanceStatus.cleared && !isBypassed) {
             {activeTab === 'graded' && 'Graded Examinations'}
           </h3>
           <div className="examinations-count">
-            {clearanceStatus && !clearanceStatus.cleared ? (
+            {/* Only show clearance warning if there are scheduled exams */}
+            {hasScheduledExams && clearanceStatus && !effectiveCleared ? (
               <span className="clearance-warning">
                 <i className="fas fa-exclamation-triangle"></i>
                 Clearance Required
@@ -1426,14 +1489,15 @@ if (clearanceStatus && !clearanceStatus.cleared && !isBypassed) {
               {activeTab === 'graded' && 'No Graded Examinations'}
             </h3>
             <p className="examinations-empty-state-message">
-              {clearanceStatus && !clearanceStatus.cleared 
-                ? 'Please resolve clearance issues to view examinations.'
+              {hasScheduledExams && clearanceStatus && !effectiveCleared 
+                ? 'Please resolve clearance issues to access examinations.'
                 : activeTab === 'all'
                 ? 'No examinations scheduled for your courses.'
                 : `No ${activeTab} examinations found.`
               }
             </p>
-            {clearanceStatus && !clearanceStatus.cleared && (
+            {/* Only show clearance button if there are scheduled exams */}
+            {hasScheduledExams && clearanceStatus && !effectiveCleared && (
               <button 
                 onClick={() => setShowClearanceModal(true)}
                 className="examinations-clearance-btn"
@@ -1461,7 +1525,7 @@ if (clearanceStatus && !clearanceStatus.cleared && !isBypassed) {
         )}
       </div>
 
-      {/* Clearance Modal */}
+      {/* Clearance Modal - Only show if there are scheduled exams */}
       {renderClearanceModal()}
     </div>
   );
