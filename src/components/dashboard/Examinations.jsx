@@ -473,7 +473,7 @@ const Examinations = () => {
 
       permitElement.innerHTML = `
         <div style="text-align: center; margin-bottom: 30px; border-bottom: 2px solid #007bff; padding-bottom: 20px;">
-          <h1 style="color: #007bff; margin-bottom: 10px;">UNIVERSITY EXAMINATION PERMIT</h1>
+          <h1 style="color: #007bff; margin-bottom: 10px;">NLE UNIVERSITY EXAMINATION PERMIT</h1>
           <h2 style="color: #333; margin: 0;">Academic Year: ${studentInfo.academic_year || '2025/2029'}</h2>
         </div>
         
