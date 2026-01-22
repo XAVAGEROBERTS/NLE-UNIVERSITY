@@ -1,4 +1,4 @@
-// src/components/layout/StudentLayout.jsx - CORRECTED VERSION
+// src/components/layout/StudentLayout.jsx - CLEANED VERSION
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useStudentAuth } from '../../context/StudentAuthContext';
@@ -10,18 +10,12 @@ const StudentLayout = () => {
   const { user, signOut, logoutLoading } = useStudentAuth();
   
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [showNotifications, setShowNotifications] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [studentData, setStudentData] = useState(null);
-  const [notifications, setNotifications] = useState([]);
-  const [unreadCount, setUnreadCount] = useState(0);
   const [isLoadingUser, setIsLoadingUser] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
-  const [isLoadingNotifications, setIsLoadingNotifications] = useState(false);
 
-  const notificationRef = useRef(null);
-  const bellIconRef = useRef(null);
   const logoutModalRef = useRef(null);
   const mobileMenuRef = useRef(null);
 
@@ -47,7 +41,7 @@ const StudentLayout = () => {
   // Check mobile on mount and resize - RESTORED TO 1024px
   useEffect(() => {
     const checkMobile = () => {
-      const mobile = window.innerWidth < 1024; // RESTORED: Keep 1024px for tablet compatibility
+      const mobile = window.innerWidth < 1024;
       setIsMobile(mobile);
       if (mobile) {
         setSidebarCollapsed(true);
@@ -108,175 +102,7 @@ const StudentLayout = () => {
     }
   }, [user]);
 
-  // Fetch notifications from Supabase
-  const fetchNotifications = useCallback(async () => {
-    try {
-      setIsLoadingNotifications(true);
-      
-      if (!studentData?.student_id && !user?.studentId) {
-        console.log('No student ID available for fetching notifications');
-        setIsLoadingNotifications(false);
-        return;
-      }
-
-      const studentId = studentData?.student_id || user?.studentId;
-      
-      console.log('🔔 Fetching notifications for student:', studentId);
-      
-      const { data: notificationsData, error } = await supabase
-        .from('notifications')
-        .select('*')
-        .eq('student_id', studentId)
-        .order('created_at', { ascending: false })
-        .limit(20);
-
-      if (error) {
-        console.error('Error fetching notifications:', error);
-        // Set empty array as fallback
-        setNotifications([]);
-        return;
-      }
-
-      if (notificationsData) {
-        console.log(`📨 Loaded ${notificationsData.length} notifications`);
-        
-        const formattedNotifications = notificationsData.map(notification => ({
-          id: notification.id,
-          title: notification.title,
-          message: notification.message,
-          time: formatTimeAgo(notification.created_at),
-          read: notification.is_read,
-          type: notification.type || 'general',
-          rawData: notification
-        }));
-        
-        setNotifications(formattedNotifications);
-      }
-    } catch (error) {
-      console.error('Error in fetchNotifications:', error);
-      // Set empty array as fallback
-      setNotifications([]);
-    } finally {
-      setIsLoadingNotifications(false);
-    }
-  }, [studentData, user]);
-
-  // Format time ago
-  const formatTimeAgo = (timestamp) => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const seconds = Math.floor((now - date) / 1000);
-    
-    if (seconds < 60) return `${seconds} seconds ago`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes ago`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
-    if (seconds < 604800) return `${Math.floor(seconds / 86400)} days ago`;
-    
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  };
-
-  // Mark notification as read
-  const markNotificationAsRead = async (notificationId) => {
-    try {
-      const { error } = await supabase
-        .from('notifications')
-        .update({ is_read: true })
-        .eq('id', notificationId);
-
-      if (error) {
-        console.error('Error marking notification as read:', error);
-        return false;
-      }
-
-      // Update local state
-      setNotifications(prev => 
-        prev.map(notif => 
-          notif.id === notificationId ? { ...notif, read: true } : notif
-        )
-      );
-      
-      return true;
-    } catch (error) {
-      console.error('Error in markNotificationAsRead:', error);
-      return false;
-    }
-  };
-
-  // Mark all notifications as read
-  const markAllNotificationsAsRead = async () => {
-    try {
-      if (!studentData?.student_id && !user?.studentId) return;
-      
-      const studentId = studentData?.student_id || user?.studentId;
-      
-      const { error } = await supabase
-        .from('notifications')
-        .update({ is_read: true })
-        .eq('student_id', studentId)
-        .eq('is_read', false);
-
-      if (error) {
-        console.error('Error marking all notifications as read:', error);
-        return;
-      }
-
-      // Update local state
-      setNotifications(prev => 
-        prev.map(notif => ({ ...notif, read: true }))
-      );
-    } catch (error) {
-      console.error('Error in markAllNotificationsAsRead:', error);
-    }
-  };
-
-  // Delete notification
-  const deleteNotification = async (notificationId) => {
-    try {
-      const { error } = await supabase
-        .from('notifications')
-        .delete()
-        .eq('id', notificationId);
-
-      if (error) {
-        console.error('Error deleting notification:', error);
-        return false;
-      }
-
-      // Update local state
-      setNotifications(prev => prev.filter(notif => notif.id !== notificationId));
-      return true;
-    } catch (error) {
-      console.error('Error in deleteNotification:', error);
-      return false;
-    }
-  };
-
-  // Delete all notifications
-  const deleteAllNotifications = async () => {
-    try {
-      if (!studentData?.student_id && !user?.studentId) return;
-      
-      const studentId = studentData?.student_id || user?.studentId;
-      
-      const { error } = await supabase
-        .from('notifications')
-        .delete()
-        .eq('student_id', studentId);
-
-      if (error) {
-        console.error('Error deleting all notifications:', error);
-        return;
-      }
-
-      // Update local state
-      setNotifications([]);
-      setShowNotifications(false);
-    } catch (error) {
-      console.error('Error in deleteAllNotifications:', error);
-    }
-  };
-
-  // Initialize user data and notifications
+  // Initialize user data
   useEffect(() => {
     if (user) {
       setIsLoadingUser(true);
@@ -284,88 +110,9 @@ const StudentLayout = () => {
     }
   }, [user, fetchStudentData]);
 
-  // Fetch notifications when student data is loaded
-  useEffect(() => {
-    if (studentData || user?.studentId) {
-      fetchNotifications();
-    }
-  }, [studentData, user?.studentId, fetchNotifications]);
-
-  // Set up real-time subscription for notifications
-  useEffect(() => {
-    if (!studentData?.student_id && !user?.studentId) return;
-    
-    const studentId = studentData?.student_id || user?.studentId;
-    
-    console.log('🔔 Setting up real-time notifications for student:', studentId);
-    
-    const channel = supabase
-      .channel(`notifications:${studentId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'notifications',
-          filter: `student_id=eq.${studentId}`
-        },
-        (payload) => {
-          console.log('🔔 New notification received:', payload.new);
-          
-          const newNotification = {
-            id: payload.new.id,
-            title: payload.new.title,
-            message: payload.new.message,
-            time: formatTimeAgo(payload.new.created_at),
-            read: payload.new.is_read,
-            type: payload.new.type || 'general',
-            rawData: payload.new
-          };
-          
-          setNotifications(prev => [newNotification, ...prev]);
-          
-          // Show desktop notification if browser supports it
-          if (Notification.permission === 'granted') {
-            new Notification(newNotification.title, {
-              body: newNotification.message,
-              icon: '/badge.png',
-              tag: 'student-notification'
-            });
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      console.log('🔔 Cleaning up real-time notifications subscription');
-      supabase.removeChannel(channel);
-    };
-  }, [studentData?.student_id, user?.studentId]);
-
-  // Update unread count
-  useEffect(() => {
-    const unread = notifications.filter(n => !n.read).length;
-    setUnreadCount(unread);
-  }, [notifications]);
-
-  // Request notification permission on mount
-  useEffect(() => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
-  }, []);
-
   // Click outside handlers
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (showNotifications && 
-          notificationRef.current && 
-          !notificationRef.current.contains(event.target) &&
-          bellIconRef.current && 
-          !bellIconRef.current.contains(event.target)) {
-        setShowNotifications(false);
-      }
-
       if (showLogoutModal && 
           logoutModalRef.current && 
           !logoutModalRef.current.contains(event.target)) {
@@ -386,7 +133,7 @@ const StudentLayout = () => {
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [showNotifications, showLogoutModal, logoutLoading, mobileMenuOpen]);
+  }, [showLogoutModal, logoutLoading, mobileMenuOpen]);
 
   // Close mobile menu on route change
   useEffect(() => {
@@ -429,67 +176,6 @@ const StudentLayout = () => {
   const cancelLogout = () => {
     if (!logoutLoading) {
       setShowLogoutModal(false);
-    }
-  };
-
-  const handleNotificationClick = (event) => {
-    event.stopPropagation();
-    event.preventDefault();
-    setShowNotifications(!showNotifications);
-  };
-
-  const handleNotificationItemClick = async (notificationId) => {
-    await markNotificationAsRead(notificationId);
-    setShowNotifications(false);
-  };
-
-  const getNotificationIcon = (type) => {
-    switch(type.toLowerCase()) {
-      case 'assignment':
-      case 'coursework':
-        return 'fas fa-file-alt';
-      case 'lecture':
-      case 'class':
-        return 'fas fa-video';
-      case 'finance':
-      case 'payment':
-        return 'fas fa-money-bill-wave';
-      case 'exam':
-      case 'examination':
-        return '#f72585';
-      case 'result':
-        return '#9C27B0';
-      case 'timetable':
-        return '#00BCD4';
-      case 'announcement':
-        return '#FF5722';
-      default:
-        return '#9C27B0';
-    }
-  };
-
-  const getNotificationColor = (type) => {
-    switch(type.toLowerCase()) {
-      case 'assignment':
-      case 'coursework':
-        return '#4CAF50';
-      case 'lecture':
-      case 'class':
-        return '#2196F3';
-      case 'finance':
-      case 'payment':
-        return '#FF9800';
-      case 'exam':
-      case 'examination':
-        return '#f72585';
-      case 'result':
-        return '#9C27B0';
-      case 'timetable':
-        return '#00BCD4';
-      case 'announcement':
-        return '#FF5722';
-      default:
-        return '#9C27B0';
     }
   };
 
@@ -618,22 +304,6 @@ const StudentLayout = () => {
             </div>
 
             <div className="header-actions">
-              <div 
-                ref={bellIconRef}
-                className={`notification-icon ${showNotifications ? 'active' : ''}`}
-                onClick={handleNotificationClick}
-                role="button"
-                tabIndex="0"
-                aria-label={`Notifications ${unreadCount > 0 ? `(${unreadCount} unread)` : ''}`}
-              >
-                <i className="fas fa-bell"></i>
-                {unreadCount > 0 && (
-                  <span className="notification-badge">
-                    {unreadCount > 9 ? '9+' : unreadCount}
-                  </span>
-                )}
-              </div>
-
               {!isMobile && (
                 <div 
                   className="user-info"
@@ -667,108 +337,6 @@ const StudentLayout = () => {
             </div>
           </div>
         </header>
-
-        {/* Notifications Dropdown */}
-        {showNotifications && (
-          <div 
-            ref={notificationRef}
-            className="notification-dropdown"
-          >
-            <div className="notification-header">
-              <div>
-                <h4>Notifications</h4>
-                <p>{unreadCount} unread {unreadCount === 1 ? 'message' : 'messages'}</p>
-              </div>
-              <div className="notification-actions">
-                {unreadCount > 0 && (
-                  <button
-                    onClick={markAllNotificationsAsRead}
-                    className="notification-action-btn mark-read"
-                  >
-                    Mark all as read
-                  </button>
-                )}
-                {notifications.length > 0 && (
-                  <button
-                    onClick={deleteAllNotifications}
-                    className="notification-action-btn clear-all"
-                  >
-                    Clear all
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="notification-list">
-              {isLoadingNotifications ? (
-                <div className="notification-loading">
-                  <div className="notification-spinner"></div>
-                  <p>Loading notifications...</p>
-                </div>
-              ) : notifications.length === 0 ? (
-                <div className="notification-empty">
-                  <i className="fas fa-bell-slash"></i>
-                  <p>No notifications yet</p>
-                  <p className="empty-subtext">New notifications will appear here</p>
-                </div>
-              ) : (
-                notifications.map((notification) => (
-                  <div
-                    key={notification.id}
-                    className={`notification-item ${notification.read ? '' : 'unread'}`}
-                    onClick={() => handleNotificationItemClick(notification.id)}
-                    role="button"
-                    tabIndex="0"
-                  >
-                    <div 
-                      className="notification-icon-wrapper"
-                      style={{ backgroundColor: `${getNotificationColor(notification.type)}20` }}
-                    >
-                      <i 
-                        className={getNotificationIcon(notification.type)} 
-                        style={{ color: getNotificationColor(notification.type) }}
-                      ></i>
-                    </div>
-                    <div className="notification-content">
-                      <div className="notification-header-row">
-                        <p className="notification-title">{notification.title}</p>
-                        {!notification.read && (
-                          <span className="unread-indicator"></span>
-                        )}
-                      </div>
-                      <p className="notification-message">{notification.message}</p>
-                      <small className="notification-time">{notification.time}</small>
-                    </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteNotification(notification.id);
-                      }}
-                      className="notification-delete-btn"
-                      aria-label="Delete notification"
-                    >
-                      <i className="fas fa-times"></i>
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-
-            {notifications.length > 0 && (
-              <div className="notification-footer">
-                <button
-                  onClick={() => {
-                    setShowNotifications(false);
-                    navigate('/notifications');
-                  }}
-                  className="view-all-btn"
-                >
-                  View all notifications
-                </button>
-              </div>
-            )}
-          </div>
-        )}
 
         <div className="main-content">
           {/* Desktop Sidebar */}
@@ -944,17 +512,6 @@ const StudentLayout = () => {
           to {
             opacity: 1;
             transform: translateX(0);
-          }
-        }
-        
-        @keyframes slideDown {
-          from {
-            opacity: 0;
-            transform: translateY(-10px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
           }
         }
         
@@ -1424,94 +981,6 @@ const StudentLayout = () => {
         @media (max-width: 1024px) {
           .header-actions {
             gap: 1rem;
-          }
-        }
-        
-        /* Notifications - RESTORED */
-        .notification-icon {
-          position: relative;
-          font-size: 1.2rem;
-          color: #adb5bd;
-          cursor: pointer;
-          padding: 8px;
-          border-radius: 50%;
-          transition: all 0.2s;
-          background-color: transparent;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          width: 40px;
-          height: 40px;
-        }
-        
-        @media (max-width: 1024px) {
-          .notification-icon {
-            font-size: 1.1rem;
-          }
-        }
-        
-        .notification-icon:hover {
-          background-color: rgba(0, 0, 0, 0.05);
-        }
-        
-        .notification-icon.active {
-          background-color: rgba(0, 0, 0, 0.05);
-        }
-        
-        .notification-badge {
-          position: absolute;
-          top: -5px;
-          right: -5px;
-          background-color: #f72585;
-          color: white;
-          border-radius: 50%;
-          width: 18px;
-          height: 18px;
-          font-size: 0.7rem;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-weight: bold;
-        }
-        
-        @media (max-width: 480px) {
-          .notification-badge {
-            width: 16px;
-            height: 16px;
-            font-size: 0.6rem;
-          }
-        }
-        
-        .notification-dropdown {
-          position: fixed;
-          top: 70px;
-          right: 2rem;
-          width: 350px;
-          max-width: 350px;
-          background-color: white;
-          border-radius: 8px;
-          box-shadow: 0 10px 30px rgba(0,0,0,0.15);
-          z-index: 9999;
-          border: 1px solid #e9ecef;
-          overflow: hidden;
-          max-height: 400px;
-          animation: slideDown 0.2s ease-out;
-        }
-        
-        @media (max-width: 1024px) {
-          .notification-dropdown {
-            top: 60px;
-            right: 1rem;
-            width: calc(100% - 2rem);
-            max-height: 60vh;
-          }
-        }
-        
-        @media (max-width: 480px) {
-          .notification-dropdown {
-            top: 56px;
-            right: 0.75rem;
-            width: calc(100% - 1.5rem);
           }
         }
         
@@ -1989,7 +1458,6 @@ const StudentLayout = () => {
         @media (max-width: 768px) {
           /* Better touch targets for mobile */
           .mobile-nav-button,
-          .notification-icon,
           .mobile-menu-toggle {
             min-height: 44px;
             min-width: 44px;
@@ -1997,23 +1465,6 @@ const StudentLayout = () => {
         }
         
         /* Scrollbar Styling - RESTORED */
-        .notification-list::-webkit-scrollbar {
-          width: 6px;
-        }
-        
-        .notification-list::-webkit-scrollbar-track {
-          background: #f1f1f1;
-        }
-        
-        .notification-list::-webkit-scrollbar-thumb {
-          background: #c1c1c1;
-          border-radius: 3px;
-        }
-        
-        .notification-list::-webkit-scrollbar-thumb:hover {
-          background: #a8a8a8;
-        }
-        
         .sidebar::-webkit-scrollbar {
           width: 4px;
         }
