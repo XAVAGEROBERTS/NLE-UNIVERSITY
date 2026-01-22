@@ -1,8 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../services/supabase';
 import { useStudentAuth } from '../../context/StudentAuthContext';
-import { checkAssignmentAccessOnly } from '../../utils/clearanceUtils'; // NEW IMPORT
+import { checkAssignmentAccessOnly } from '../../utils/clearanceUtils';
 import SubmissionModal from "./SubmissionModal.jsx";
+import { useLocation, useNavigate } from 'react-router-dom';
+import { useCallback } from 'react';
+
+const COURSEWORK_CACHE_KEY = 'coursework_cache_v1';
 
 const Coursework = () => {
   const [assignments, setAssignments] = useState([]);
@@ -13,137 +17,136 @@ const Coursework = () => {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedAssignment, setSelectedAssignment] = useState(null);
   const [studentId, setStudentId] = useState(null);
-  const [hasAssignmentAccess, setHasAssignmentAccess] = useState(false); // NEW STATE
-  const [accessLoading, setAccessLoading] = useState(true); // NEW STATE
-  const [accessDetails, setAccessDetails] = useState(null); // NEW STATE
+  const [hasAssignmentAccess, setHasAssignmentAccess] = useState(false);
+  const [accessLoading, setAccessLoading] = useState(true);
+  const [accessDetails, setAccessDetails] = useState(null);
+  
   const { user } = useStudentAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
 
-  // Lock scroll when any modal is open
-  useEffect(() => {
-    if (showSubmissionModal || showResultsModal || showFilesModal || showDetailsModal) {
-      document.body.classList.add('modal-open');
-    } else {
-      document.body.classList.remove('modal-open');
+  // =================== MODIFIED CHECKANDFETCH WITH CACHING ===================
+  const checkAndFetch = useCallback(async (silent = false) => {
+    if (!user?.email) {
+      if (!silent) setAccessLoading(false);
+      return;
     }
-    return () => document.body.classList.remove('modal-open');
-  }, [showSubmissionModal, showResultsModal, showFilesModal, showDetailsModal]);
 
-  // NEW: Check assignment access on component mount
-  useEffect(() => {
-    const checkAccess = async () => {
-      if (user?.email) {
-        try {
-          setAccessLoading(true);
-          
-          // Get student ID first
-          const { data: student, error: studentError } = await supabase
-            .from('students')
-            .select('id')
-            .eq('email', user.email)
-            .single();
-
-          if (studentError) {
-            console.error('Error getting student:', studentError);
-            setHasAssignmentAccess(false);
-            setAccessLoading(false);
-            return;
-          }
-
-          setStudentId(student.id);
-          
-          // Check assignment access
-          const accessResult = await checkAssignmentAccessOnly(student.id);
-          
-          setHasAssignmentAccess(accessResult.hasAccess);
-          setAccessDetails({
-            percentagePaid: accessResult.percentagePaid || 0,
-            notes: accessResult.notes,
-            details: accessResult.details || [],
-            cached: accessResult.cached || false
-          });
-          
-          console.log('Assignment access result:', accessResult);
-          
-          // Only fetch assignments if access is granted
-          if (accessResult.hasAccess) {
-            await fetchAssignments();
-          }
-          
-        } catch (error) {
-          console.error('Error checking assignment access:', error);
-          setHasAssignmentAccess(false);
-        } finally {
-          setAccessLoading(false);
-        }
+    try {
+      if (!silent) {
+        setAccessLoading(true);
+        setLoading(true);
       }
-    };
 
-    checkAccess();
+      // Get student ID first
+      const { data: student, error: studentError } = await supabase
+        .from('students')
+        .select('id')
+        .eq('email', user.email)
+        .single();
+
+      if (studentError || !student) {
+        console.error('Error getting student:', studentError);
+        setHasAssignmentAccess(false);
+        if (!silent) setAccessLoading(false);
+        return;
+      }
+
+      setStudentId(student.id);
+
+      // Check assignment access
+      const accessResult = await checkAssignmentAccessOnly(student.id);
+
+      setHasAssignmentAccess(accessResult.hasAccess);
+      setAccessDetails({
+        percentagePaid: accessResult.percentagePaid || 0,
+        notes: accessResult.notes,
+        details: accessResult.details || [],
+        cached: accessResult.cached || false
+      });
+
+      console.log('Assignment access result:', accessResult);
+
+      let processedAssignments = [];
+
+      // Only fetch assignments if access is granted
+      if (accessResult.hasAccess) {
+        processedAssignments = await fetchAssignments(silent);
+      } else {
+        setAssignments([]);
+      }
+
+      // === CACHE THE DATA ===
+      sessionStorage.setItem(COURSEWORK_CACHE_KEY, JSON.stringify({
+        assignments: processedAssignments,
+        hasAccess: accessResult.hasAccess,
+        accessDetails: {
+          percentagePaid: accessResult.percentagePaid || 0,
+          notes: accessResult.notes,
+          details: accessResult.details || [],
+          cached: accessResult.cached || false
+        },
+        studentId: student.id,
+        timestamp: Date.now()
+      }));
+
+    } catch (error) {
+      console.error('Error checking assignment access:', error);
+      setHasAssignmentAccess(false);
+    } finally {
+      if (!silent) {
+        setAccessLoading(false);
+        setLoading(false);
+      }
+    }
   }, [user]);
 
-  // =================== FETCH ASSIGNMENTS WITH LECTURER FILES ===================
-  const fetchAssignments = async () => {
+  // =================== MODIFIED FETCHASSIGNMENTS ===================
+  const fetchAssignments = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) {
+        setLoading(true);
+      }
+      
       console.clear();
       console.log('🚀 ===== STARTING ASSIGNMENT FETCH =====');
-
+      
       // 1. Get student by email with current semester/year info
       const { data: student, error: studentError } = await supabase
         .from('students')
         .select('id, student_id, full_name, email, department_code, year_of_study, semester')
         .eq('email', user.email)
         .single();
-
+      
       if (studentError) {
         console.error('❌ Student error:', studentError);
         throw studentError;
       }
-      
+     
       setStudentId(student.id);
-
-      console.log('👤 STUDENT:', {
-        id: student.id,
-        name: student.full_name,
-        email: student.email,
-        department: student.department_code,
-        year: student.year_of_study,
-        semester: student.semester
-      });
-
+      
       // 2. Get student's enrolled courses and filter out completed ones
-      console.log('📚 Fetching student courses...');
       const { data: studentCourses, error: coursesError } = await supabase
         .from('student_courses')
         .select('course_id, status')
         .eq('student_id', student.id);
-
+      
       if (coursesError) {
         console.error('❌ Student courses error:', coursesError);
         throw coursesError;
       }
-
-      // Get course IDs that are not completed
+      
       const nonCompletedCourseIds = studentCourses
         ?.filter(course => course.status !== 'completed')
         .map(course => course.course_id) || [];
-
-      console.log(`📊 Student has ${studentCourses?.length || 0} total courses`);
-      console.log(`📊 Non-completed courses: ${nonCompletedCourseIds.length}`);
-
+      
       if (nonCompletedCourseIds.length === 0) {
-        console.log('✅ No non-completed courses found - setting empty assignments');
+        console.log('✅ No non-completed courses found');
         setAssignments([]);
-        setLoading(false);
-        return;
+        return [];
       }
-
-      // 3. Get assignments for student's department, current semester, and non-completed courses
-      console.log(`🔍 Fetching assignments for:
-        - Department: ${student.department_code}
-        - Year: ${student.year_of_study}
-        - Semester: ${student.semester}`);
-
+      
+      // 3. Get assignments
       const { data: assignmentsData, error: assignmentsError } = await supabase
         .from('assignments')
         .select(`
@@ -164,106 +167,82 @@ const Coursework = () => {
         .in('status', ['published', 'closed', 'graded'])
         .in('course_id', nonCompletedCourseIds)
         .order('created_at', { ascending: false });
-
+      
       if (assignmentsError) {
         console.error('❌ Assignments error:', assignmentsError);
         throw assignmentsError;
       }
-
-      console.log(`📚 Found ${assignmentsData?.length || 0} assignments for current semester`);
-
+      
       // 4. Get THIS STUDENT'S submissions only
       const { data: submissions, error: subsError } = await supabase
         .from('assignment_submissions')
         .select('*')
         .eq('student_id', student.id);
-
+      
       if (subsError) {
         console.error('❌ Submissions error:', subsError);
         throw subsError;
       }
-
-      console.log(`📤 Student has ${submissions?.length || 0} submissions`);
-
-      // 5. Process assignments with PROPER BUCKET URLS
+      
+      // 5. Process assignments
       const processedAssignments = (assignmentsData || []).map(assignment => {
-        // Find THIS student's submission
-        const submission = submissions?.find(sub => 
-          sub.assignment_id === assignment.id
-        );
-
-        // Check submission status
+        const submission = submissions?.find(sub => sub.assignment_id === assignment.id);
+        
         let isSubmitted = false;
         let submissionStatus = 'not submitted';
         let canSubmit = true;
         let isGraded = false;
-        
+       
         if (submission) {
           submissionStatus = submission.status || 'not submitted';
           isSubmitted = ['submitted', 'graded', 'late'].includes(submissionStatus);
           isGraded = submissionStatus === 'graded';
         }
-
+        
         const dueDate = new Date(assignment.due_date);
         const now = new Date();
         const isPastDue = dueDate < now;
         canSubmit = !isSubmitted && !isPastDue;
-
-        // =========== CRITICAL: PROCESS LECTURER FILES FROM LECTURERBUCKET ===========
+        
+        // Process lecturer files
         const assignmentFiles = assignment.file_urls || [];
         const processedFiles = assignmentFiles.map(fileUrl => {
           if (!fileUrl) return null;
-          
-          // If it's already a full URL, keep it
+         
           if (fileUrl.startsWith('http')) {
             return fileUrl;
           }
-          
-          // If it's a path/name, construct lecturerbucket URL
-          // Get project reference from Supabase URL
+         
           const projectRef = supabase.supabaseUrl.split('//')[1].split('.')[0];
-          
-          // Try to extract file path from different formats
           let filePath = fileUrl;
-          
-          // Remove any "lecturerbucket/" prefix if present
+         
           if (filePath.includes('lecturerbucket/')) {
             filePath = filePath.split('lecturerbucket/')[1];
           }
-          
-          // Construct the full URL to lecturerbucket
+         
           const fullUrl = `https://${projectRef}.supabase.co/storage/v1/object/public/lecturerbucket/${filePath}`;
-          
-          console.log(`📁 Lecturer file: ${filePath} → ${fullUrl}`);
           return fullUrl;
         }).filter(url => url && url !== '');
-
-        console.log(`   Assignment "${assignment.title}": ${processedFiles.length} lecturer files`);
-
-        // =========== PROCESS STUDENT SUBMISSION FILES (from assignments bucket) ===========
+        
+        // Process student submission files
         const studentSubmissionFiles = (submission?.file_urls || []).map(fileUrl => {
           if (!fileUrl) return null;
-          
+         
           if (fileUrl.startsWith('http')) {
             return fileUrl;
           }
-          
-          // Get project reference
+         
           const projectRef = supabase.supabaseUrl.split('//')[1].split('.')[0];
-          
-          // Student submissions go to 'assignments' bucket
           const fullUrl = `https://${projectRef}.supabase.co/storage/v1/object/public/assignments/${fileUrl}`;
-          
           return fullUrl;
         }).filter(url => url && url !== '');
-
-        // Find main PDF file from lecturer
-        const mainPdfFile = processedFiles.find(file => 
-          file && (file.toLowerCase().endsWith('.pdf') || 
-          file.includes('assignment') || 
+        
+        const mainPdfFile = processedFiles.find(file =>
+          file && (file.toLowerCase().endsWith('.pdf') ||
+          file.includes('assignment') ||
           file.includes('question'))
         ) || processedFiles[0];
-
+        
         return {
           id: assignment.id,
           courseCode: assignment.courses?.course_code || 'N/A',
@@ -293,7 +272,7 @@ const Coursework = () => {
           isSubmitted: isSubmitted,
           submissionId: submission?.id,
           submissionDate: submission?.submission_date,
-          fileUrls: studentSubmissionFiles, // Student's submitted files (assignments bucket)
+          fileUrls: studentSubmissionFiles,
           submittedText: submission?.submitted_text || '',
           feedback: submission?.feedback || '',
           marks: submission?.marks_obtained
@@ -305,85 +284,159 @@ const Coursework = () => {
           submission_type: assignment.submission_type || 'file',
           allowed_formats: assignment.allowed_formats || ['pdf', 'doc', 'docx', 'zip'],
           max_file_size: assignment.max_file_size || 10,
-          assignment_files: processedFiles, // Lecturer's files (lecturerbucket)
+          assignment_files: processedFiles,
           main_assignment_file: mainPdfFile,
           canSubmit: canSubmit,
           isGraded: isGraded,
           original_file_urls: assignment.file_urls || [],
-          created_at: assignment.created_at // Keep for sorting
+          created_at: assignment.created_at
         };
       });
-
+      
       console.log(`✅ Processed ${processedAssignments.length} assignments`);
       
-      // Already sorted by created_at DESC from the query
-      setAssignments(processedAssignments);
-
+      // Set assignments if not silent
+      if (!silent) {
+        setAssignments(processedAssignments);
+      }
+      
+      return processedAssignments;
+      
     } catch (error) {
       console.error('❌ Error in fetchAssignments:', error);
-      alert(`Error loading assignments: ${error.message}`);
-      setAssignments([]);
+      if (!silent) {
+        alert(`Error loading assignments: ${error.message}`);
+        setAssignments([]);
+      }
+      return [];
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   };
 
-  // =================== ENHANCED FILE DOWNLOAD FUNCTIONS ===================
+  // =================== MODIFIED MAIN USEFFECT WITH CACHING ===================
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const hasRefresh = params.has('refresh');
+
+    const cachedRaw = sessionStorage.getItem(COURSEWORK_CACHE_KEY);
+    let usedCache = false;
+
+    if (cachedRaw && !hasRefresh) {
+      try {
+        const cached = JSON.parse(cachedRaw);
+        
+        // Check if cache is less than 5 minutes old
+        const cacheAge = Date.now() - cached.timestamp;
+        const MAX_CACHE_AGE = 5 * 60 * 1000; // 5 minutes
+        
+        if (cacheAge < MAX_CACHE_AGE) {
+          setAssignments(cached.assignments || []);
+          setHasAssignmentAccess(cached.hasAccess);
+          setAccessDetails(cached.accessDetails || null);
+          setStudentId(cached.studentId || null);
+          setLoading(false);
+          setAccessLoading(false);
+          usedCache = true;
+
+          // Silent background refresh to check for updates
+          checkAndFetch(true);
+        } else {
+          console.log('Cache expired, fetching fresh data');
+          sessionStorage.removeItem(COURSEWORK_CACHE_KEY);
+        }
+      } catch (e) {
+        console.error('Invalid cache', e);
+        sessionStorage.removeItem(COURSEWORK_CACHE_KEY);
+      }
+    }
+
+    // Always run full fetch if explicit refresh or no valid cache
+    if (hasRefresh || !usedCache) {
+      checkAndFetch(false);
+    }
+
+    // Clean refresh param from URL
+    if (hasRefresh) {
+      params.delete('refresh');
+      const newSearch = params.toString();
+      navigate(`${location.pathname}${newSearch ? '?' + newSearch : ''}`, { replace: true });
+    }
+  }, [location.search, navigate, checkAndFetch]);
+
+  // =================== MODAL SCROLL LOCK ===================
+  useEffect(() => {
+    if (showSubmissionModal || showResultsModal || showFilesModal || showDetailsModal) {
+      document.body.classList.add('modal-open');
+    } else {
+      document.body.classList.remove('modal-open');
+    }
+    return () => document.body.classList.remove('modal-open');
+  }, [showSubmissionModal, showResultsModal, showFilesModal, showDetailsModal]);
+
+  // =================== CLEAR CACHE ON MANUAL REFRESH ===================
+  const handleManualRefresh = () => {
+    // Clear cache and force fresh fetch
+    sessionStorage.removeItem(COURSEWORK_CACHE_KEY);
+    checkAndFetch(false);
+  };
+
+  // =================== FILE DOWNLOAD FUNCTIONS ===================
   const handleDownloadAssignmentFile = async (assignment, fileUrl = null) => {
     const url = fileUrl || assignment.main_assignment_file;
-    
+   
     if (!url) {
       handleViewAllFiles(assignment);
       return;
     }
-
     try {
       // Extract filename from URL
       let fileName = `Assignment_${assignment.title.replace(/[^a-z0-9]/gi, '_')}`;
-      
+     
       // Try to get actual filename from URL
       const urlParts = url.split('/');
       const lastPart = urlParts[urlParts.length - 1];
       if (lastPart && lastPart.includes('.')) {
         const actualFileName = lastPart.split('?')[0];
-        fileName = decodeURIComponent(actualFileName); // Decode URL-encoded characters
+        fileName = decodeURIComponent(actualFileName);
       }
-      
+     
       console.log(`📥 Downloading lecturer file: ${fileName} from ${url}`);
-
       // FORCE DOWNLOAD instead of opening in new tab
       const response = await fetch(url);
       if (!response.ok) {
         throw new Error(`Failed to fetch file: ${response.status} ${response.statusText}`);
       }
-      
+     
       const blob = await response.blob();
       const downloadUrl = window.URL.createObjectURL(blob);
-      
+     
       // Create download link
       const a = document.createElement('a');
       a.href = downloadUrl;
       a.download = fileName; // This forces download instead of opening
       a.style.display = 'none';
-      
+     
       document.body.appendChild(a);
       a.click();
-      
+     
       // Cleanup
       setTimeout(() => {
         document.body.removeChild(a);
         window.URL.revokeObjectURL(downloadUrl);
       }, 100);
-      
+     
       console.log('✅ Download started');
     } catch (error) {
       console.error('❌ Error downloading assignment file:', error);
-      
+     
       // Fallback to old method if fetch fails
       try {
         const a = document.createElement('a');
         a.href = url;
-        
+       
         // Extract filename for download attribute
         const urlParts = url.split('/');
         const lastPart = urlParts[urlParts.length - 1];
@@ -392,12 +445,12 @@ const Coursework = () => {
         } else {
           a.download = `Assignment_${assignment.title.replace(/[^a-z0-9]/gi, '_')}.pdf`;
         }
-        
+       
         a.style.display = 'none';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        
+       
         console.log('✅ Download started (fallback method)');
       } catch (fallbackError) {
         console.error('❌ Fallback download failed:', fallbackError);
@@ -411,42 +464,41 @@ const Coursework = () => {
       alert('No files submitted for this assignment');
       return;
     }
-
     try {
       const confirmed = window.confirm(
         `Download ${assignment.fileUrls.length} submitted file(s) for "${assignment.title}"?`
       );
-      
+     
       if (!confirmed) return;
-      
+     
       for (let i = 0; i < assignment.fileUrls.length; i++) {
         const fileUrl = assignment.fileUrls[i];
         let fileName = `my_submission_${assignment.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${i + 1}`;
-        
+       
         // Try to get actual filename
         const urlParts = fileUrl.split('/');
         const lastPart = urlParts[urlParts.length - 1];
         if (lastPart && lastPart.includes('.')) {
           fileName = `submission_${lastPart.split('?')[0]}`;
         }
-        
+       
         console.log(`📥 Downloading student submission: ${fileName} from ${fileUrl}`);
-        
+       
         try {
           // Try fetch method first for proper download
           const response = await fetch(fileUrl);
           if (response.ok) {
             const blob = await response.blob();
             const downloadUrl = window.URL.createObjectURL(blob);
-            
+           
             const a = document.createElement('a');
             a.href = downloadUrl;
             a.download = fileName;
             a.style.display = 'none';
-            
+           
             document.body.appendChild(a);
             a.click();
-            
+           
             setTimeout(() => {
               document.body.removeChild(a);
               window.URL.revokeObjectURL(downloadUrl);
@@ -467,11 +519,11 @@ const Coursework = () => {
           console.warn(`⚠️ Could not download file ${i + 1}:`, error);
           // Continue with next file
         }
-        
+       
         // Small delay between downloads
         await new Promise(resolve => setTimeout(resolve, 300));
       }
-      
+     
       console.log('✅ All student files downloaded');
       alert(`${assignment.fileUrls.length} file(s) downloaded successfully!`);
     } catch (error) {
@@ -519,7 +571,6 @@ const Coursework = () => {
   // =================== MODAL COMPONENTS ===================
   const AssignmentResultsModal = () => {
     if (!selectedAssignment) return null;
-
     const submissionDate = selectedAssignment.submissionDate
       ? new Date(selectedAssignment.submissionDate).toLocaleString('en-US', {
           day: 'numeric',
@@ -530,7 +581,6 @@ const Coursework = () => {
           hour12: true
         })
       : 'Not available';
-
     return (
       <div className="coursework-modal-overlay">
         <div className="coursework-modal">
@@ -540,14 +590,14 @@ const Coursework = () => {
               ×
             </button>
           </div>
-          
+         
           <div className="coursework-modal-body">
             <div className="coursework-results-card">
               <h4>{selectedAssignment.title}</h4>
               <p className="coursework-course-info">
                 {selectedAssignment.courseCode} - {selectedAssignment.courseName}
               </p>
-              
+             
               <div className="coursework-marks-section">
                 <div className="coursework-marks-display">
                   <span className="coursework-marks-label">Your Score</span>
@@ -555,7 +605,7 @@ const Coursework = () => {
                     {selectedAssignment.marks || 'Not graded'}
                   </span>
                 </div>
-                
+               
                 {selectedAssignment.obtainedMarks && (
                   <div className="coursework-percentage">
                     <span className="coursework-percentage-label">Percentage</span>
@@ -565,7 +615,7 @@ const Coursework = () => {
                   </div>
                 )}
               </div>
-              
+             
               <div className="coursework-details-grid">
                 <div className="coursework-detail-item">
                   <span className="coursework-detail-label">Submission Date:</span>
@@ -584,7 +634,7 @@ const Coursework = () => {
                   <span className="coursework-detail-value">{selectedAssignment.lecturer}</span>
                 </div>
               </div>
-              
+             
               {selectedAssignment.feedback && (
                 <div className="coursework-feedback-section">
                   <h5>Feedback from Lecturer</h5>
@@ -595,7 +645,7 @@ const Coursework = () => {
               )}
             </div>
           </div>
-          
+         
           <div className="coursework-modal-footer">
             <button className="coursework-btn coursework-btn-primary" onClick={() => setShowResultsModal(false)}>
               Close
@@ -608,7 +658,6 @@ const Coursework = () => {
 
   const AssignmentFilesModal = () => {
     if (!selectedAssignment) return null;
-
     return (
       <div className="coursework-modal-overlay">
         <div className="coursework-modal coursework-modal-large">
@@ -618,7 +667,7 @@ const Coursework = () => {
               ×
             </button>
           </div>
-          
+         
           <div className="coursework-modal-body">
             <div className="coursework-assignment-info">
               <h4>{selectedAssignment.title}</h4>
@@ -629,17 +678,17 @@ const Coursework = () => {
                 Total Files: {selectedAssignment.assignment_files?.length || 0}
               </p>
             </div>
-            
+           
             <div className="coursework-files-grid">
               {selectedAssignment.assignment_files?.map((fileUrl, index) => {
                 if (!fileUrl) return null;
-                
+               
                 const fileName = fileUrl.split('/').pop() || `assignment_file_${index + 1}`;
                 const fileExtension = fileName.split('.').pop().toLowerCase();
                 const isPdf = fileExtension === 'pdf';
                 const isImage = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(fileExtension);
                 const isDocument = ['doc', 'docx', 'txt', 'rtf'].includes(fileExtension);
-                
+               
                 let fileIcon = '📄';
                 let fileLabel = 'File';
                 if (isPdf) {
@@ -654,7 +703,7 @@ const Coursework = () => {
                   fileIcon = '📝';
                   fileLabel = 'Document';
                 }
-                
+               
                 return (
                   <div key={index} className={`coursework-file-card ${isPdf ? 'coursework-pdf-file' : ''}`}>
                     <div className="coursework-file-icon">{fileIcon}</div>
@@ -684,7 +733,7 @@ const Coursework = () => {
               })}
             </div>
           </div>
-          
+         
           <div className="coursework-modal-footer">
             <button className="coursework-btn coursework-btn-secondary" onClick={() => setShowFilesModal(false)}>
               Close
@@ -706,7 +755,7 @@ const Coursework = () => {
               ×
             </button>
           </div>
-          
+         
           <div className="coursework-modal-body">
             <div className="coursework-assignment-header">
               <h4>{selectedAssignment.title}</h4>
@@ -727,7 +776,7 @@ const Coursework = () => {
                 )}
               </div>
             </div>
-            
+           
             {selectedAssignment.description && (
               <div className="coursework-description-section">
                 <h5>Description</h5>
@@ -736,7 +785,7 @@ const Coursework = () => {
                 </div>
               </div>
             )}
-            
+           
             {selectedAssignment.instructions && (
               <div className="coursework-instructions-section">
                 <h5>Instructions</h5>
@@ -745,7 +794,7 @@ const Coursework = () => {
                 </div>
               </div>
             )}
-            
+           
             {selectedAssignment.assignment_files && selectedAssignment.assignment_files.length > 0 && (
               <div className="coursework-attached-files">
                 <h5>📦 Assignment Files</h5>
@@ -774,7 +823,7 @@ const Coursework = () => {
               </div>
             )}
           </div>
-          
+         
           <div className="coursework-modal-footer">
             {selectedAssignment.main_assignment_file && (
               <button
@@ -807,16 +856,13 @@ const Coursework = () => {
   // NEW: Payment Required Modal Component
   const PaymentRequiredModal = () => {
     if (hasAssignmentAccess || accessLoading) return null;
-
     return (
       <div className="coursework-modal-overlay">
-        <div className="coursework-modal coursework-modal-large"> 
+        <div className="coursework-modal coursework-modal-large">
           <div className="coursework-modal-body">
             <div className="coursework-payment-required">
-             
-              
               <h4>Assignment Access Requires 50% Tuition Payment</h4>
-              
+             
               <div className="payment-requirements">
                 <div className="requirement-item requirement-not-met">
                   <i className="fas fa-times-circle"></i>
@@ -827,14 +873,14 @@ const Coursework = () => {
                   <span>This is a mandatory requirement to access course assignments</span>
                 </div>
               </div>
-              
+             
               {accessDetails && (
                 <div className="payment-details">
                   <h5>Your Payment Status</h5>
                   <div className="payment-progress">
                     <div className="progress-bar">
-                      <div 
-                        className="progress-fill" 
+                      <div
+                        className="progress-fill"
                         style={{ width: `${Math.min(accessDetails.percentagePaid, 100)}%` }}
                       ></div>
                     </div>
@@ -843,7 +889,7 @@ const Coursework = () => {
                       <span>Required: 50%</span>
                     </div>
                   </div>
-                  
+                 
                   <div className="payment-instructions">
                     <h6>To Gain Access:</h6>
                     <ol>
@@ -853,7 +899,7 @@ const Coursework = () => {
                       <li>Once 50% is paid, assignments will automatically become visible</li>
                     </ol>
                   </div>
-                  
+                 
                   <div className="contact-info">
                     <p><strong>Finance Office:</strong> finance@nleuniversity.com</p>
                     <p><strong>Phone:</strong> +(256) 765673373</p>
@@ -862,7 +908,6 @@ const Coursework = () => {
               )}
             </div>
           </div>
-        
         </div>
       </div>
     );
@@ -888,7 +933,7 @@ const Coursework = () => {
           <h2>Course Work</h2>
           <div className="cw-date-display">Assignment Access Restricted</div>
         </div>
-        
+       
         <div className="cw-no-access">
           <div className="no-access-card">
             <div className="no-access-icon">
@@ -898,7 +943,7 @@ const Coursework = () => {
             <p className="no-access-message">
               You need to pay at least 50% of your tuition fees to access assignments.
             </p>
-            
+           
             {accessDetails && (
               <div className="access-details">
                 <div className="payment-status">
@@ -907,11 +952,11 @@ const Coursework = () => {
                     {accessDetails.percentagePaid}% paid
                   </div>
                 </div>
-                
+               
                 <div className="progress-container">
                   <div className="progress-bar-large">
-                    <div 
-                      className="progress-fill-large" 
+                    <div
+                      className="progress-fill-large"
                       style={{ width: `${Math.min(accessDetails.percentagePaid, 100)}%` }}
                     ></div>
                   </div>
@@ -919,7 +964,7 @@ const Coursework = () => {
                     <span className="required-marker" style={{ left: '50%' }}>50% Required</span>
                   </div>
                 </div>
-                
+               
                 <div className="contact-support">
                   <p>If you've already paid, please contact the Finance Office:</p>
                   <p><strong>Email:</strong> finance@nleuniversity.com <strong>Phone:</strong> +(256) 765673373</p>
@@ -928,220 +973,8 @@ const Coursework = () => {
             )}
           </div>
         </div>
-        
+       
         <PaymentRequiredModal />
-        
-        <style jsx>{`
-          .cw-no-access {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 60vh;
-            padding: 40px 20px;
-          }
-          
-          .no-access-card {
-            background: white;
-            border-radius: 16px;
-            padding: 40px;
-            text-align: center;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-            max-width: 600px;
-            width: 100%;
-            border: 1px solid #e2e8f0;
-          }
-          
-          .no-access-icon {
-            font-size: 64px;
-            color: #ef4444;
-            margin-bottom: 20px;
-          }
-          
-          .no-access-card h3 {
-            font-size: 24px;
-            color: #1e293b;
-            margin-bottom: 16px;
-            font-weight: 700;
-          }
-          
-          .no-access-message {
-            color: #64748b;
-            font-size: 16px;
-            line-height: 1.6;
-            margin-bottom: 30px;
-          }
-          
-          .access-details {
-            text-align: left;
-          }
-          
-          .payment-status {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            padding: 16px;
-            background: #f8fafc;
-            border-radius: 8px;
-          }
-          
-          .status-label {
-            font-weight: 600;
-            color: #475569;
-          }
-          
-          .status-value {
-            font-weight: 700;
-            font-size: 18px;
-          }
-          
-          .status-value.paid {
-            color: #10b981;
-          }
-          
-          .status-value.unpaid {
-            color: #ef4444;
-          }
-          
-          .progress-container {
-            margin: 30px 0;
-          }
-          
-          .progress-bar-large {
-            height: 20px;
-            background: #e2e8f0;
-            border-radius: 10px;
-            overflow: hidden;
-            margin-bottom: 10px;
-          }
-          
-          .progress-fill-large {
-            height: 100%;
-            background: linear-gradient(90deg, #3b82f6, #1d4ed8);
-            transition: width 0.3s ease;
-          }
-          
-          .progress-required {
-            position: relative;
-            height: 20px;
-          }
-          
-          .required-marker {
-            position: absolute;
-            top: 0;
-            transform: translateX(-50%);
-            color: #ef4444;
-            font-size: 12px;
-            font-weight: 600;
-            white-space: nowrap;
-          }
-          
-          .action-buttons {
-            display: flex;
-            gap: 12px;
-            margin: 30px 0;
-          }
-          
-          .contact-support {
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 1px solid #e2e8f0;
-            color: #64748b;
-            font-size: 14px;
-          }
-          
-          .contact-support p {
-            margin: 8px 0;
-          }
-          
-          .contact-support strong {
-            color: #475569;
-          }
-          
-          .coursework-payment-required {
-            text-align: center;
-          }
-          
-          .payment-alert-icon {
-            font-size: 72px;
-            color: #f59e0b;
-            margin-bottom: 20px;
-          }
-          
-          .payment-requirements {
-            margin: 30px 0;
-          }
-          
-          .requirement-item {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 12px;
-            margin: 10px 0;
-            background: #f8fafc;
-            border-radius: 8px;
-          }
-          
-          .requirement-not-met {
-            background: #fef2f2;
-            color: #dc2626;
-          }
-          
-          .payment-details {
-            text-align: left;
-            margin-top: 30px;
-          }
-          
-          .payment-progress {
-            margin: 20px 0;
-          }
-          
-          .progress-labels {
-            display: flex;
-            justify-content: space-between;
-            margin-top: 8px;
-            font-size: 14px;
-            color: #64748b;
-          }
-          
-          .payment-instructions {
-            background: #f0f9ff;
-            padding: 20px;
-            border-radius: 8px;
-            margin: 20px 0;
-          }
-          
-          .payment-instructions h6 {
-            color: #0369a1;
-            margin-bottom: 12px;
-          }
-          
-          .payment-instructions ol {
-            padding-left: 20px;
-            margin: 0;
-          }
-          
-          .payment-instructions li {
-            margin-bottom: 8px;
-          }
-          
-          .contact-info {
-            background: #f1f5f9;
-            padding: 16px;
-            border-radius: 8px;
-            font-size: 14px;
-          }
-          
-          @media (max-width: 768px) {
-            .no-access-card {
-              padding: 24px;
-            }
-            
-            .action-buttons {
-              flex-direction: column;
-            }
-          }
-        `}</style>
       </div>
     );
   }
@@ -1170,13 +1003,12 @@ const Coursework = () => {
           </span>
         </div>
       </div>
-
       <div className="cw-grid">
         {assignments.length === 0 ? (
           <div className="cw-no-assignments">
             <p>No assignments available at the moment.</p>
-            <button 
-              onClick={fetchAssignments}
+            <button
+              onClick={handleManualRefresh}
               className="cw-refresh-btn"
             >
               🔄 Refresh Assignments
@@ -1188,7 +1020,6 @@ const Coursework = () => {
             const isSubmitted = assignment.isSubmitted;
             const hasAssignmentFiles = assignment.assignment_files?.length > 0;
             const hasMainPdfFile = !!assignment.main_assignment_file;
-
             return (
               <div key={assignment.id} className="cw-card">
                 <div className="cw-card-info">
@@ -1200,7 +1031,6 @@ const Coursework = () => {
                   </div>
                   <h3 className="cw-card-title">{assignment.title}</h3>
                   <p className="cw-card-description">{assignment.description}</p>
-
                   <div className="cw-card-dates">
                     <div className="cw-date-item">
                       <i className="fas fa-calendar-check"></i>
@@ -1216,7 +1046,6 @@ const Coursework = () => {
                       )}
                     </div>
                   </div>
-
                   <div className="cw-card-status">
                     <i className={`fas fa-${isSubmitted ? 'check-circle' : 'times-circle'}`}
                        style={{ color: isSubmitted ? '#4CAF50' : '#F44336' }}></i>
@@ -1232,7 +1061,6 @@ const Coursework = () => {
                     )}
                   </div>
                 </div>
-
                 <div className="cw-card-marks">
                   <div className={`cw-marks-display cw-marks-${marksColor}`}>
                     {assignment.marks || (
@@ -1243,7 +1071,6 @@ const Coursework = () => {
                       )
                     )}
                   </div>
-
                   {isSubmitted ? (
                     <div className="cw-submission-actions">
                       {assignment.fileUrls?.length > 0 && (
@@ -1265,15 +1092,15 @@ const Coursework = () => {
                     <div className="cw-submission-actions">
                       {hasMainPdfFile ? (
                         <>
-                          <button 
-                            className="cw-btn cw-btn-download-pdf" 
+                          <button
+                            className="cw-btn cw-btn-download-pdf"
                             onClick={() => handleDownloadAssignmentFile(assignment)}
                             title="Download the assignment PDF file from lecturerbucket"
                           >
                             <i className="fas fa-download"></i> Download Assignment
                           </button>
-                          <button 
-                            className="cw-btn cw-btn-view-details" 
+                          <button
+                            className="cw-btn cw-btn-view-details"
                             onClick={() => handleViewDetails(assignment)}
                           >
                             <i className="fas fa-info-circle"></i> View Details
@@ -1281,28 +1108,27 @@ const Coursework = () => {
                         </>
                       ) : hasAssignmentFiles ? (
                         <>
-                          <button 
-                            className="cw-btn cw-btn-view-files" 
+                          <button
+                            className="cw-btn cw-btn-view-files"
                             onClick={() => handleViewAllFiles(assignment)}
                           >
                             <i className="fas fa-eye"></i> View Files
                           </button>
-                          <button 
-                            className="cw-btn cw-btn-view-details" 
+                          <button
+                            className="cw-btn cw-btn-view-details"
                             onClick={() => handleViewDetails(assignment)}
                           >
                             <i className="fas fa-info-circle"></i> View Details
                           </button>
                         </>
                       ) : (
-                        <button 
-                          className="cw-btn cw-btn-view-details" 
+                        <button
+                          className="cw-btn cw-btn-view-details"
                           onClick={() => handleViewDetails(assignment)}
                         >
                           <i className="fas fa-info-circle"></i> View Assignment
                         </button>
                       )}
-
                       {assignment.canSubmit ? (
                         <button className="cw-btn cw-btn-submit" onClick={() => handleSubmitAssignment(assignment)}>
                           <i className="fas fa-upload"></i> Submit Work
@@ -1320,7 +1146,6 @@ const Coursework = () => {
           })
         )}
       </div>
-
       {/* =================== MODALS =================== */}
       {showSubmissionModal && selectedAssignment && (
         <SubmissionModal
@@ -1330,35 +1155,14 @@ const Coursework = () => {
             setShowSubmissionModal(false);
             setSelectedAssignment(null);
           }}
-          onSubmitSuccess={fetchAssignments}
+          onSubmitSuccess={handleManualRefresh}
         />
       )}
-
       {showResultsModal && selectedAssignment && <AssignmentResultsModal />}
       {showFilesModal && selectedAssignment && <AssignmentFilesModal />}
       {showDetailsModal && selectedAssignment && <AssignmentDetailsModal />}
-
-      {/* Add the access badge style */}
-      <style jsx>{`
-        .access-badge {
-          margin-left: 12px;
-          background: linear-gradient(135deg, #10b981, #059669);
-          color: white;
-          padding: 4px 10px;
-          border-radius: 12px;
-          font-size: 12px;
-          font-weight: 600;
-          display: inline-flex;
-          align-items: center;
-          gap: 4px;
-        }
-        
-        .access-badge i {
-          font-size: 10px;
-        }
-      `}</style>
-
-      {/* All other styles remain exactly the same */}
+      
+      {/* CSS Styles */}
       <style jsx>{`
         /* =================== COURSEWORK PAGE STYLES =================== */
         .coursework-page {
@@ -1370,7 +1174,6 @@ const Coursework = () => {
           background: #f8fafc;
           min-height: 100vh;
         }
-
         .cw-header {
           display: flex;
           justify-content: space-between;
@@ -1383,14 +1186,12 @@ const Coursework = () => {
           border-radius: 12px;
           box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
         }
-
         .cw-header h2 {
           font-size: 24px;
           font-weight: 600;
           color: #1e293b;
           margin: 0;
         }
-
         .cw-date-display {
           color: #64748b;
           font-size: 14px;
@@ -1401,14 +1202,27 @@ const Coursework = () => {
           display: flex;
           align-items: center;
         }
-
+        .access-badge {
+          margin-left: 12px;
+          background: linear-gradient(135deg, #10b981, #059669);
+          color: white;
+          padding: 4px 10px;
+          border-radius: 12px;
+          font-size: 12px;
+          font-weight: 600;
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+        }
+        .access-badge i {
+          font-size: 10px;
+        }
         .cw-grid {
           display: grid;
           grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
           gap: 20px;
           width: 100%;
         }
-
         /* =================== CARD STYLES =================== */
         .cw-card {
           background: white;
@@ -1423,20 +1237,17 @@ const Coursework = () => {
           position: relative;
           overflow: hidden;
         }
-
         .cw-card:hover {
           transform: translateY(-4px);
           box-shadow: 0 10px 25px rgba(0, 0, 0, 0.12);
           border-color: #cbd5e1;
         }
-
         .cw-card-info {
           flex: 1;
           display: flex;
           flex-direction: column;
           gap: 12px;
         }
-
         .cw-course-code {
           background: linear-gradient(135deg, #3b82f6, #1d4ed8);
           color: white;
@@ -1450,7 +1261,6 @@ const Coursework = () => {
           align-self: flex-start;
           margin-bottom: 8px;
         }
-
         .cw-department-badge {
           margin-left: 8px;
           font-size: 10px;
@@ -1460,7 +1270,6 @@ const Coursework = () => {
           border-radius: 4px;
           font-weight: 500;
         }
-
         .cw-card-title {
           font-size: 18px;
           font-weight: 700;
@@ -1468,7 +1277,6 @@ const Coursework = () => {
           margin: 0;
           line-height: 1.4;
         }
-
         .cw-card-description {
           color: #64748b;
           font-size: 14px;
@@ -1481,7 +1289,6 @@ const Coursework = () => {
           overflow: hidden;
           min-height: 4.8em;
         }
-
         .cw-card-dates {
           display: flex;
           flex-direction: column;
@@ -1492,7 +1299,6 @@ const Coursework = () => {
           border-radius: 8px;
           border: 1px solid #e2e8f0;
         }
-
         .cw-date-item {
           display: flex;
           align-items: center;
@@ -1500,13 +1306,11 @@ const Coursework = () => {
           color: #475569;
           font-size: 13px;
         }
-
         .cw-date-item i {
           width: 16px;
           text-align: center;
           color: #64748b;
         }
-
         .cw-late-badge {
           background: #ef4444;
           color: white;
@@ -1517,73 +1321,11 @@ const Coursework = () => {
           font-weight: 600;
           letter-spacing: 0.3px;
         }
-
         .past-due, .past-due-text {
           color: #ef4444 !important;
           font-weight: 600;
         }
-
         /* =================== FILE ATTACHMENT STYLES =================== */
-        .cw-assignment-files-info {
-          margin: 10px 0;
-        }
-
-        .cw-main-pdf-file {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          font-size: 14px;
-          color: #1e40af;
-          padding: 12px;
-          background: linear-gradient(135deg, #dbeafe, #eff6ff);
-          border-radius: 8px;
-          border: 1px solid #bfdbfe;
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-
-        .cw-main-pdf-file:hover {
-          background: linear-gradient(135deg, #bfdbfe, #dbeafe);
-          transform: translateY(-1px);
-        }
-
-        .cw-main-pdf-file i {
-          color: #ef4444;
-          font-size: 18px;
-        }
-
-        .cw-files-attached {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          font-size: 14px;
-          color: #475569;
-          padding: 12px;
-          background: #f8fafc;
-          border-radius: 8px;
-          border: 1px solid #e2e8f0;
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-
-        .cw-files-attached.clickable:hover {
-          background: #f1f5f9;
-          border-color: #cbd5e1;
-          color: #334155;
-          transform: translateY(-1px);
-        }
-
-        .cw-files-attached i {
-          color: #3b82f6;
-        }
-
-        .cw-files-attached .fa-external-link-alt {
-          margin-left: auto;
-          font-size: 12px;
-          color: #64748b;
-        }
-
-        /* =================== STATUS STYLES =================== */
         .cw-card-status {
           display: flex;
           align-items: center;
@@ -1594,7 +1336,6 @@ const Coursework = () => {
           padding-top: 16px;
           border-top: 1px solid #e2e8f0;
         }
-
         .cw-card-lecturer {
           margin-left: auto;
           color: #64748b;
@@ -1603,11 +1344,9 @@ const Coursework = () => {
           align-items: center;
           gap: 6px;
         }
-
         .cw-card-lecturer i {
           color: #8b5cf6;
         }
-
         /* =================== MARKS SECTION =================== */
         .cw-card-marks {
           margin-top: 20px;
@@ -1618,7 +1357,6 @@ const Coursework = () => {
           padding-top: 20px;
           gap: 12px;
         }
-
         .cw-marks-display {
           font-weight: 700;
           font-size: 18px;
@@ -1631,31 +1369,26 @@ const Coursework = () => {
           justify-content: center;
           transition: all 0.3s ease;
         }
-
-        .cw-marks-excellent { 
+        .cw-marks-excellent {
           background: linear-gradient(135deg, #d1fae5, #a7f3d0);
           color: #065f46;
           border: 2px solid #34d399;
         }
-
-        .cw-marks-good { 
+        .cw-marks-good {
           background: linear-gradient(135deg, #fef3c7, #fde68a);
           color: #92400e;
           border: 2px solid #f59e0b;
         }
-
-        .cw-marks-average { 
+        .cw-marks-average {
           background: linear-gradient(135deg, #fed7aa, #fdba74);
           color: #9a3412;
           border: 2px solid #f97316;
         }
-
-        .cw-marks-poor { 
+        .cw-marks-poor {
           background: linear-gradient(135deg, #fecaca, #fca5a5);
           color: #991b1b;
           border: 2px solid #ef4444;
         }
-
         /* =================== BUTTON STYLES =================== */
         .cw-submission-actions {
           display: flex;
@@ -1663,7 +1396,6 @@ const Coursework = () => {
           gap: 10px;
           width: 100%;
         }
-
         .cw-btn {
           padding: 12px 18px;
           border-radius: 8px;
@@ -1677,88 +1409,77 @@ const Coursework = () => {
           justify-content: center;
           gap: 8px;
           width: 100%;
-          
         }
-
         .cw-btn i {
           font-size: 14px;
         }
-
         .cw-btn-download-pdf {
           background: linear-gradient(135deg, #ef4444, #dc2626);
           color: white;
         }
-        .cw-btn-download-pdf:hover { 
+        .cw-btn-download-pdf:hover {
           background: linear-gradient(135deg, #dc2626, #b91c1c);
           transform: translateY(-2px);
           box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
         }
-
         .cw-btn-view-files {
           background: linear-gradient(135deg, #3b82f6, #2563eb);
           color: white;
         }
-        .cw-btn-view-files:hover { 
+        .cw-btn-view-files:hover {
           background: linear-gradient(135deg, #2563eb, #1d4ed8);
           transform: translateY(-2px);
           box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
         }
-
         .cw-btn-view-details {
           background: linear-gradient(135deg, #64748b, #475569);
           color: white;
         }
-        .cw-btn-view-details:hover { 
+        .cw-btn-view-details:hover {
           background: linear-gradient(135deg, #475569, #334155);
           transform: translateY(-2px);
           box-shadow: 0 4px 12px rgba(100, 116, 139, 0.3);
         }
-
         .cw-btn-view {
           background: linear-gradient(135deg, #10b981, #059669);
           color: white;
           display: none;
         }
-        .cw-btn-view:hover { 
+        .cw-btn-view:hover {
           background: linear-gradient(135deg, #059669, #047857);
           transform: translateY(-2px);
           box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
         }
-
         .cw-btn-submit {
           background: linear-gradient(135deg, #10b981, #059669);
           color: white;
         }
-        .cw-btn-submit:hover { 
+        .cw-btn-submit:hover {
           background: linear-gradient(135deg, #059669, #047857);
           transform: translateY(-2px);
           box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
         }
-
         .cw-btn-results {
           background: linear-gradient(135deg, #8b5cf6, #7c3aed);
           color: white;
         }
-        .cw-btn-results:hover { 
+        .cw-btn-results:hover {
           background: linear-gradient(135deg, #7c3aed, #6d28d9);
           transform: translateY(-2px);
           box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
         }
-
         .cw-btn-submitted {
           background: #94a3b8;
           color: white;
           cursor: default;
           opacity: 0.8;
         }
-
         .cw-btn-late {
           background: #f1f5f9;
           color: #64748b;
           cursor: not-allowed;
           border: 1px solid #cbd5e1;
         }
-
         .cw-refresh-btn {
           margin-top: 15px;
           padding: 10px 20px;
@@ -1769,12 +1490,10 @@ const Coursework = () => {
           cursor: pointer;
           font-weight: 600;
         }
-
         .cw-refresh-btn:hover {
           background: #1976d2;
           transform: translateY(-1px);
         }
-
         /* =================== LOADING & NO DATA =================== */
         .cw-no-assignments {
           grid-column: 1 / -1;
@@ -1786,23 +1505,19 @@ const Coursework = () => {
           border-radius: 12px;
           box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
         }
-
-      .coursework-loading-spinner {
-  width: 50px;
-  height: 50px;
-  border: 4px solid #f1f5f9;
-  border-top: 4px solid #3b82f6;
-  border-radius: 50%;
-  animation: coursework-spin 1s linear infinite;
-  margin: 40px auto;
-}
-
-/* Add a unique animation name to avoid conflicts */
-@keyframes coursework-spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
+        .coursework-loading-spinner {
+          width: 50px;
+          height: 50px;
+          border: 4px solid #f1f5f9;
+          border-top: 4px solid #3b82f6;
+          border-radius: 50%;
+          animation: coursework-spin 1s linear infinite;
+          margin: 40px auto;
+        }
+        @keyframes coursework-spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
         /* =================== MODAL STYLES =================== */
         .coursework-modal-overlay {
           position: fixed;
@@ -1818,7 +1533,6 @@ const Coursework = () => {
           padding: 16px;
           backdrop-filter: blur(4px);
         }
-
         .coursework-modal {
           background: white;
           border-radius: 16px;
@@ -1830,11 +1544,9 @@ const Coursework = () => {
           animation: modalSlideIn 0.3s ease;
           border: 1px solid #e2e8f0;
         }
-
         .coursework-modal-large {
           max-width: 720px;
         }
-
         .coursework-modal-header {
           display: flex;
           justify-content: space-between;
@@ -1847,7 +1559,6 @@ const Coursework = () => {
           z-index: 1;
           border-radius: 16px 16px 0 0;
         }
-
         .coursework-modal-header h3 {
           margin: 0;
           font-size: 20px;
@@ -1857,7 +1568,6 @@ const Coursework = () => {
           align-items: center;
           gap: 10px;
         }
-
         .coursework-modal-close {
           background: #f1f5f9;
           border: none;
@@ -1872,16 +1582,13 @@ const Coursework = () => {
           border-radius: 8px;
           transition: all 0.2s ease;
         }
-
         .coursework-modal-close:hover {
           background: #e2e8f0;
           color: #1e293b;
         }
-
         .coursework-modal-body {
           padding: 24px;
         }
-
         .coursework-modal-footer {
           padding: 24px;
           border-top: 1px solid #e2e8f0;
@@ -1891,7 +1598,6 @@ const Coursework = () => {
           background: #f8fafc;
           border-radius: 0 0 16px 16px;
         }
-
         /* =================== MODAL BUTTON STYLES =================== */
         .coursework-btn {
           padding: 12px 20px;
@@ -1907,11 +1613,9 @@ const Coursework = () => {
           gap: 8px;
           min-width: 120px;
         }
-
         .coursework-btn i {
           font-size: 14px;
         }
-
         .coursework-btn-primary {
           background: linear-gradient(135deg, #3b82f6, #2563eb);
           color: white;
@@ -1921,7 +1625,6 @@ const Coursework = () => {
           transform: translateY(-2px);
           box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
         }
-
         .coursework-btn-secondary {
           background: #f1f5f9;
           color: #475569;
@@ -1931,7 +1634,6 @@ const Coursework = () => {
           background: #e2e8f0;
           transform: translateY(-2px);
         }
-
         .coursework-btn-tertiary {
           background: transparent;
           color: #64748b;
@@ -1941,7 +1643,6 @@ const Coursework = () => {
           background: #f1f5f9;
           transform: translateY(-2px);
         }
-
         /* =================== RESULTS MODAL =================== */
         .coursework-results-card {
           background: white;
@@ -1949,20 +1650,17 @@ const Coursework = () => {
           padding: 20px;
           border: 1px solid #e2e8f0;
         }
-
         .coursework-results-card h4 {
           margin: 0 0 8px 0;
           color: #1e293b;
           font-size: 18px;
           font-weight: 700;
         }
-
         .coursework-course-info {
           color: #64748b;
           font-size: 14px;
           margin: 0 0 24px 0;
         }
-
         .coursework-marks-section {
           display: flex;
           align-items: center;
@@ -1972,58 +1670,49 @@ const Coursework = () => {
           background: linear-gradient(135deg, #f8fafc, #f1f5f9);
           border-radius: 12px;
         }
-
         .coursework-marks-display {
           display: flex;
           flex-direction: column;
           gap: 6px;
           flex: 1;
         }
-
         .coursework-marks-label {
           font-size: 13px;
           color: #64748b;
           font-weight: 600;
         }
-
         .coursework-marks-value {
           font-size: 28px;
           font-weight: 800;
           color: #1e293b;
         }
-
         .coursework-percentage {
           display: flex;
           flex-direction: column;
           gap: 6px;
           flex: 1;
         }
-
         .coursework-percentage-label {
           font-size: 13px;
           color: #64748b;
           font-weight: 600;
         }
-
         .coursework-percentage-value {
           font-size: 28px;
           font-weight: 800;
           color: #3b82f6;
         }
-
         .coursework-details-grid {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
           gap: 16px;
           margin: 24px 0;
         }
-
         .coursework-detail-item {
           display: flex;
           flex-direction: column;
           gap: 4px;
         }
-
         .coursework-detail-label {
           font-size: 12px;
           color: #64748b;
@@ -2031,13 +1720,11 @@ const Coursework = () => {
           text-transform: uppercase;
           letter-spacing: 0.5px;
         }
-
         .coursework-detail-value {
           font-size: 14px;
           color: #1e293b;
           font-weight: 600;
         }
-
         .coursework-feedback-section {
           margin: 24px 0;
           padding: 20px;
@@ -2045,304 +1732,177 @@ const Coursework = () => {
           border-radius: 12px;
           border: 1px solid #bae6fd;
         }
-
         .coursework-feedback-section h5 {
           margin: 0 0 12px 0;
           color: #0369a1;
           font-size: 16px;
           font-weight: 700;
         }
-
         .coursework-feedback-content {
           color: #0c4a6e;
           font-size: 14px;
           line-height: 1.6;
           white-space: pre-line;
         }
-
-        .coursework-submitted-files {
-          margin: 24px 0;
-        }
-
-        .coursework-submitted-files h5 {
-          margin: 0 0 16px 0;
-          color: #1e293b;
-          font-size: 16px;
-          font-weight: 700;
-        }
-
-        .coursework-files-list {
+        /* =================== NO ACCESS STYLES =================== */
+        .cw-no-access {
           display: flex;
-          flex-direction: column;
-          gap: 10px;
-        }
-
-        .coursework-file-item {
-          display: flex;
+          justify-content: center;
           align-items: center;
-          justify-content: space-between;
-          padding: 12px 16px;
-          background: #f8fafc;
-          border-radius: 8px;
+          min-height: 60vh;
+          padding: 40px 20px;
+        }
+        .no-access-card {
+          background: white;
+          border-radius: 16px;
+          padding: 40px;
+          text-align: center;
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+          max-width: 600px;
+          width: 100%;
           border: 1px solid #e2e8f0;
         }
-
-        .coursework-file-name {
-          font-size: 14px;
-          color: #475569;
-          font-weight: 500;
+        .no-access-icon {
+          font-size: 64px;
+          color: #ef4444;
+          margin-bottom: 20px;
         }
-
-        .coursework-download-btn {
-          padding: 6px 12px;
-          background: #3b82f6;
-          color: white;
-          border: none;
-          border-radius: 6px;
-          font-size: 12px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-
-        .coursework-download-btn:hover {
-          background: #2563eb;
-          transform: translateY(-1px);
-        }
-
-        /* =================== FILES MODAL =================== */
-        .coursework-assignment-info {
-          margin-bottom: 24px;
-        }
-
-        .coursework-assignment-info h4 {
-          margin: 0 0 8px 0;
+        .no-access-card h3 {
+          font-size: 24px;
           color: #1e293b;
-          font-size: 20px;
+          margin-bottom: 16px;
           font-weight: 700;
         }
-
-        .coursework-files-count {
+        .no-access-message {
+          color: #64748b;
+          font-size: 16px;
+          line-height: 1.6;
+          margin-bottom: 30px;
+        }
+        .access-details {
+          text-align: left;
+        }
+        .payment-status {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 20px;
+          padding: 16px;
+          background: #f8fafc;
+          border-radius: 8px;
+        }
+        .status-label {
+          font-weight: 600;
+          color: #475569;
+        }
+        .status-value {
+          font-weight: 700;
+          font-size: 18px;
+        }
+        .status-value.paid {
+          color: #10b981;
+        }
+        .status-value.unpaid {
+          color: #ef4444;
+        }
+        .progress-container {
+          margin: 30px 0;
+        }
+        .progress-bar-large {
+          height: 20px;
+          background: #e2e8f0;
+          border-radius: 10px;
+          overflow: hidden;
+          margin-bottom: 10px;
+        }
+        .progress-fill-large {
+          height: 100%;
+          background: linear-gradient(90deg, #3b82f6, #1d4ed8);
+          transition: width 0.3s ease;
+        }
+        .progress-required {
+          position: relative;
+          height: 20px;
+        }
+        .required-marker {
+          position: absolute;
+          top: 0;
+          transform: translateX(-50%);
+          color: #ef4444;
+          font-size: 12px;
+          font-weight: 600;
+          white-space: nowrap;
+        }
+        .contact-support {
+          margin-top: 30px;
+          padding-top: 20px;
+          border-top: 1px solid #e2e8f0;
           color: #64748b;
           font-size: 14px;
+        }
+        .contact-support p {
           margin: 8px 0;
         }
-
-        .coursework-files-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-          gap: 16px;
-        }
-
-        .coursework-file-card {
-          display: flex;
-          align-items: center;
-          gap: 16px;
-          padding: 16px;
-          background: white;
-          border-radius: 12px;
-          border: 1px solid #e2e8f0;
-          transition: all 0.2s ease;
-        }
-
-        .coursework-file-card:hover {
-          border-color: #cbd5e1;
-          transform: translateY(-2px);
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-        }
-
-        .coursework-pdf-file {
-          background: linear-gradient(135deg, #fef2f2, #fee2e2);
-          border-color: #fecaca;
-        }
-
-        .coursework-file-icon {
-          font-size: 24px;
-          width: 48px;
-          height: 48px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: #f1f5f9;
-          border-radius: 10px;
-        }
-
-        .coursework-file-info {
-          flex: 1;
-        }
-
-        .coursework-file-name {
-          font-size: 14px;
-          font-weight: 600;
-          color: #1e293b;
-          margin-bottom: 4px;
-          word-break: break-all;
-        }
-
-        .coursework-file-meta {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-
-        .coursework-file-type {
-          font-size: 11px;
-          color: #64748b;
-          background: #f1f5f9;
-          padding: 2px 6px;
-          border-radius: 4px;
-        }
-
-        .coursework-file-extension {
-          font-size: 11px;
-          color: #3b82f6;
-          background: #dbeafe;
-          padding: 2px 6px;
-          border-radius: 4px;
-          font-weight: 700;
-        }
-
-        .coursework-file-actions {
-          display: flex;
-          gap: 8px;
-        }
-
-        .coursework-btn-preview {
-          padding: 8px 12px;
-          background: #f1f5f9;
-          color: #475569;
-          border: 1px solid #cbd5e1;
-          border-radius: 6px;
-          font-size: 12px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-
-        .coursework-btn-preview:hover {
-          background: #e2e8f0;
-        }
-
-        .coursework-btn-download {
-          padding: 8px 12px;
-          background: #3b82f6;
-          color: white;
-          border: none;
-          border-radius: 6px;
-          font-size: 12px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-
-        .coursework-btn-download:hover {
-          background: #2563eb;
-        }
-
-        /* =================== DETAILS MODAL =================== */
-        .coursework-assignment-header {
-          margin-bottom: 24px;
-        }
-
-        .coursework-assignment-header h4 {
-          margin: 0 0 16px 0;
-          color: #1e293b;
-          font-size: 22px;
-          font-weight: 800;
-        }
-
-        .coursework-assignment-meta {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-        }
-
-        .coursework-meta-item {
-          font-size: 14px;
+        .contact-support strong {
           color: #475569;
         }
-
-        .coursework-meta-item strong {
-          color: #334155;
-          margin-right: 6px;
+        .coursework-payment-required {
+          text-align: center;
         }
-
-        .coursework-description-section,
-        .coursework-instructions-section {
-          margin: 24px 0;
+        .payment-requirements {
+          margin: 30px 0;
         }
-
-        .coursework-description-section h5,
-        .coursework-instructions-section h5 {
-          margin: 0 0 12px 0;
-          color: #1e293b;
-          font-size: 16px;
-          font-weight: 700;
-        }
-
-        .coursework-description-content,
-        .coursework-instructions-content {
-          color: #475569;
-          font-size: 14px;
-          line-height: 1.6;
-          white-space: pre-line;
-          padding: 16px;
+        .requirement-item {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 12px;
+          margin: 10px 0;
           background: #f8fafc;
           border-radius: 8px;
-          border: 1px solid #e2e8f0;
         }
-
-        .coursework-attached-files {
-          margin: 24px 0;
+        .requirement-not-met {
+          background: #fef2f2;
+          color: #dc2626;
         }
-
-        .coursework-attached-files h5 {
-          margin: 0 0 16px 0;
-          color: #1e293b;
-          font-size: 16px;
-          font-weight: 700;
+        .payment-details {
+          text-align: left;
+          margin-top: 30px;
+        }
+        .payment-progress {
+          margin: 20px 0;
+        }
+        .progress-labels {
           display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-
-        .coursework-file-item-small {
-          display: flex;
-          align-items: center;
           justify-content: space-between;
-          padding: 10px 14px;
-          background: #f8fafc;
+          margin-top: 8px;
+          font-size: 14px;
+          color: #64748b;
+        }
+        .payment-instructions {
+          background: #f0f9ff;
+          padding: 20px;
           border-radius: 8px;
-          border: 1px solid #e2e8f0;
+          margin: 20px 0;
+        }
+        .payment-instructions h6 {
+          color: #0369a1;
+          margin-bottom: 12px;
+        }
+        .payment-instructions ol {
+          padding-left: 20px;
+          margin: 0;
+        }
+        .payment-instructions li {
           margin-bottom: 8px;
         }
-
-        .coursework-download-btn-small {
-          padding: 6px 12px;
-          background: #3b82f6;
-          color: white;
-          border: none;
-          border-radius: 6px;
-          font-size: 12px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.2s ease;
+        .contact-info {
+          background: #f1f5f9;
+          padding: 16px;
+          border-radius: 8px;
+          font-size: 14px;
         }
-
-        .coursework-download-btn-small:hover {
-          background: #2563eb;
-        }
-
-        .coursework-more-files {
-          color: #64748b;
-          font-size: 13px;
-          font-style: italic;
-          margin-top: 8px;
-          padding-left: 14px;
-        }
-
         /* =================== ANIMATIONS =================== */
-
         @keyframes modalSlideIn {
           from {
             opacity: 0;
@@ -2353,7 +1913,6 @@ const Coursework = () => {
             transform: translateY(0);
           }
         }
-
         /* =================== RESPONSIVE STYLES =================== */
         @media (max-width: 1024px) {
           .cw-grid {
@@ -2361,71 +1920,59 @@ const Coursework = () => {
             gap: 16px;
           }
         }
-
         @media (max-width: 768px) {
           .cw-header {
             flex-direction: column;
             align-items: flex-start;
             gap: 12px;
           }
-          
           .cw-grid {
             grid-template-columns: 1fr;
           }
-          
           .coursework-modal {
             max-width: 95%;
             margin: 0 auto;
           }
-          
           .coursework-details-grid {
             grid-template-columns: 1fr;
           }
-          
           .coursework-files-grid {
             grid-template-columns: 1fr;
           }
-          
           .coursework-modal-footer {
             flex-direction: column;
           }
-          
           .coursework-btn {
             width: 100%;
           }
+          .no-access-card {
+            padding: 24px;
+          }
         }
-
         @media (max-width: 480px) {
           .coursework-page {
             padding: 12px;
           }
-          
           .cw-header {
             padding: 16px;
           }
-          
           .cw-header h2 {
             font-size: 20px;
           }
-          
           .cw-card {
             padding: 16px;
             min-height: 280px;
           }
-          
           .cw-card-title {
             font-size: 16px;
           }
-          
           .cw-btn {
             padding: 10px 14px;
             font-size: 13px;
           }
-          
           .coursework-modal {
             max-height: 90vh;
           }
-          
           .coursework-modal-header,
           .coursework-modal-body,
           .coursework-modal-footer {
