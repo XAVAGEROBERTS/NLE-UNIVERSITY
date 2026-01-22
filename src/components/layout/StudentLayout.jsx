@@ -395,12 +395,23 @@ const StudentLayout = () => {
     }
   }, [location.pathname]);
 
-  const handleNavigation = (path) => {
+const handleNavigation = (path) => {
+  if (location.pathname === path) {
+    // If already on this page, force a refresh by appending a unique refresh param
+    // This preserves any existing query params (if the page ever uses them in the future)
+    const currentSearch = location.search;
+    const separator = currentSearch ? '&' : '?';
+    navigate(`${path}${currentSearch}${separator}refresh=${Date.now()}`, { replace: true });
+  } else {
+    // Normal navigation to a different page (clean URL, no query params)
     navigate(path);
-    if (isMobile) {
-      setMobileMenuOpen(false);
-    }
-  };
+  }
+
+  // Always close mobile menu after navigation or refresh
+  if (isMobile) {
+    setMobileMenuOpen(false);
+  }
+};
 
   const handleLogout = () => {
     setShowLogoutModal(true);
@@ -626,12 +637,12 @@ const StudentLayout = () => {
                 tabIndex="0"
                 aria-label={`Notifications ${unreadCount > 0 ? `(${unreadCount} unread)` : ''}`}
               >
-                {/* <i className="fas fa-bell"></i>
+                <i className="fas fa-bell"></i>
                 {unreadCount > 0 && (
                   <span className="notification-badge">
                     {unreadCount > 9 ? '9+' : unreadCount}
                   </span>
-                )} */}
+                )}
               </div>
 
               {!isMobile && (
