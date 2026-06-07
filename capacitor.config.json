@@ -1,0 +1,8 @@
+{
+  "appId": "com.nle.learner",
+  "appName": "NLE Learner",
+  "webDir": "dist",
+  "server": {
+    "cleartext": false
+  }
+}
