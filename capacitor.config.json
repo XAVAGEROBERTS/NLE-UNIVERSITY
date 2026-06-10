@@ -1,6 +1,6 @@
-{
-  "appId": "com.nle.learner",
-  "appName": "NLE Learner",
+﻿{
+  "appId": "com.nle.admin",
+  "appName": "NLE Admin",
   "webDir": "dist",
   "server": {
     "cleartext": false
