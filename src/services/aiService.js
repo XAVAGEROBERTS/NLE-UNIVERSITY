@@ -1,6 +1,6 @@
 // src/services/aiService.js
 
-const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || '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';
+const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || process.env.VITE_GROQ_API_KEY;';
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 const WORKING_MODELS = [
