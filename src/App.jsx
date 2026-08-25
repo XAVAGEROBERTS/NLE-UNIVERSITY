@@ -1,6 +1,6 @@
 // src/App.jsx - FINAL with back button handler
 import React, { Suspense, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from ' react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'; // Fixed: removed space
 import { StudentAuthProvider, useStudentAuth } from './context/StudentAuthContext';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';

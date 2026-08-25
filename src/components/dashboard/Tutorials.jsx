@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '../../services/supabase';
 import { useStudentAuth } from '../../context/StudentAuthContext';
+import { useCachedData } from '../../hooks/useCachedData';
 import Modal from 'react-modal';
 
 // Set app element for modal accessibility
@@ -9,9 +10,7 @@ if (typeof window !== 'undefined') {
 }
 
 const Tutorials = () => {
-  const [tutorials, setTutorials] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+
   const [activeVideo, setActiveVideo] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isVideoLoading, setIsVideoLoading] = useState(false);
@@ -23,61 +22,12 @@ const Tutorials = () => {
   const { user } = useStudentAuth();
 
   const [thumbnails, setThumbnails] = useState({});
-
-  useEffect(() => {
-    if (user?.email) {
-      fetchTutorials();
-    }
-  }, [user]);
-
-  useEffect(() => {
-  const loadThumbnails = async () => {
-    for (const tutorial of tutorials) {
-      if (!thumbnails[tutorial.id] && tutorial.videoSrc) {
-        const thumb = await generateThumbnail(tutorial.videoSrc);
-        if (thumb) {
-          setThumbnails(prev => ({
-            ...prev,
-            [tutorial.id]: thumb
-          }));
-        }
-      }
-    }
-  };
-
-  if (tutorials.length > 0) {
-    loadThumbnails();
+  const fetchTutorialsData = useCallback(async () => {
+  if (!user?.email) {
+    throw new Error('No user logged in');
   }
-}, [tutorials]);
-
-  // Clean up hover videos on unmount
-  useEffect(() => {
-    return () => {
-      Object.values(hoverVideoRefs.current).forEach(video => {
-        if (video) {
-          video.pause();
-          video.currentTime = 0;
-          video.src = '';
-        }
-      });
-    };
-  }, []);
-
-  // Hide download toast after 3 seconds
-  useEffect(() => {
-    if (showDownloadToast) {
-      const timer = setTimeout(() => {
-        setShowDownloadToast(false);
-      }, 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [showDownloadToast]);
-
-const fetchTutorials = async () => {
-  try {
-    setLoading(true);
-    setError(null);
-const { data: student, error: studentError } = await supabase
+  
+  const { data: student, error: studentError } = await supabase
   .from('students')
   .select('id, program_code, academic_year, year_of_study, semester')
   .eq('email', user.email)
@@ -189,17 +139,18 @@ allFiles.forEach(file => {
 });
 
     console.log(`Filtered to ${matchingFiles.length} matching tutorials`);
-const { data: enrollments, error: enrollError } = await supabase
+// Fetch enrollments (for potential future use)
+const { error: enrollError } = await supabase
   .from('student_courses')
   .select('courses(course_code)')
-  .eq('student_id', studentId); // Use the UUID we destructured // Now uses correct UUID
+  .eq('student_id', studentId);
 
 if (enrollError) {
   console.warn('Could not load enrollments:', enrollError);
   // Continue without strict course check
 }
 
-    const enrolledCourseCodes = enrollments?.map(e => e.courses?.course_code?.toUpperCase()) || [];
+    // (removed unused variable)
 
       // Collect unique lecturer IDs from file paths
     const lecturerIdSet = new Set();
@@ -277,51 +228,111 @@ if (enrollError) {
       return dateDiff !== 0 ? dateDiff : a.title.localeCompare(b.title);
     });
 
-    setTutorials(studentTutorials);
+    return {
+      tutorials: studentTutorials,
+      error: studentTutorials.length === 0 ? 'No tutorials available for your program and cohort yet. Check back later!' : null
+    };
 
-    if (studentTutorials.length === 0) {
-      setError('No tutorials available for your program and cohort yet. Check back later!');
-    }
+}, [user]);
 
-  } catch (err) {
-    console.error('Error loading tutorials:', err);
-    setError(`Failed to load tutorials: ${err.message}`);
-  } finally {
-    setLoading(false);
+// Use cached data hook
+const { 
+  data: cachedTutorialData, 
+  loading, 
+  error,
+  refetch: refetchTutorials 
+} = useCachedData(
+  `tutorials-${user?.id || user?.email}`,
+  fetchTutorialsData,
+  {
+    ttl: 15 * 60 * 1000, // 15 minutes cache
+    enabled: !!user?.email,
+    dependencies: [user?.email]
   }
+);
+
+  
+  // Define tutorials early (will be populated by cached data)
+  const tutorials = cachedTutorialData?.tutorials || [];
+
+
+
+  const generateThumbnail = (videoSrc) => {
+    return new Promise((resolve) => {
+      const video = document.createElement('video');
+      const canvas = document.createElement('canvas');
+      video.src = videoSrc;
+      video.crossOrigin = 'anonymous';
+      video.muted = true;
+      video.preload = 'metadata';
+
+      video.onloadedmetadata = () => {
+        let seekTime = 1;
+        if (video.duration && !isNaN(video.duration) && video.duration > 4) {
+          seekTime = Math.min(video.duration * 0.25, video.duration - 1);
+        }
+        video.currentTime = seekTime;
+      };
+
+      video.onseeked = () => {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.8));
+      };
+
+      video.onerror = () => {
+        resolve(null);
+      };
+    });
   };
 
-const generateThumbnail = (videoSrc) => {
-  return new Promise((resolve) => {
-    const video = document.createElement('video');
-    const canvas = document.createElement('canvas');
-    video.src = videoSrc;
-    video.crossOrigin = 'anonymous';
-    video.muted = true; // Helps with autoplay policies
-    video.preload = 'metadata'; // Load metadata first (includes duration)
-
-    video.onloadedmetadata = () => {
-      // Calculate middle point: prefer 25% in, but fallback to 1s if duration unknown/short
-      let seekTime = 1;
-      if (video.duration && !isNaN(video.duration) && video.duration > 4) {
-        seekTime = Math.min(video.duration * 0.25, video.duration - 1); // 25% or near end
+  useEffect(() => {
+    const loadThumbnails = async () => {
+      for (const tutorial of tutorials) {
+        if (!thumbnails[tutorial.id] && tutorial.videoSrc) {
+          const thumb = await generateThumbnail(tutorial.videoSrc);
+          if (thumb) {
+            setThumbnails(prev => ({
+              ...prev,
+              [tutorial.id]: thumb
+            }));
+          }
+        }
       }
-      video.currentTime = seekTime;
     };
 
-    video.onseeked = () => {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL('image/jpeg', 0.8)); // 80% quality for smaller size
-    };
+    if (tutorials.length > 0) {
+      loadThumbnails();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tutorials]);
 
-    video.onerror = () => {
-      resolve(null); // Fallback to gradient if error
+  // Clean up hover videos on unmount
+  useEffect(() => {
+    const refs = hoverVideoRefs.current;
+    return () => {
+      Object.values(refs).forEach(video => {
+        if (video) {
+          video.pause();
+          video.currentTime = 0;
+          video.src = '';
+        }
+      });
     };
-  });
-};
+  }, []);
+
+  // Hide download toast after 3 seconds
+  useEffect(() => {
+    if (showDownloadToast) {
+      const timer = setTimeout(() => {
+        setShowDownloadToast(false);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [showDownloadToast]);
+
 
   const openVideoPlayer = async (tutorial) => {
     if (!tutorial.videoSrc) {
@@ -372,16 +383,10 @@ const generateThumbnail = (videoSrc) => {
     }
   };
 
-  const formatTime = (seconds) => {
-    if (!seconds || seconds < 0) return '0:00';
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
+
 
   const refreshTutorials = () => {
-    setLoading(true);
-    fetchTutorials();
+    refetchTutorials();
   };
 
 const downloadVideo = (videoUrl, videoTitle) => {

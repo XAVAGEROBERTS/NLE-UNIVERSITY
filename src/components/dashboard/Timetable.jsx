@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+// src/components/dashboard/Timetable.jsx
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../services/supabase';
 import { useStudentAuth } from '../../context/StudentAuthContext';
+import { useCachedData } from '../../hooks/useCachedData';
 
 const Timetable = () => {
   const [timetableData, setTimetableData] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [upcomingLectures, setUpcomingLectures] = useState([]);
   const [isMobile, setIsMobile] = useState(false);
   const [viewMode, setViewMode] = useState('timetable'); // 'timetable' or 'upcoming'
@@ -26,15 +27,39 @@ const Timetable = () => {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  useEffect(() => {
-    if (user?.email) {
-      fetchTimetable();
-    }
-  }, [user]);
+  // Helper functions
+  const formatTime = (timeString) => {
+    if (!timeString) return 'TBD';
+    const [hours, minutes] = timeString.split(':');
+    const hour = parseInt(hours);
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const hour12 = hour % 12 || 12;
+    return `${hour12}:${minutes} ${ampm}`;
+  };
 
-const fetchTimetable = async () => {
-  try {
-    setLoading(true);
+  const formatDate = (date) => {
+    const today = new Date();
+    const tomorrow = new Date();
+    tomorrow.setDate(today.getDate() + 1);
+    
+    if (date.toDateString() === today.toDateString()) {
+      return 'Today';
+    } else if (date.toDateString() === tomorrow.toDateString()) {
+      return 'Tomorrow';
+    } else {
+      return date.toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric'
+      });
+    }
+  };
+
+  // Main data fetching function for timetable
+  const fetchTimetableData = useCallback(async () => {
+    if (!user?.email) {
+      throw new Error('No user logged in');
+    }
 
     // Get current logged-in student's details
     const { data: student, error: studentError } = await supabase
@@ -45,10 +70,10 @@ const fetchTimetable = async () => {
 
     if (studentError || !student) {
       console.error('Student not found:', studentError);
-      setTimetableData([]);
-      setUpcomingLectures([]);
-      setLoading(false);
-      return;
+      return {
+        timetableData: [],
+        upcomingLectures: []
+      };
     }
 
     // Fetch the active program timetable for this student
@@ -64,10 +89,10 @@ const fetchTimetable = async () => {
 
     if (ptError || !programTimetable) {
       console.log('No program timetable found for this student yet.');
-      setTimetableData([]);
-      setUpcomingLectures([]);
-      setLoading(false);
-      return;
+      return {
+        timetableData: [],
+        upcomingLectures: []
+      };
     }
 
     // Fetch all slots for this program timetable
@@ -93,13 +118,13 @@ const fetchTimetable = async () => {
     if (slotsError) throw slotsError;
 
     if (!timetableSlots || timetableSlots.length === 0) {
-      setTimetableData([]);
-      setUpcomingLectures([]);
-      setLoading(false);
-      return;
+      return {
+        timetableData: [],
+        upcomingLectures: []
+      };
     }
 
-    // === Processing remains mostly the same from here ===
+    // Process timetable data
     const timeSlots = [
       "8:00 - 9:00",
       "9:00 - 10:00",
@@ -185,45 +210,35 @@ const fetchTimetable = async () => {
       return a.date.localeCompare(b.date);
     });
 
-    setTimetableData(timetable);
-    setUpcomingLectures(upcomingLecs);
+    return {
+      timetableData: timetable,
+      upcomingLectures: upcomingLecs
+    };
+  }, [user?.email]);
 
-  } catch (error) {
-    console.error('Error fetching program timetable:', error);
-    setTimetableData([]);
-    setUpcomingLectures([]);
-  } finally {
-    setLoading(false);
-  }
-};
-
-  // Helper functions
-  const formatTime = (timeString) => {
-    if (!timeString) return 'TBD';
-    const [hours, minutes] = timeString.split(':');
-    const hour = parseInt(hours);
-    const ampm = hour >= 12 ? 'PM' : 'AM';
-    const hour12 = hour % 12 || 12;
-    return `${hour12}:${minutes} ${ampm}`;
-  };
-
-  const formatDate = (date) => {
-    const today = new Date();
-    const tomorrow = new Date();
-    tomorrow.setDate(today.getDate() + 1);
-    
-    if (date.toDateString() === today.toDateString()) {
-      return 'Today';
-    } else if (date.toDateString() === tomorrow.toDateString()) {
-      return 'Tomorrow';
-    } else {
-      return date.toLocaleDateString('en-US', {
-        weekday: 'short',
-        month: 'short',
-        day: 'numeric'
-      });
+  // Use cached data hook
+  const { 
+    data: cachedTimetableData, 
+    loading, 
+    error,
+    refetch: refetchTimetable 
+  } = useCachedData(
+    `timetable-${user?.id || user?.email}`,
+    fetchTimetableData,
+    {
+      ttl: 30 * 60 * 1000, // 30 minutes cache (timetable changes infrequently)
+      enabled: !!user?.email,
+      dependencies: [user?.email]
     }
-  };
+  );
+
+  // Update state when cached data changes
+  useEffect(() => {
+    if (cachedTimetableData) {
+      setTimetableData(cachedTimetableData.timetableData || []);
+      setUpcomingLectures(cachedTimetableData.upcomingLectures || []);
+    }
+  }, [cachedTimetableData]);
 
   const addToCalendar = (lecture) => {
     const event = {
@@ -503,25 +518,58 @@ const fetchTimetable = async () => {
   );
 
   // Loading state
- // Loading state
-if (loading) {
-  return (
-    <div className="content" style={{ padding: '16px' }}>
-      <div className="dashboard-header" style={{ padding: '0' }}>
-        <h2 style={{ margin: '0 0 8px 0' }}>My Time Table</h2>
-        <div className="date-display" style={{ color: '#666' }}>Loading timetable...</div>
+  if (loading) {
+    return (
+      <div className="content" style={{ padding: '16px' }}>
+        <div className="dashboard-header" style={{ padding: '0' }}>
+          <h2 style={{ margin: '0 0 8px 0' }}>My Time Table</h2>
+          <div className="date-display" style={{ color: '#666' }}>Loading timetable...</div>
+        </div>
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'center', 
+          alignItems: 'center',
+          height: '200px'
+        }}>
+          <div className="timetable-spinner"></div>
+        </div>
       </div>
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center',
-        height: '200px'
-      }}>
-        <div className="timetable-spinner"></div>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div className="content" style={{ padding: '16px' }}>
+        <div className="dashboard-header" style={{ padding: '0' }}>
+          <h2 style={{ margin: '0 0 8px 0' }}>My Time Table</h2>
+          <div className="date-display" style={{ color: '#d33' }}>Error loading timetable</div>
+        </div>
+        <div style={{ 
+          textAlign: 'center',
+          padding: '40px 16px',
+          backgroundColor: '#fee',
+          borderRadius: '10px',
+          marginTop: '20px'
+        }}>
+          <p style={{ color: '#d33', margin: '0 0 15px 0' }}>{error}</p>
+          <button 
+            onClick={() => refetchTimetable()}
+            style={{
+              padding: '10px 20px',
+              backgroundColor: '#007bff',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer'
+            }}
+          >
+            Retry
+          </button>
+        </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
 
   return (
     <div className="content" style={{ 
@@ -557,50 +605,71 @@ if (loading) {
           </div>
         </div>
         
-        {/* View Toggle for Desktop */}
-        {!isMobile && (
-          <div className="view-toggle" style={{
-            display: 'flex',
-            gap: '4px',
-            backgroundColor: '#f8f9fa',
-            padding: '4px',
-            borderRadius: '8px',
-            flexShrink: 0
-          }}>
-            <button
-              onClick={() => setViewMode('timetable')}
-              style={{
-                padding: '8px 16px',
-                borderRadius: '6px',
-                border: 'none',
-                background: viewMode === 'timetable' ? '#3498db' : 'transparent',
-                color: viewMode === 'timetable' ? 'white' : '#666',
-                cursor: 'pointer',
-                fontWeight: '500',
-                fontSize: '0.9rem',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              Full Timetable
-            </button>
-            <button
-              onClick={() => setViewMode('upcoming')}
-              style={{
-                padding: '8px 16px',
-                borderRadius: '6px',
-                border: 'none',
-                background: viewMode === 'upcoming' ? '#3498db' : 'transparent',
-                color: viewMode === 'upcoming' ? 'white' : '#666',
-                cursor: 'pointer',
-                fontWeight: '500',
-                fontSize: '0.9rem',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              Upcoming Lectures
-            </button>
-          </div>
-        )}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button 
+            onClick={() => refetchTimetable()}
+            style={{
+              backgroundColor: '#f8f9fa',
+              color: '#333',
+              border: '1px solid #dee2e6',
+              padding: '8px 12px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '14px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            <i className="fas fa-sync-alt"></i> Refresh
+          </button>
+          
+          {/* View Toggle for Desktop */}
+          {!isMobile && (
+            <div className="view-toggle" style={{
+              display: 'flex',
+              gap: '4px',
+              backgroundColor: '#f8f9fa',
+              padding: '4px',
+              borderRadius: '8px',
+              flexShrink: 0
+            }}>
+              <button
+                onClick={() => setViewMode('timetable')}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: viewMode === 'timetable' ? '#3498db' : 'transparent',
+                  color: viewMode === 'timetable' ? 'white' : '#666',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  fontSize: '0.9rem',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                Full Timetable
+              </button>
+              <button
+                onClick={() => setViewMode('upcoming')}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: viewMode === 'upcoming' ? '#3498db' : 'transparent',
+                  color: viewMode === 'upcoming' ? 'white' : '#666',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  fontSize: '0.9rem',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                Upcoming Lectures
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {timetableData.length === 0 ? (
@@ -669,21 +738,21 @@ if (loading) {
           box-shadow: 0 4px 16px rgba(0,0,0,0.12);
         }
         
-        /* Loading spinner */
-     /* Timetable loading spinner */
-.timetable-spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid #f3f3f3;
-  border-top: 3px solid #3498db;
-  border-radius: 50%;
-  animation: timetable-spin 1s linear infinite;
-}
+        /* Timetable loading spinner */
+        .timetable-spinner {
+          width: 40px;
+          height: 40px;
+          border: 3px solid #f3f3f3;
+          border-top: 3px solid #3498db;
+          border-radius: 50%;
+          animation: timetable-spin 1s linear infinite;
+        }
 
-@keyframes timetable-spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
+        @keyframes timetable-spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        
         /* Mobile optimizations */
         @media (max-width: 768px) {
           .content {

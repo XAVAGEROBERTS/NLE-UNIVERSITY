@@ -1,15 +1,15 @@
+// src/components/dashboard/Lectures.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '../../services/supabase';
 import { useStudentAuth } from '../../context/StudentAuthContext';
+import { useCachedData } from '../../hooks/useCachedData';
 
 const Lectures = () => {
   const [liveLectures, setLiveLectures] = useState([]);
-  const [recentlyEndedLectures, setRecentlyEndedLectures] = useState([]); // 4-hour grace
-  const [endedLast4, setEndedLast4] = useState([]); // Last 4 ended (old card style)
-  const [pastLectures, setPastLectures] = useState([]); // All past/completed lectures in table
+  const [recentlyEndedLectures, setRecentlyEndedLectures] = useState([]);
+  const [endedLast4, setEndedLast4] = useState([]);
+  const [pastLectures, setPastLectures] = useState([]);
   const [upcomingLectures, setUpcomingLectures] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [showPrevButton, setShowPrevButton] = useState(false);
   const [showNextButton, setShowNextButton] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -49,12 +49,6 @@ const Lectures = () => {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  useEffect(() => {
-    if (user?.email) {
-      fetchAllLectures();
-    }
-  }, [user]);
-
   const checkScrollButtons = useCallback(() => {
     const slider = sliderRef.current;
     if (!slider) return;
@@ -87,161 +81,43 @@ const Lectures = () => {
     return `${year}-${month}-${day}`;
   };
 
-  const fetchAllLectures = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const { data: student, error: studentError } = await supabase
-        .from('students')
-        .select('id, department_code, email, program')
-        .eq('email', user.email)
-        .single();
-      if (studentError) throw new Error(`Student error: ${studentError.message}`);
-      if (!student) throw new Error('Student not found');
-
-      // Try RPC first
-      try {
-        const { data: allData, error: rpcError } = await supabase
-          .rpc('get_student_lectures', { p_student_id: student.id });
-        if (!rpcError && allData && allData.length > 0) {
-          processCurrentAndGraceLectures(allData);
-          processPastLectures(allData);
-          return;
-        }
-      } catch {}
-
-      // Fallback fetches
-      await fetchCurrentLectures(student.id, student.department_code);
-      await fetchEndedLast4(student.id, student.department_code);
-      await fetchPastLectures(student.id, student.department_code);
-    } catch (err) {
-      setError(`Failed to load lectures: ${err.message}`);
-    } finally {
-      setLoading(false);
-    }
+  // Helper functions (defined before fetchAllLecturesData)
+  const formatLecture = (item) => {
+    const isFunction = 'lecture_id' in item;
+    const lecture = {
+      id: isFunction ? item.lecture_id : item.id,
+      title: isFunction ? item.lecture_title : item.title,
+      lecturer: isFunction ? item.lecturer_name : item.lecturers?.full_name || 'Unknown',
+      meetLink: isFunction ? item.google_meet_link : item.google_meet_link || item.lecturers?.google_meet_link,
+      scheduledDate: isFunction ? item.scheduled_date : item.scheduled_date,
+      startTime: isFunction ? item.start_time : item.start_time,
+      endTime: isFunction ? item.end_time : item.end_time,
+      status: isFunction ? item.status : item.status,
+      courseCode: isFunction ? item.course_code : item.courses?.course_code,
+      courseName: isFunction ? item.course_name : item.courses?.course_name,
+      description: isFunction ? item.description : item.description,
+    };
+    const date = new Date(lecture.scheduledDate);
+    lecture.formattedDate = date.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    lecture.formattedShortDate = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    lecture.formattedTime = `${formatTime(lecture.startTime)} - ${formatTime(lecture.endTime)}`;
+    return lecture;
   };
 
-  const fetchCurrentLectures = async (studentId, studentDeptCode) => {
-    const { data: studentCourses } = await supabase
-      .from('student_courses')
-      .select('course_id, status')
-      .eq('student_id', studentId)
-      .in('status', ['enrolled', 'in_progress']);
-
-    if (!studentCourses || studentCourses.length === 0) return;
-
-    const courseIds = studentCourses.map(sc => sc.course_id);
-    const today = getLocalDateString();
-    const nextWeek = new Date();
-    nextWeek.setDate(nextWeek.getDate() + 7);
-    const nextWeekFormatted = getLocalDateString(nextWeek);
-
-    const { data } = await supabase
-      .from('lectures')
-      .select(`
-        *,
-        courses (id, course_code, course_name, department_code),
-        lecturers (full_name, google_meet_link)
-      `)
-      .in('course_id', courseIds)
-      .gte('scheduled_date', today)
-      .lte('scheduled_date', nextWeekFormatted)
-      .order('scheduled_date', { ascending: true })
-      .order('start_time', { ascending: true });
-
-    let filtered = data || [];
-    if (studentDeptCode) {
-      filtered = filtered.filter(l => l.courses?.department_code === studentDeptCode);
-    }
-    processCurrentAndGraceLectures(filtered);
+  const formatTime = (timeString) => {
+    if (!timeString) return 'TBD';
+    const [hours, minutes = '00'] = timeString.split(':');
+    const h = parseInt(hours);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const displayHour = h % 12 || 12;
+    return `${displayHour}:${minutes.padStart(2, '0')} ${ampm}`;
   };
 
-  const fetchEndedLast4 = async (studentId, studentDeptCode) => {
-    const { data: studentCourses } = await supabase
-      .from('student_courses')
-      .select('course_id, status')
-      .eq('student_id', studentId)
-      .in('status', ['enrolled', 'in_progress']);
-
-    if (!studentCourses || studentCourses.length === 0) {
-      setEndedLast4([]);
-      return;
-    }
-
-    const courseIds = studentCourses.map(sc => sc.course_id);
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const thirtyDaysAgoStr = getLocalDateString(thirtyDaysAgo);
-    const today = getLocalDateString();
-
-    const { data } = await supabase
-      .from('lectures')
-      .select(`
-        *,
-        courses (id, course_code, course_name, department_code),
-        lecturers (full_name, google_meet_link)
-      `)
-      .in('course_id', courseIds)
-      .or(`status.eq.completed,and(scheduled_date.gte.${thirtyDaysAgoStr},scheduled_date.lt.${today})`)
-      .order('scheduled_date', { ascending: false })
-      .order('end_time', { ascending: false })
-      .limit(20);
-
-    let filtered = data || [];
-    if (studentDeptCode) {
-      filtered = filtered.filter(l => l.courses?.department_code === studentDeptCode);
-    }
-
-    const now = new Date();
-    const sorted = filtered
-      .map(lecture => ({
-        ...formatLecture(lecture),
-        endDateTime: new Date(`${lecture.scheduled_date}T${lecture.end_time}:00`)
-      }))
-      .filter(l => l.endDateTime < now)
-      .sort((a, b) => b.endDateTime - a.endDateTime)
-      .slice(0, 4)
-      .map(l => ({ ...l, displayStatus: 'ended' }));
-
-    setEndedLast4(sorted);
-  };
-
-  // Fetch all past/completed lectures for the table view
-  const fetchPastLectures = async (studentId, studentDeptCode) => {
-    const { data: studentCourses } = await supabase
-      .from('student_courses')
-      .select('course_id, status')
-      .eq('student_id', studentId)
-      .in('status', ['enrolled', 'in_progress']);
-
-    if (!studentCourses || studentCourses.length === 0) {
-      setPastLectures([]);
-      return;
-    }
-
-    const courseIds = studentCourses.map(sc => sc.course_id);
-    const today = getLocalDateString();
-
-    const { data } = await supabase
-      .from('lectures')
-      .select(`
-        *,
-        courses (id, course_code, course_name, department_code),
-        lecturers (full_name, google_meet_link)
-      `)
-      .in('course_id', courseIds)
-      .or(`status.eq.completed,scheduled_date.lt.${today}`)
-      .order('scheduled_date', { ascending: false })
-      .order('end_time', { ascending: false })
-      .limit(100);
-
-    let filtered = data || [];
-    if (studentDeptCode) {
-      filtered = filtered.filter(l => l.courses?.department_code === studentDeptCode);
-    }
-
-    const formatted = filtered.map(lecture => formatLecture(lecture));
-    setPastLectures(formatted);
+  const isWithinGracePeriod = (lecture, now, todayStr) => {
+    if (lecture.scheduledDate !== todayStr) return false;
+    const endDateTime = new Date(`${lecture.scheduledDate}T${lecture.endTime}:00`);
+    const fourHoursLater = new Date(endDateTime.getTime() + 4 * 60 * 60 * 1000);
+    return now > endDateTime && now <= fourHoursLater;
   };
 
   const processCurrentAndGraceLectures = (data) => {
@@ -285,9 +161,7 @@ const Lectures = () => {
       }
     });
 
-    setLiveLectures(live);
-    setRecentlyEndedLectures(grace);
-    setUpcomingLectures(upcoming);
+    return { live, grace, upcoming };
   };
 
   const processPastLectures = (data) => {
@@ -297,46 +171,138 @@ const Lectures = () => {
       .map(item => formatLecture(item))
       .sort((a, b) => new Date(b.scheduledDate) - new Date(a.scheduledDate));
 
-    setPastLectures(past);
+    return past;
   };
 
-  const formatLecture = (item) => {
-    const isFunction = 'lecture_id' in item;
-    const lecture = {
-      id: isFunction ? item.lecture_id : item.id,
-      title: isFunction ? item.lecture_title : item.title,
-      lecturer: isFunction ? item.lecturer_name : item.lecturers?.full_name || 'Unknown',
-      meetLink: isFunction ? item.google_meet_link : item.google_meet_link || item.lecturers?.google_meet_link,
-      scheduledDate: isFunction ? item.scheduled_date : item.scheduled_date,
-      startTime: isFunction ? item.start_time : item.start_time,
-      endTime: isFunction ? item.end_time : item.end_time,
-      status: isFunction ? item.status : item.status,
-      courseCode: isFunction ? item.course_code : item.courses?.course_code,
-      courseName: isFunction ? item.course_name : item.courses?.course_name,
-      description: isFunction ? item.description : item.description,
+  // Main data fetching function for lectures
+  const fetchAllLecturesData = useCallback(async () => {
+    if (!user?.email) {
+      throw new Error('No user logged in');
+    }
+
+    const { data: student, error: studentError } = await supabase
+      .from('students')
+      .select('id, department_code, email, program')
+      .eq('email', user.email)
+      .single();
+    
+    if (studentError) throw new Error(`Student error: ${studentError.message}`);
+    if (!student) throw new Error('Student not found');
+
+    let allData = null;
+    
+    // Try RPC first
+    try {
+      const { data: rpcData, error: rpcError } = await supabase
+        .rpc('get_student_lectures', { p_student_id: student.id });
+      if (!rpcError && rpcData && rpcData.length > 0) {
+        allData = rpcData;
+      }
+    } catch {
+      // RPC failed, will use fallback
+    }
+
+    if (!allData) {
+      // Fallback: fetch student courses
+      const { data: studentCourses } = await supabase
+        .from('student_courses')
+        .select('course_id, status')
+        .eq('student_id', student.id)
+        .in('status', ['enrolled', 'in_progress']);
+
+      if (!studentCourses || studentCourses.length === 0) {
+        return {
+          live: [],
+          grace: [],
+          upcoming: [],
+          past: [],
+          endedLast4: []
+        };
+      }
+
+      const courseIds = studentCourses.map(sc => sc.course_id);
+      const today = getLocalDateString();
+      const nextWeek = new Date();
+      nextWeek.setDate(nextWeek.getDate() + 7);
+      const nextWeekFormatted = getLocalDateString(nextWeek);
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      const thirtyDaysAgoStr = getLocalDateString(thirtyDaysAgo);
+
+      // Fetch all lectures
+      const { data: lectures, error: lecturesError } = await supabase
+        .from('lectures')
+        .select(`
+          *,
+          courses (id, course_code, course_name, department_code),
+          lecturers (full_name, google_meet_link)
+        `)
+        .in('course_id', courseIds)
+        .or(`scheduled_date.gte.${thirtyDaysAgoStr},status.eq.completed`)
+        .order('scheduled_date', { ascending: false })
+        .order('start_time', { ascending: true })
+        .limit(200);
+
+      if (lecturesError) throw new Error(`Lectures error: ${lecturesError.message}`);
+
+      allData = lectures || [];
+      
+      // Filter by department if needed
+      if (student.department_code) {
+        allData = allData.filter(l => l.courses?.department_code === student.department_code);
+      }
+    }
+
+    // Process lectures
+    const { live, grace, upcoming } = processCurrentAndGraceLectures(allData);
+    const past = processPastLectures(allData);
+    
+    // Get recently ended last 4
+    const now = new Date();
+    const endedLast4 = [...grace, ...past]
+      .filter(l => {
+        const endDateTime = new Date(`${l.scheduledDate}T${l.endTime}:00`);
+        return endDateTime < now;
+      })
+      .sort((a, b) => new Date(b.scheduledDate) - new Date(a.scheduledDate))
+      .slice(0, 4)
+      .map(l => ({ ...l, displayStatus: 'ended' }));
+
+    return {
+      live,
+      grace,
+      upcoming,
+      past,
+      endedLast4
     };
-    const date = new Date(lecture.scheduledDate);
-    lecture.formattedDate = date.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-    lecture.formattedShortDate = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    lecture.formattedTime = `${formatTime(lecture.startTime)} - ${formatTime(lecture.endTime)}`;
-    return lecture;
-  };
+  }, [user?.email]);
 
-  const isWithinGracePeriod = (lecture, now, todayStr) => {
-    if (lecture.scheduledDate !== todayStr) return false;
-    const endDateTime = new Date(`${lecture.scheduledDate}T${lecture.endTime}:00`);
-    const fourHoursLater = new Date(endDateTime.getTime() + 4 * 60 * 60 * 1000);
-    return now > endDateTime && now <= fourHoursLater;
-  };
+  // Use cached data hook
+  const { 
+    data: cachedLecturesData, 
+    loading, 
+    error,
+    refetch: refetchLectures 
+  } = useCachedData(
+    `lectures-${user?.id || user?.email}`,
+    fetchAllLecturesData,
+    {
+      ttl: 5 * 60 * 1000, // 5 minutes cache (lectures change more frequently)
+      enabled: !!user?.email,
+      dependencies: [user?.email]
+    }
+  );
 
-  const formatTime = (timeString) => {
-    if (!timeString) return 'TBD';
-    const [hours, minutes = '00'] = timeString.split(':');
-    const h = parseInt(hours);
-    const ampm = h >= 12 ? 'PM' : 'AM';
-    const displayHour = h % 12 || 12;
-    return `${displayHour}:${minutes.padStart(2, '0')} ${ampm}`;
-  };
+  // Update state when cached data changes
+  useEffect(() => {
+    if (cachedLecturesData) {
+      setLiveLectures(cachedLecturesData.live || []);
+      setRecentlyEndedLectures(cachedLecturesData.grace || []);
+      setUpcomingLectures(cachedLecturesData.upcoming || []);
+      setPastLectures(cachedLecturesData.past || []);
+      setEndedLast4(cachedLecturesData.endedLast4 || []);
+    }
+  }, [cachedLecturesData]);
 
   const scrollLectures = (direction) => {
     const slider = sliderRef.current;
@@ -390,32 +356,31 @@ const Lectures = () => {
     }
   };
 
-  const refreshLectures = () => fetchAllLectures();
-if (loading) {
-  return (
-    <div style={{ padding: '1rem', textAlign: 'center' }}>
-      <h2>Live Lectures</h2>
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '200px' }}>
-        <div className="lectures-spinner"></div>
+  if (loading) {
+    return (
+      <div style={{ padding: '1rem', textAlign: 'center' }}>
+        <h2>Live Lectures</h2>
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '200px' }}>
+          <div className="lectures-spinner"></div>
+        </div>
+        <style>{`
+          .lectures-spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            animation: lectures-spin 1s linear infinite;
+          }
+          
+          @keyframes lectures-spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        `}</style>
       </div>
-      <style>{`
-        .lectures-spinner {
-          width: 40px;
-          height: 40px;
-          border: 4px solid #f3f3f3;
-          border-top: 4px solid #3498db;
-          border-radius: 50%;
-          animation: lectures-spin 1s linear infinite;
-        }
-        
-        @keyframes lectures-spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-      `}</style>
-    </div>
-  );
-}
+    );
+  }
 
   if (error) {
     return (
@@ -423,7 +388,10 @@ if (loading) {
         <h2>Live Lectures</h2>
         <div style={{ padding: '20px', backgroundColor: '#fee', border: '1px solid #f99', borderRadius: '8px', marginBottom: '20px' }}>
           <p style={{ color: '#d33', margin: '0 0 15px 0' }}>{error}</p>
-          <button onClick={refreshLectures} style={{ padding: '10px 20px', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+          <button 
+            onClick={() => refetchLectures()} 
+            style={{ padding: '10px 20px', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+          >
             Refresh Lectures
           </button>
         </div>
@@ -445,7 +413,10 @@ if (loading) {
           <div style={{ fontSize: '0.9rem', color: '#666' }}>
             Total: {liveLectures.length + recentlyEndedLectures.length + upcomingLectures.length + pastLectures.length} lectures
           </div>
-          <button onClick={refreshLectures} style={{ padding: '10px 16px', backgroundColor: '#28a745', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button 
+            onClick={() => refetchLectures()} 
+            style={{ padding: '10px 16px', backgroundColor: '#28a745', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}
+          >
             🔄 Refresh
           </button>
         </div>
@@ -460,24 +431,33 @@ if (loading) {
         {(liveLectures.length > 0 || recentlyEndedLectures.length > 0) ? (
           <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
             {showPrevButton && (
-              <button onClick={() => scrollLectures(-1)} style={{ position: 'absolute', left: isMobile ? '4px' : '-12px', backgroundColor: '#3498db', color: 'white', border: 'none', borderRadius: '50%', width: isMobile ? '28px' : '32px', height: isMobile ? '28px' : '32px', cursor: 'pointer', zIndex: '10', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }}>
+              <button 
+                onClick={() => scrollLectures(-1)} 
+                style={{ position: 'absolute', left: isMobile ? '4px' : '-12px', backgroundColor: '#3498db', color: 'white', border: 'none', borderRadius: '50%', width: isMobile ? '28px' : '32px', height: isMobile ? '28px' : '32px', cursor: 'pointer', zIndex: '10', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }}
+              >
                 ←
               </button>
             )}
-            <div ref={sliderRef} style={{ display: 'flex', overflowX: 'auto', gap: '12px', padding: '4px', scrollBehavior: 'smooth', width: '100%' }}>
+            <div 
+              ref={sliderRef} 
+              style={{ display: 'flex', overflowX: 'auto', gap: '12px', padding: '4px', scrollBehavior: 'smooth', width: '100%' }}
+            >
               {[...liveLectures, ...recentlyEndedLectures].map(lecture => (
-                <div key={lecture.id} style={{
-                  flex: '0 0 auto',
-                  width: isMobile ? 'calc(100vw - 2.5rem)' : '320px',
-                  backgroundColor: lecture.displayStatus === 'recently-ended' ? '#fff4f4' : 'white',
-                  borderRadius: '10px',
-                  boxShadow: '0 3px 10px rgba(0,0,0,0.08)',
-                  padding: '16px',
-                  borderTop: '4px solid #e74c3c',
-                  transition: 'transform 0.2s ease'
-                }}
+                <div 
+                  key={lecture.id} 
+                  style={{
+                    flex: '0 0 auto',
+                    width: isMobile ? 'calc(100vw - 2.5rem)' : '320px',
+                    backgroundColor: lecture.displayStatus === 'recently-ended' ? '#fff4f4' : 'white',
+                    borderRadius: '10px',
+                    boxShadow: '0 3px 10px rgba(0,0,0,0.08)',
+                    padding: '16px',
+                    borderTop: '4px solid #e74c3c',
+                    transition: 'transform 0.2s ease'
+                  }}
                   onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-2px)'}
-                  onMouseLeave={e => e.currentTarget.style.transform = 'translateY(0)'}>
+                  onMouseLeave={e => e.currentTarget.style.transform = 'translateY(0)'}
+                >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
                     <h4 style={{ margin: '0', fontSize: '1.05rem', color: '#2c3e50', lineHeight: '1.3' }}>{lecture.title}</h4>
                     <span style={{
@@ -515,36 +495,42 @@ if (loading) {
                     </div>
                   )}
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <button onClick={() => handleJoinLecture(lecture)} style={{
-                      flex: '1',
-                      padding: '10px',
-                      backgroundColor: lecture.meetLink
-                        ? (lecture.displayStatus === 'recently-ended' ? '#c0392b' : '#28a745')
-                        : '#95a5a6',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '6px',
-                      cursor: lecture.meetLink ? 'pointer' : 'not-allowed',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '6px',
-                      fontWeight: '500'
-                    }}>
+                    <button 
+                      onClick={() => handleJoinLecture(lecture)} 
+                      style={{
+                        flex: '1',
+                        padding: '10px',
+                        backgroundColor: lecture.meetLink
+                          ? (lecture.displayStatus === 'recently-ended' ? '#c0392b' : '#28a745')
+                          : '#95a5a6',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: lecture.meetLink ? 'pointer' : 'not-allowed',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                        fontWeight: '500'
+                      }}
+                    >
                       {lecture.displayStatus === 'recently-ended' ? '⏰ Too Late? Join Anyway' : '🎥 Join Now'}
                     </button>
-                    <button onClick={() => addToCalendar(lecture)} style={{
-                      padding: '10px 12px',
-                      backgroundColor: '#3498db',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      fontWeight: '500'
-                    }}>
+                    <button 
+                      onClick={() => addToCalendar(lecture)} 
+                      style={{
+                        padding: '10px 12px',
+                        backgroundColor: '#3498db',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        fontWeight: '500'
+                      }}
+                    >
                       📅 Add
                     </button>
                   </div>
@@ -552,7 +538,10 @@ if (loading) {
               ))}
             </div>
             {showNextButton && (
-              <button onClick={() => scrollLectures(1)} style={{ position: 'absolute', right: isMobile ? '4px' : '-12px', backgroundColor: '#3498db', color: 'white', border: 'none', borderRadius: '50%', width: isMobile ? '28px' : '32px', height: isMobile ? '28px' : '32px', cursor: 'pointer', zIndex: '10', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }}>
+              <button 
+                onClick={() => scrollLectures(1)} 
+                style={{ position: 'absolute', right: isMobile ? '4px' : '-12px', backgroundColor: '#3498db', color: 'white', border: 'none', borderRadius: '50%', width: isMobile ? '28px' : '32px', height: isMobile ? '28px' : '32px', cursor: 'pointer', zIndex: '10', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }}
+              >
                 →
               </button>
             )}
@@ -566,7 +555,7 @@ if (loading) {
         )}
       </div>
 
-      {/* Past Lectures - Full Table View (like Admin) */}
+      {/* Past Lectures - Full Table View */}
       <div style={{ marginBottom: '30px' }}>
         <h3 style={{ margin: '0 0 15px 0' }}>
           <span style={{ marginRight: '8px' }}>📜</span>
@@ -682,26 +671,32 @@ if (loading) {
                     </td>
                     <td style={{ padding: '15px' }}>
                       <div style={{ display: 'flex', gap: '8px' }}>
-                        <button onClick={() => handleJoinLecture(lecture)} style={{
-                          backgroundColor: '#f4f4f4',
-                          color: '#333',
-                          border: '1px solid #ddd',
-                          padding: '8px 12px',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                          fontSize: '0.9rem'
-                        }}>
+                        <button 
+                          onClick={() => handleJoinLecture(lecture)} 
+                          style={{
+                            backgroundColor: '#f4f4f4',
+                            color: '#333',
+                            border: '1px solid #ddd',
+                            padding: '8px 12px',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontSize: '0.9rem'
+                          }}
+                        >
                           ℹ️ Details
                         </button>
-                        <button onClick={() => addToCalendar(lecture)} style={{
-                          backgroundColor: '#3498db',
-                          color: 'white',
-                          border: 'none',
-                          padding: '8px 12px',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                          fontSize: '0.9rem'
-                        }}>
+                        <button 
+                          onClick={() => addToCalendar(lecture)} 
+                          style={{
+                            backgroundColor: '#3498db',
+                            color: 'white',
+                            border: 'none',
+                            padding: '8px 12px',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontSize: '0.9rem'
+                          }}
+                        >
                           📅 Add
                         </button>
                       </div>

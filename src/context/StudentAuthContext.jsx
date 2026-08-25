@@ -1,7 +1,8 @@
-// src/context/StudentAuthContext.jsx - 100% FIXED: WITH PASSWORD CHANGE FUNCTION
+// src/context/StudentAuthContext.jsx - WITH CACHE CLEARING
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../services/supabase';
 import { useNavigate } from 'react-router-dom';
+import { dataCache } from '../utils/dataCache';
 
 const StudentAuthContext = createContext({});
 
@@ -92,6 +93,8 @@ export const StudentAuthProvider = ({ children }) => {
       } else {
         setAuthUser(null);
         setUser(null);
+        // Clear cache when session is null
+        dataCache.clear();
       }
 
       // Final: stop loading
@@ -108,6 +111,12 @@ export const StudentAuthProvider = ({ children }) => {
     // Listen to changes
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       console.log('Auth event:', event);
+      
+      // Clear cache on sign out
+      if (event === 'SIGNED_OUT') {
+        dataCache.clear();
+      }
+      
       processSession(session);
     });
 
@@ -129,6 +138,9 @@ export const StudentAuthProvider = ({ children }) => {
   const signIn = async (email, password) => {
     setAuthLoading(true);
     try {
+      // Clear any existing cache before new login
+      dataCache.clear();
+      
       const { error } = await supabase.auth.signInWithPassword({
         email: email.toLowerCase().trim(),
         password,
@@ -146,6 +158,17 @@ export const StudentAuthProvider = ({ children }) => {
     setAuthLoading(true);
     try {
       await supabase.auth.signOut();
+      
+      // Clear all cached data on logout
+      dataCache.clear();
+      
+      // Clear chat history
+      if (user?.email) {
+        localStorage.removeItem(`chat-history-${user.email}`);
+      }
+      
+      console.log('✅ Cache and chat history cleared on logout');
+      
       return { success: true };
     } catch (err) {
       return { success: false };
@@ -154,7 +177,7 @@ export const StudentAuthProvider = ({ children }) => {
     }
   };
 
-  // ADD THIS FUNCTION - Password Change Functionality
+  // Password Change Functionality
   const changePassword = async (currentPassword, newPassword, confirmPassword) => {
     setAuthLoading(true);
     
@@ -240,7 +263,7 @@ export const StudentAuthProvider = ({ children }) => {
     isAuthenticated: !!user,
     signIn,
     signOut,
-    changePassword, // ADD THIS LINE
+    changePassword,
     getCurrentUser: () => user,
   };
 

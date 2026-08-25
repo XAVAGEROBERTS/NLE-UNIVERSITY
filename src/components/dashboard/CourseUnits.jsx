@@ -1,17 +1,17 @@
-import React, { useState, useEffect } from 'react';
+// src/components/dashboard/CourseUnits.jsx
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../services/supabase';
 import { useStudentAuth } from '../../context/StudentAuthContext';
+import { useCachedData } from '../../hooks/useCachedData';
 import './CourseUnits.css';
 
 const CourseUnits = () => {
   const [activeTab, setActiveTab] = useState('current');
   const [completedCourses, setCompletedCourses] = useState({});
   const [courseData, setCourseData] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const { user } = useStudentAuth();
   const [studentInfo, setStudentInfo] = useState(null);
   const [isMobile, setIsMobile] = useState(false);
+  const { user } = useStudentAuth();
 
   // Check screen size
   useEffect(() => {
@@ -25,269 +25,292 @@ const CourseUnits = () => {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  useEffect(() => {
-    if (user?.email) {
-      fetchStudentData();
+  // Main data fetching function for course units
+  const fetchCourseUnitsData = useCallback(async () => {
+    if (!user?.email) {
+      throw new Error('No user logged in');
     }
-  }, [user]);
 
-  const fetchStudentData = async () => {
-    try {
-      setLoading(true);
-      setError(null);
+    console.log('Fetching data for user:', user.email);
 
-      console.log('Fetching data for user:', user.email);
+    // Get student with year of study, semester, program_code, and program_duration_years
+    const { data: student, error: studentError } = await supabase
+      .from('students')
+      .select('id, year_of_study, semester, academic_year, program, program_code, program_duration_years, program_total_semesters')
+      .eq('email', user.email)
+      .single();
 
-      // Get student with year of study, semester, program_code, and program_duration_years
-      const { data: student, error: studentError } = await supabase
-        .from('students')
-        .select('id, year_of_study, semester, academic_year, program, program_code, program_duration_years, program_total_semesters')
-        .eq('email', user.email)
-        .single();
+    if (studentError) {
+      console.error('Student error:', studentError);
+      throw new Error(`Student data error: ${studentError.message}`);
+    }
 
-      if (studentError) {
-        console.error('Student error:', studentError);
-        throw new Error(`Student data error: ${studentError.message}`);
-      }
+    if (!student) {
+      throw new Error('Student not found');
+    }
 
-      if (!student) {
-        throw new Error('Student not found');
-      }
+    console.log('Student found:', student);
 
-      console.log('Student found:', student);
-      setStudentInfo(student);
+    // Calculate total semesters based on program duration
+    const isEngineering = student.program_code === 'BSCE';
+    const totalYears = student.program_duration_years || (isEngineering ? 4 : 3);
+    const totalSemesters = student.program_total_semesters || totalYears * 2;
+    
+    console.log('Program:', student.program_code, 'Total years:', totalYears, 'Total semesters:', totalSemesters);
 
-      // Calculate total semesters based on program duration
-      const isEngineering = student.program_code === 'BSCE';
-      const totalYears = student.program_duration_years || (isEngineering ? 4 : 3);
-      const totalSemesters = student.program_total_semesters || totalYears * 2;
+    // Fetch ALL courses for the student's program
+    const { data: courses, error: coursesError } = await supabase
+      .from('courses')
+      .select('*')
+      .eq('program_code', student.program_code)
+      .eq('is_active', true)
+      .order('year', { ascending: true })
+      .order('semester', { ascending: true })
+      .order('course_code', { ascending: true });
+
+    if (coursesError) {
+      console.error('Courses error:', coursesError);
+      throw new Error(`Courses error: ${coursesError.message}`);
+    }
+
+    console.log('Courses fetched:', courses?.length || 0, 'for program:', student.program_code);
+
+    // If no courses found with exact match, try fallback
+    let finalCourses = courses;
+    if (!finalCourses || finalCourses.length === 0) {
+      console.log('No courses found with exact match, trying broader search...');
       
-      console.log('Program:', student.program_code, 'Total years:', totalYears, 'Total semesters:', totalSemesters);
-
-      // Fetch ALL courses for the student's program
-      const { data: courses, error: coursesError } = await supabase
+      const departmentCode = isEngineering ? 'ENG' : 'SCT';
+      const { data: deptCourses } = await supabase
         .from('courses')
         .select('*')
-        .eq('program_code', student.program_code)
+        .eq('department_code', departmentCode)
         .eq('is_active', true)
-        .order('year', { ascending: true })
-        .order('semester', { ascending: true })
+        .limit(30)
         .order('course_code', { ascending: true });
-
-      if (coursesError) {
-        console.error('Courses error:', coursesError);
-        throw new Error(`Courses error: ${coursesError.message}`);
-      }
-
-      console.log('Courses fetched:', courses?.length || 0, 'for program:', student.program_code);
-
-      // If no courses found with exact match, try fallback
-      let finalCourses = courses;
-      if (!finalCourses || finalCourses.length === 0) {
-        console.log('No courses found with exact match, trying broader search...');
-        
-        const departmentCode = isEngineering ? 'ENG' : 'SCT';
-        const { data: deptCourses } = await supabase
-          .from('courses')
-          .select('*')
-          .eq('department_code', departmentCode)
-          .eq('is_active', true)
-          .limit(30)
-          .order('course_code', { ascending: true });
-        
-        if (deptCourses && deptCourses.length > 0) {
-          finalCourses = deptCourses;
-          console.log('Using', finalCourses.length, 'department courses as fallback');
-        }
-      }
-
-      if (!finalCourses || finalCourses.length === 0) {
-        console.warn('No courses found at all');
-        setCourseData({});
-        setLoading(false);
-        return;
-      }
-
-      // Fetch student's course enrollments and grades
-      const { data: studentCourses, error: scError } = await supabase
-        .from('student_courses')
-        .select('course_id, status, grade, marks')
-        .eq('student_id', student.id);
-
-      if (scError) {
-        console.error('Student courses error:', scError);
-        throw new Error(`Student courses error: ${scError.message}`);
-      }
-
-      console.log('Student courses:', studentCourses?.length || 0);
-
-      // Create completed courses map from database only
-      const completedMap = {};
-      if (studentCourses) {
-        studentCourses.forEach(sc => {
-          if (sc.status === 'completed') {
-            completedMap[sc.course_id] = {
-              completed: true,
-              grade: sc.grade,
-              marks: sc.marks
-            };
-          }
-        });
-      }
-
-      // Use only database data
-      setCompletedCourses(completedMap);
-
-      // Get current year from student data
-      const currentYear = student.year_of_study || 1;
-      const currentSemester = student.semester || 1;
-      console.log('Current year of study:', currentYear, 'Semester:', currentSemester);
-
-      // Create tabs for ALL years in the program
-      const organizedData = {};
       
-      for (let year = 1; year <= totalYears; year++) {
-        let tabKey = '';
-        let title = '';
-        
-        if (year === currentYear) {
-          tabKey = 'current';
-          title = `Year ${year} (Current)`;
-        } else if (year === currentYear - 1) {
-          tabKey = 'previous1';
-          title = `Year ${year}`;
-        } else if (year === currentYear - 2) {
-          tabKey = 'previous2';
-          title = `Year ${year}`;
-        } else if (year === currentYear - 3) {
-          tabKey = 'previous3';
-          title = `Year ${year}`;
-        } else if (year < currentYear) {
-          tabKey = `past${year}`;
-          title = `Year ${year}`;
-        } else if (year > currentYear) {
-          tabKey = `future${year}`;
-          title = `Year ${year}`;
-        } else {
-          tabKey = `year${year}`;
-          title = `Year ${year}`;
-        }
-        
-        organizedData[tabKey] = {
-          title: title,
-          yearNumber: year,
-          semesters: [],
-          academicYear: year === currentYear ? student.academic_year : null,
-          isCurrent: year === currentYear,
-          isPast: year < currentYear,
-          isFuture: year > currentYear
-        };
+      if (deptCourses && deptCourses.length > 0) {
+        finalCourses = deptCourses;
+        console.log('Using', finalCourses.length, 'department courses as fallback');
       }
-      
-      const currentYearKey = Object.keys(organizedData).find(key => 
-        organizedData[key].yearNumber === currentYear
-      ) || Object.keys(organizedData)[0];
-      
-      if (currentYearKey && !activeTab) {
-        setActiveTab(currentYearKey);
-      }
+    }
 
-      // Group courses by year and semester
-      if (finalCourses && finalCourses.length > 0) {
-        finalCourses.forEach(course => {
-          if (course.year >= 1 && course.year <= totalYears) {
-            const tabEntry = Object.entries(organizedData).find(([key, data]) => 
-              data.yearNumber === course.year
-            );
-            
-            if (tabEntry) {
-              const [tabKey, yearData] = tabEntry;
+    if (!finalCourses || finalCourses.length === 0) {
+      console.warn('No courses found at all');
+      return {
+        student,
+        courseData: {},
+        completedCourses: {},
+        totalYears,
+        totalSemesters
+      };
+    }
 
-              let semesterGroup = yearData.semesters.find(s => 
-                s.semesterNumber === course.semester
-              );
-              
-              if (!semesterGroup) {
-                semesterGroup = {
-                  semesterNumber: course.semester,
-                  semester: `Semester ${course.semester}`,
-                  courses: []
-                };
-                yearData.semesters.push(semesterGroup);
-              }
-              
-              const courseExists = semesterGroup.courses.some(c => c.id === course.id);
-              
-              if (!courseExists) {
-                const courseInfo = {
-                  id: course.id,
-                  code: course.course_code,
-                  name: course.course_name,
-                  credits: course.credits,
-                  isCore: course.is_core,
-                  year: course.year,
-                  semester: course.semester,
-                  program: course.program,
-                  program_code: course.program_code,
-                  department: course.department
-                };
+    // Fetch student's course enrollments and grades
+    const { data: studentCourses, error: scError } = await supabase
+      .from('student_courses')
+      .select('course_id, status, grade, marks')
+      .eq('student_id', student.id);
 
-                if (completedMap[course.id]) {
-                  courseInfo.grade = completedMap[course.id].grade;
-                  courseInfo.marks = completedMap[course.id].marks;
-                  courseInfo.completed = true;
-                } else {
-                  courseInfo.completed = false;
-                }
+    if (scError) {
+      console.error('Student courses error:', scError);
+      throw new Error(`Student courses error: ${scError.message}`);
+    }
 
-                semesterGroup.courses.push(courseInfo);
-              }
-            }
-          }
-        });
-      }
+    console.log('Student courses:', studentCourses?.length || 0);
 
-      // Add empty semesters for UI completeness
-      Object.keys(organizedData).forEach(key => {
-        const yearData = organizedData[key];
-        const yearNumber = yearData.yearNumber;
-        
-        for (let semester = 1; semester <= 2; semester++) {
-          const hasSemester = yearData.semesters.some(s => s.semesterNumber === semester);
-          
-          if (!hasSemester) {
-            yearData.semesters.push({
-              semesterNumber: semester,
-              semester: `Semester ${semester}`,
-              courses: [],
-              isEmpty: true
-            });
-          }
-        }
-        
-        yearData.semesters.sort((a, b) => a.semesterNumber - b.semesterNumber);
-        
-        yearData.semesters.forEach(semester => {
-          semester.courses.sort((a, b) => {
-            return a.code.localeCompare(b.code);
-          });
-        });
-        
-        const hasCourses = yearData.semesters.some(semester => semester.courses.length > 0);
-        if (!hasCourses) {
-          delete organizedData[key];
+    // Create completed courses map from database only
+    const completedMap = {};
+    if (studentCourses) {
+      studentCourses.forEach(sc => {
+        if (sc.status === 'completed') {
+          completedMap[sc.course_id] = {
+            completed: true,
+            grade: sc.grade,
+            marks: sc.marks
+          };
         }
       });
-
-      console.log('Organized data:', organizedData);
-      setCourseData(organizedData);
-    } catch (err) {
-      console.error('Error fetching student data:', err);
-      setError(`Failed to load course data: ${err.message}`);
-    } finally {
-      setLoading(false);
     }
-  };
+
+    // Get current year from student data
+    const currentYear = student.year_of_study || 1;
+    const currentSemester = student.semester || 1;
+    console.log('Current year of study:', currentYear, 'Semester:', currentSemester);
+
+    // Create tabs for ALL years in the program
+    const organizedData = {};
+    
+    for (let year = 1; year <= totalYears; year++) {
+      let tabKey = '';
+      let title = '';
+      
+      if (year === currentYear) {
+        tabKey = 'current';
+        title = `Year ${year} (Current)`;
+      } else if (year === currentYear - 1) {
+        tabKey = 'previous1';
+        title = `Year ${year}`;
+      } else if (year === currentYear - 2) {
+        tabKey = 'previous2';
+        title = `Year ${year}`;
+      } else if (year === currentYear - 3) {
+        tabKey = 'previous3';
+        title = `Year ${year}`;
+      } else if (year < currentYear) {
+        tabKey = `past${year}`;
+        title = `Year ${year}`;
+      } else if (year > currentYear) {
+        tabKey = `future${year}`;
+        title = `Year ${year}`;
+      } else {
+        tabKey = `year${year}`;
+        title = `Year ${year}`;
+      }
+      
+      organizedData[tabKey] = {
+        title: title,
+        yearNumber: year,
+        semesters: [],
+        academicYear: year === currentYear ? student.academic_year : null,
+        isCurrent: year === currentYear,
+        isPast: year < currentYear,
+        isFuture: year > currentYear
+      };
+    }
+    
+    const currentYearKey = Object.keys(organizedData).find(key => 
+      organizedData[key].yearNumber === currentYear
+    ) || Object.keys(organizedData)[0];
+
+    // Group courses by year and semester
+    if (finalCourses && finalCourses.length > 0) {
+      finalCourses.forEach(course => {
+        if (course.year >= 1 && course.year <= totalYears) {
+          const tabEntry = Object.entries(organizedData).find(([key, data]) => 
+            data.yearNumber === course.year
+          );
+          
+          if (tabEntry) {
+            const [tabKey, yearData] = tabEntry;
+
+            let semesterGroup = yearData.semesters.find(s => 
+              s.semesterNumber === course.semester
+            );
+            
+            if (!semesterGroup) {
+              semesterGroup = {
+                semesterNumber: course.semester,
+                semester: `Semester ${course.semester}`,
+                courses: []
+              };
+              yearData.semesters.push(semesterGroup);
+            }
+            
+            const courseExists = semesterGroup.courses.some(c => c.id === course.id);
+            
+            if (!courseExists) {
+              const courseInfo = {
+                id: course.id,
+                code: course.course_code,
+                name: course.course_name,
+                credits: course.credits,
+                isCore: course.is_core,
+                year: course.year,
+                semester: course.semester,
+                program: course.program,
+                program_code: course.program_code,
+                department: course.department
+              };
+
+              if (completedMap[course.id]) {
+                courseInfo.grade = completedMap[course.id].grade;
+                courseInfo.marks = completedMap[course.id].marks;
+                courseInfo.completed = true;
+              } else {
+                courseInfo.completed = false;
+              }
+
+              semesterGroup.courses.push(courseInfo);
+            }
+          }
+        }
+      });
+    }
+
+    // Add empty semesters for UI completeness
+    Object.keys(organizedData).forEach(key => {
+      const yearData = organizedData[key];
+      const yearNumber = yearData.yearNumber;
+      
+      for (let semester = 1; semester <= 2; semester++) {
+        const hasSemester = yearData.semesters.some(s => s.semesterNumber === semester);
+        
+        if (!hasSemester) {
+          yearData.semesters.push({
+            semesterNumber: semester,
+            semester: `Semester ${semester}`,
+            courses: [],
+            isEmpty: true
+          });
+        }
+      }
+      
+      yearData.semesters.sort((a, b) => a.semesterNumber - b.semesterNumber);
+      
+      yearData.semesters.forEach(semester => {
+        semester.courses.sort((a, b) => {
+          return a.code.localeCompare(b.code);
+        });
+      });
+      
+      const hasCourses = yearData.semesters.some(semester => semester.courses.length > 0);
+      if (!hasCourses) {
+        delete organizedData[key];
+      }
+    });
+
+    console.log('Organized data:', organizedData);
+
+    return {
+      student,
+      courseData: organizedData,
+      completedCourses: completedMap,
+      totalYears,
+      totalSemesters,
+      currentYearKey
+    };
+  }, [user?.email]);
+
+  // Use cached data hook
+  const { 
+    data: cachedCourseData, 
+    loading, 
+    error,
+    refetch: refetchCourseData 
+  } = useCachedData(
+    `course-units-${user?.id || user?.email}`,
+    fetchCourseUnitsData,
+    {
+      ttl: 15 * 60 * 1000, // 15 minutes cache
+      enabled: !!user?.email,
+      dependencies: [user?.email]
+    }
+  );
+
+  // Update state when cached data changes
+  useEffect(() => {
+    if (cachedCourseData) {
+      setStudentInfo(cachedCourseData.student);
+      setCourseData(cachedCourseData.courseData);
+      setCompletedCourses(cachedCourseData.completedCourses);
+      
+      // Set active tab to current year if not already set
+      if (!activeTab && cachedCourseData.currentYearKey) {
+        setActiveTab(cachedCourseData.currentYearKey);
+      }
+    }
+  }, [cachedCourseData]);
 
   // Render mobile-friendly course card
   const renderMobileCourseCard = (course) => {
@@ -432,7 +455,7 @@ const CourseUnits = () => {
         <div className="cu-error-container">
           <p className="cu-error-message">{error}</p>
           <button 
-            onClick={fetchStudentData}
+            onClick={() => refetchCourseData()}
             className="cu-retry-button"
           >
             Retry
@@ -454,9 +477,35 @@ const CourseUnits = () => {
           gap: 'clamp(6px, 1.5vw, 10px)',
           width: '100%'
         }}>
-          <h2 className="cu-header-title">
-            Course Units
-          </h2>
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '10px'
+          }}>
+            <h2 className="cu-header-title">
+              Course Units
+            </h2>
+            <button 
+              onClick={() => refetchCourseData()}
+              style={{
+                backgroundColor: '#f8f9fa',
+                color: '#333',
+                border: '1px solid #dee2e6',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              <i className="fas fa-sync-alt"></i> Refresh
+            </button>
+          </div>
           {studentInfo && (
             <div className="cu-header-info-row">
               <div className="cu-info-card cu-info-year">
@@ -496,7 +545,7 @@ const CourseUnits = () => {
             </div>
           )}
           <button 
-            onClick={fetchStudentData}
+            onClick={() => refetchCourseData()}
             className="cu-try-again-button"
           >
             Try Again

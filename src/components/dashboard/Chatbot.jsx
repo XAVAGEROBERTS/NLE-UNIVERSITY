@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useStudentAuth } from '../../context/StudentAuthContext';
 import { supabase } from '../../services/supabase';
+import { dataCache } from '../../utils/dataCache';
+import { generateAIResponseWithContext } from '../../services/aiService';
 
 const Chatbot = () => {
   const { user } = useStudentAuth();
@@ -12,13 +14,32 @@ const Chatbot = () => {
   const [studentStats, setStudentStats] = useState(null);
   const [isMobile, setIsMobile] = useState(false);
   const [showQuickQuestions, setShowQuickQuestions] = useState(true);
-  const [gpaData, setGpaData] = useState({
-    gpa: 0.0,
-    cgpa: 0.0,
-    examBasedGpa: 0.0,
-    examBasedCgpa: 0.0
-  });
-  
+
+  // Save chat history to localStorage
+  const saveChatHistory = (chatMessages) => {
+    try {
+      localStorage.setItem(`chat-history-${user?.email}`, JSON.stringify(chatMessages));
+    } catch (error) {
+      console.error('Error saving chat history:', error);
+    }
+  };
+
+  // Load chat history from localStorage
+  const loadChatHistory = () => {
+    try {
+      const saved = localStorage.getItem(`chat-history-${user?.email}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (error) {
+      console.error('Error loading chat history:', error);
+    }
+    return null;
+  };
+
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
   const quickQuestionsRef = useRef(null);
@@ -193,30 +214,28 @@ const Chatbot = () => {
   };
 
   // NEW FUNCTION: Fetch GPA and CGPA from exam results
-  const fetchExamBasedGPA = async (studentId) => {
+  const fetchExamBasedGPA = async (studentId, studentData) => {
     try {
-      // Fetch all graded exam submissions
+      console.log('📊 Fetching exam submissions for student_id:', studentId);
+      
+      // Fetch all graded exam submissions (same as Results.jsx)
       const { data: examSubmissions, error: subError } = await supabase
         .from('exam_submissions')
-        .select(`
-          *,
-          examinations (
-            id,
-            total_marks,
-            course_id,
-            courses (
-              id,
-              credits
-            )
-          )
-        `)
+        .select('*')
         .eq('student_id', studentId)
         .eq('status', 'graded')
         .not('total_marks_obtained', 'is', null);
 
-      if (subError) throw subError;
+      if (subError) {
+        console.error('❌ Exam submissions error:', subError);
+        throw subError;
+      }
+      
+      console.log(`📊 Found ${examSubmissions?.length || 0} graded exam submissions`);
+      
       if (!examSubmissions || examSubmissions.length === 0) {
-        return { gpa: 0.0, cgpa: 0.0 };
+        console.log('📭 No graded submissions found');
+        return { gpa: 0.0, cgpa: 0.0, semesterResults: {}, totalExams: 0, totalCredits: 0 };
       }
 
       // Organize by semester/year for GPA calculation
@@ -250,12 +269,20 @@ const Chatbot = () => {
       // Process each graded exam
       examSubmissions.forEach(submission => {
         const exam = examMap[submission.exam_id];
-        if (!exam || !exam.courses) return;
+        if (!exam || !exam.courses) {
+          console.log('⚠️ No exam found for submission:', submission.exam_id);
+          return;
+        }
 
         const course = exam.courses;
         const credits = course.credits || 3;
-        const grade = getGradeFromMarks(submission.total_marks_obtained);
-        const gradePoints = getGradePoints(grade);
+        // Use database grade_points if available, otherwise calculate
+        const gradePoints = submission.grade_points || 
+                           getGradePoints(submission.grade) || 
+                           getGradePoints(getGradeFromMarks(submission.total_marks_obtained));
+        const grade = submission.grade || getGradeFromMarks(submission.total_marks_obtained);
+        
+        console.log(`📚 Processing: ${course.course_code}, Grade: ${grade}, Points: ${gradePoints}, Credits: ${credits}`);
         
         // Calculate semester key
         const semesterKey = `year${course.year}_sem${course.semester}`;
@@ -330,6 +357,33 @@ const Chatbot = () => {
   const fetchAllStudentData = useCallback(async () => {
     if (!user?.email) return;
 
+    // Check cache first
+    const cacheKey = `chatbot-data-${user.email}`;
+    const cachedData = dataCache.get(cacheKey);
+    
+    if (cachedData) {
+      console.log('✅ Chatbot: CACHE HIT');
+      setStudentData(cachedData.studentData);
+      setStudentStats(cachedData.studentStats);
+      
+      // Load saved chat history
+      const savedHistory = loadChatHistory();
+      if (savedHistory) {
+        console.log('✅ Restored chat history:', savedHistory.length, 'messages');
+        setMessages(savedHistory);
+      } else {
+        const welcomeMessage = {
+          id: 1,
+          text: generateWelcomeMessage(cachedData.studentData, cachedData.studentStats),
+          sender: 'ai',
+          timestamp: new Date()
+        };
+        setMessages([welcomeMessage]);
+      }
+      setIsLoadingInitial(false);
+      return;
+    }
+
     try {
       setIsLoadingInitial(true);
       
@@ -378,7 +432,10 @@ const Chatbot = () => {
       });
 
       // 3. Fetch exam-based GPA and CGPA
-      const examGpaData = await fetchExamBasedGPA(student.id);
+      // IMPORTANT: exam_submissions uses auth user.id, not database student.id
+      const authUserId = user?.id || student.id;
+      console.log('🔑 Fetching exam GPA using student_id:', authUserId);
+      const examGpaData = await fetchExamBasedGPA(authUserId, student);
       
       // 4. Calculate course-based GPA (for comparison)
       const calculateCourseBasedGPA = (courses) => {
@@ -408,22 +465,8 @@ const Chatbot = () => {
       };
 
       const courseBasedGPA = calculateCourseBasedGPA(coursesWithGrades);
-      const courseBasedCGPA = calculateCourseBasedGPA(
-        coursesWithGrades.filter(c => c.status === 'completed')
-      );
 
-      // Set GPA data
-      setGpaData({
-        gpa: examGpaData.gpa || courseBasedGPA,
-        cgpa: examGpaData.cgpa || courseBasedCGPA,
-        examBasedGpa: examGpaData.gpa,
-        examBasedCgpa: examGpaData.cgpa,
-        courseBasedGpa: courseBasedGPA,
-        courseBasedCgpa: courseBasedCGPA,
-        semesterResults: examGpaData.semesterResults,
-        totalExams: examGpaData.totalExams || 0,
-        totalCredits: examGpaData.totalCredits || 0
-      });
+
 
       // 5. Get active courses (not completed)
       const activeCourses = coursesWithGrades.filter(c => c.status !== 'completed') || [];
@@ -440,7 +483,10 @@ const Chatbot = () => {
         .select('*')
         .eq('student_id', student.id)
         .eq('academic_year', student.academic_year)
-        .order('payment_date', { ascending: false });
+        .order('semester', { ascending: true })
+        .order('created_at', { ascending: true });
+
+      console.log('💰 ALL FINANCE RECORDS:', finance);
 
       const { data: attendance } = await supabase
         .from('attendance_records')
@@ -492,11 +538,11 @@ const Chatbot = () => {
         // GPA data
         gpa: {
           currentGPA: examGpaData.gpa || courseBasedGPA,
-          currentCGPA: examGpaData.cgpa || courseBasedCGPA,
+          currentCGPA: examGpaData.cgpa || courseBasedGPA,
           examBasedGPA: examGpaData.gpa,
           examBasedCGPA: examGpaData.cgpa,
           courseBasedGPA: courseBasedGPA,
-          courseBasedCGPA: courseBasedCGPA,
+          courseBasedCGPA: courseBasedGPA,
           semesterResults: examGpaData.semesterResults,
           totalGradedExams: examGpaData.totalExams || 0,
           totalCredits: examGpaData.totalCredits || 0
@@ -567,19 +613,57 @@ const Chatbot = () => {
           ) || [])
         },
 
-        // Financial statistics
+        // Financial statistics - COMPLETE breakdown
         finance: {
-          totalPaid: finance?.filter(f => f.status === 'paid').reduce((sum, f) => sum + (f.amount || 0), 0) || 0,
-          totalPending: finance?.filter(f => f.status === 'pending').reduce((sum, f) => sum + (f.amount || 0), 0) || 0,
-          totalPartial: finance?.filter(f => f.status === 'partial').reduce((sum, f) => sum + (f.balance_due || 0), 0) || 0,
+          totalPaid: finance?.filter(f => f.status === 'paid').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
+          totalPending: finance?.filter(f => f.status === 'pending').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
+          totalPartial: finance?.filter(f => f.status === 'partial').reduce((sum, f) => sum + (parseFloat(f.balance_due) || parseFloat(f.amount) || 0), 0) || 0,
           overdue: finance?.filter(f => 
             f.due_date && 
             new Date(f.due_date) < new Date() && 
             f.status !== 'paid'
           ).length || 0,
-          recent: finance?.slice(0, 5) || [],
-          scholarships: finance?.filter(f => f.type === 'scholarship').reduce((sum, f) => sum + (f.amount || 0), 0) || 0,
-          fines: finance?.filter(f => f.type === 'fine').reduce((sum, f) => sum + (f.amount || 0), 0) || 0
+          allFees: finance?.map(f => ({
+            id: f.id,
+            description: f.description || f.category || f.fee_type || 'Fee',
+            feeType: f.category || f.fee_type || 'tuition',
+            amount: parseFloat(f.amount) || 0,
+            balanceDue: parseFloat(f.balance_due) || 0,
+            status: f.status,
+            semester: f.semester || 1,
+            paymentDate: f.payment_date,
+            dueDate: f.due_date,
+            receiptNumber: f.receipt_number,
+            paymentMethod: f.payment_method
+          })) || [],
+          tuition: {
+            amount: finance?.filter(f => (f.category === 'tuition' || f.fee_type === 'tuition')).reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
+            paid: finance?.filter(f => (f.category === 'tuition' || f.fee_type === 'tuition') && f.status === 'paid').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
+            pending: finance?.filter(f => (f.category === 'tuition' || f.fee_type === 'tuition') && f.status !== 'paid').reduce((sum, f) => sum + (parseFloat(f.balance_due) || parseFloat(f.amount) || 0), 0) || 0,
+            semester1: finance?.filter(f => (f.category === 'tuition' || f.fee_type === 'tuition') && f.semester === 1).map(f => ({ amount: parseFloat(f.amount) || 0, status: f.status, paidDate: f.payment_date })) || [],
+            semester2: finance?.filter(f => (f.category === 'tuition' || f.fee_type === 'tuition') && f.semester === 2).map(f => ({ amount: parseFloat(f.amount) || 0, status: f.status, paidDate: f.payment_date })) || []
+          },
+          functional: {
+            amount: finance?.filter(f => f.category === 'functional').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
+            paid: finance?.filter(f => f.category === 'functional' && f.status === 'paid').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
+            pending: finance?.filter(f => f.category === 'functional' && f.status !== 'paid').reduce((sum, f) => sum + (parseFloat(f.balance_due) || parseFloat(f.amount) || 0), 0) || 0
+          },
+          guild: {
+            amount: finance?.filter(f => f.category === 'guild').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
+            paid: finance?.filter(f => f.category === 'guild' && f.status === 'paid').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
+            pending: finance?.filter(f => f.category === 'guild' && f.status !== 'paid').reduce((sum, f) => sum + (parseFloat(f.balance_due) || parseFloat(f.amount) || 0), 0) || 0
+          },
+          nche: {
+            amount: finance?.filter(f => f.category === 'nche').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
+            paid: finance?.filter(f => f.category === 'nche' && f.status === 'paid').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0
+          },
+          registration: {
+            amount: finance?.filter(f => f.category === 'registration').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
+            paid: finance?.filter(f => f.category === 'registration' && f.status === 'paid').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0
+          },
+          recent: finance?.slice(0, 10) || [],
+          scholarships: finance?.filter(f => f.type === 'scholarship' || f.category === 'scholarship').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
+          fines: finance?.filter(f => f.type === 'fine' || f.category === 'fine').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0
         },
 
         // Attendance statistics
@@ -630,15 +714,27 @@ const Chatbot = () => {
 
       setStudentStats(processedStats);
 
-      // Initialize welcome message
-      const welcomeMessage = {
-        id: 1,
-        text: generateWelcomeMessage(student, processedStats),
-        sender: 'ai',
-        timestamp: new Date()
-      };
+      // Save to cache for 10 minutes
+      dataCache.set(`chatbot-data-${user.email}`, {
+        studentData: student,
+        studentStats: processedStats
+      }, 10 * 60 * 1000);
 
-      setMessages([welcomeMessage]);
+      // Check if there's saved chat history
+      const savedHistory = loadChatHistory();
+      if (savedHistory) {
+        console.log('✅ Restored chat history:', savedHistory.length, 'messages');
+        setMessages(savedHistory);
+      } else {
+        // Initialize welcome message
+        const welcomeMessage = {
+          id: 1,
+          text: generateWelcomeMessage(student, processedStats),
+          sender: 'ai',
+          timestamp: new Date()
+        };
+        setMessages([welcomeMessage]);
+      }
       
     } catch (error) {
       console.error('Error in fetchAllStudentData:', error);
@@ -651,6 +747,7 @@ const Chatbot = () => {
     } finally {
       setIsLoadingInitial(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.email]);
 
   // Helper functions (keep existing ones, add missing ones)
@@ -1156,7 +1253,7 @@ Wishing you all the best in your studies! Come back anytime! 📚✨`;
     if (queryType === 'cgpa') {
       const cgpaData = studentStats.gpa;
       const examBasedCGPA = cgpaData.examBasedCGPA || cgpaData.currentCGPA;
-      const courseBasedCGPA = cgpaData.courseBasedCGPA;
+   
       
       let sourceInfo = '';
       if (cgpaData.totalGradedExams > 0) {
@@ -1476,7 +1573,6 @@ ${randomEncouragement}
 "How are you doing today?"`;
   };
 
-  // Event handlers
   const handleSendMessage = async () => {
     if (!inputText.trim() || isLoading) return;
 
@@ -1487,13 +1583,33 @@ ${randomEncouragement}
       timestamp: new Date()
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    setMessages(prev => {
+      const updated = [...prev, userMessage];
+      saveChatHistory(updated);
+      return updated;
+    });
     setInputText('');
     setIsLoading(true);
 
-    // Simulate AI thinking time
-    setTimeout(() => {
-      const aiResponse = generateAIResponse(inputText);
+    try {
+      // Build conversation history from last 6 messages (3 exchanges)
+      const conversationHistory = messages
+        .filter(msg => msg.text && msg.text.length > 0)
+        .slice(-6)
+        .map(msg => ({
+          role: msg.sender === 'user' ? 'user' : 'assistant',
+          content: msg.text.substring(0, 300)
+        }));
+
+      console.log('📝 Sending conversation history:', conversationHistory.length, 'messages');
+
+      // Use Groq AI with conversation history
+      const aiResponse = await generateAIResponseWithContext(
+        inputText, 
+        studentStats, 
+        studentData,
+        conversationHistory
+      );
       
       const aiMessage = {
         id: messages.length + 2,
@@ -1502,14 +1618,31 @@ ${randomEncouragement}
         timestamp: new Date()
       };
       
-      setMessages(prev => [...prev, aiMessage]);
+      setMessages(prev => {
+        const updated = [...prev, aiMessage];
+        saveChatHistory(updated);
+        return updated;
+      });
+    } catch (error) {
+      console.error('AI response error, using fallback:', error);
+      const aiResponse = generateAIResponse(inputText);
+      const aiMessage = {
+        id: messages.length + 2,
+        text: aiResponse,
+        sender: 'ai',
+        timestamp: new Date()
+      };
+      setMessages(prev => {
+        const updated = [...prev, aiMessage];
+        saveChatHistory(updated);
+        return updated;
+      });
+    } finally {
       setIsLoading(false);
-      
-      // Auto-scroll to bottom
       setTimeout(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       }, 100);
-    }, 600);
+    }
   };
 
   const handleKeyPress = (e) => {
@@ -1521,12 +1654,14 @@ ${randomEncouragement}
 
   const handleClearChat = () => {
     if (studentData && studentStats) {
-      setMessages([{
+      const welcomeMessage = {
         id: 1,
         text: generateWelcomeMessage(studentData, studentStats),
         sender: 'ai',
         timestamp: new Date()
-      }]);
+      };
+      setMessages([welcomeMessage]);
+      saveChatHistory([welcomeMessage]);
     }
   };
 
@@ -1566,8 +1701,10 @@ ${randomEncouragement}
 
   // Fetch data on mount
   useEffect(() => {
+    // Clear chatbot cache to get fresh data
+    dataCache.delete(`chatbot-data-${user?.email}`);
     fetchAllStudentData();
-  }, [fetchAllStudentData]);
+  }, [fetchAllStudentData, user?.email]);
 
   // Loading state
   if (isLoadingInitial) {

@@ -2,18 +2,17 @@ import React, { useState, useEffect } from 'react';
 import { useStudentAuth } from '../../context/StudentAuthContext';
 import { supabase } from '../../services/supabase';
 import { useNavigate } from 'react-router-dom';
+import { dataCache } from '../../utils/dataCache';
 
 const Settings = () => {
   const { 
     user: authUser, 
     signOut, 
-    loading: authLoading,
-    changePassword 
+    loading: authLoading
   } = useStudentAuth();
   const navigate = useNavigate();
   
   // Main state
-  const [isLoading, setIsLoading] = useState(true);
   const [studentData, setStudentData] = useState(null);
   const [profileData, setProfileData] = useState(null);
   const [academicStats, setAcademicStats] = useState({
@@ -269,9 +268,20 @@ const Settings = () => {
     const fetchStudentData = async () => {
       if (!authUser?.email) return;
       
+      // Check cache first
+      const cacheKey = `settings-data-${authUser.email}`;
+      const cachedData = dataCache.get(cacheKey);
+      
+      if (cachedData) {
+        console.log('✅ Settings: CACHE HIT');
+        setStudentData(cachedData.studentData);
+        setProfileData(cachedData.profileData);
+        setAcademicStats(cachedData.academicStats);
+        setFormData(cachedData.formData);
+        return;
+      }
+      
       try {
-        setIsLoading(true);
-        
         // Fetch student record
         console.log('👤 Fetching student data for email:', authUser.email);
         const { data: student, error: studentError } = await supabase
@@ -368,17 +378,31 @@ const Settings = () => {
         console.log('📊 Fetching academic statistics...');
         await fetchAcademicStats(student.id);
 
+        // Save to cache for 10 minutes
+        dataCache.set(`settings-data-${authUser.email}`, {
+          studentData: student,
+          profileData: profileData,
+          academicStats: academicStats,
+          formData: {
+            phone: student.phone || '',
+            address: profileData?.address || '',
+            city: profileData?.city || '',
+            country: profileData?.country || 'Uganda',
+            emergency_contact_name: profileData?.emergency_contact_name || '',
+            emergency_contact_phone: profileData?.emergency_contact_phone || ''
+          }
+        }, 10 * 60 * 1000);
+
       } catch (error) {
         console.error('❌ Error fetching student data:', error);
         setMessage({ type: 'error', text: 'Failed to load data: ' + error.message });
-      } finally {
-        setIsLoading(false);
       }
     };
 
     if (authUser) {
       fetchStudentData();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authUser]);
 
   // Fetch academic statistics
@@ -681,7 +705,7 @@ const Settings = () => {
       }
 
       // Verify current password
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      const { error: authError } = await supabase.auth.signInWithPassword({
         email: userEmail,
         password: passwordForm.currentPassword
       });
@@ -776,7 +800,7 @@ const Settings = () => {
   };
 
   // Loading state
-  if (authLoading || isLoading) {
+  if (authLoading && !studentData) {
     return (
       <div className="settings-container">
         <div className="settings-header">

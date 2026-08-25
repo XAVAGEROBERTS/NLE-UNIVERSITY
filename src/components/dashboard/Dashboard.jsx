@@ -1,6 +1,8 @@
+// src/components/dashboard/Dashboard.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useStudentAuth } from '../../context/StudentAuthContext';
 import { supabase } from '../../services/supabase';
+import { useCachedData } from '../../hooks/useCachedData';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -62,42 +64,42 @@ const Dashboard = () => {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-const getGradePoints = (grade) => {
-  if (!grade) return 0.0;
-  const gradeMap = {
-    'A+': 5.0,
-    'A': 5.0,
-    'B+': 4.5,
-    'B': 4.0,
-    'C+': 3.5,
-    'C': 3.0,
-    'D+': 2.5,
-    'D': 2.0,
-    'F': 0.0
+  const getGradePoints = (grade) => {
+    if (!grade) return 0.0;
+    const gradeMap = {
+      'A+': 5.0,
+      'A': 5.0,
+      'B+': 4.5,
+      'B': 4.0,
+      'C+': 3.5,
+      'C': 3.0,
+      'D+': 2.5,
+      'D': 2.0,
+      'F': 0.0
+    };
+    return gradeMap[grade.toUpperCase()] || 0.0;
   };
-  return gradeMap[grade.toUpperCase()] || 0.0;
-};
 
-const getGradeFromMarks = (marks) => {
-  if (!marks && marks !== 0) return 'N/A';
-  const numericMarks = parseFloat(marks);
-  if (isNaN(numericMarks)) return 'N/A';
+  const getGradeFromMarks = (marks) => {
+    if (!marks && marks !== 0) return 'N/A';
+    const numericMarks = parseFloat(marks);
+    if (isNaN(numericMarks)) return 'N/A';
 
-  if (numericMarks >= 90) return 'A+';
-  if (numericMarks >= 80) return 'A';
-  if (numericMarks >= 75) return 'B+';
-  if (numericMarks >= 70) return 'B';
-  if (numericMarks >= 65) return 'C+';
-  if (numericMarks >= 60) return 'C';
-  if (numericMarks >= 55) return 'D+';
-  if (numericMarks >= 50) return 'D';
-  return 'F';  // Below 50%
-};
-  // Calculate GPA from completed courses (updated to match Results component)
+    if (numericMarks >= 90) return 'A+';
+    if (numericMarks >= 80) return 'A';
+    if (numericMarks >= 75) return 'B+';
+    if (numericMarks >= 70) return 'B';
+    if (numericMarks >= 65) return 'C+';
+    if (numericMarks >= 60) return 'C';
+    if (numericMarks >= 55) return 'D+';
+    if (numericMarks >= 50) return 'D';
+    return 'F';
+  };
+
+  // Calculate GPA from completed courses
   const calculateGPA = (studentCourses) => {
     if (!studentCourses || studentCourses.length === 0) return 0.0;
     
-    // Filter completed courses with grades
     const completedCourses = studentCourses.filter(
       course => course.status === 'completed' && (course.grade || course.marks)
     );
@@ -148,97 +150,82 @@ const getGradeFromMarks = (marks) => {
     return { years: 4, semesters: 8 };
   };
 
-  // Fetch all dashboard data
-  useEffect(() => {
-    const fetchDashboardData = async () => {
-      try {
-        setLoading(true);
+  // Main data fetching function for dashboard
+  const fetchDashboardData = useCallback(async () => {
+    if (!user?.email) {
+      throw new Error('No user logged in');
+    }
 
-        if (!user?.email) {
-          console.error('No user logged in');
-          setLoading(false);
-          return;
-        }
+    // 1. Fetch student details
+    const { data: student, error: studentError } = await supabase
+      .from('students')
+      .select('*')
+      .eq('email', user.email)
+      .single();
 
-        // 1. Fetch student details
-        const { data: student, error: studentError } = await supabase
-          .from('students')
-          .select('*')
-          .eq('email', user.email)
-          .single();
+    if (studentError || !student) {
+      throw new Error('Student not found');
+    }
 
-        if (studentError || !student) {
-          console.error('Student not found:', studentError);
-          setLoading(false);
-          return;
-        }
+    // Default values in case anything fails
+    let attendanceArray = [1, 1, 0, 1, 1];
+    let semesterAttendanceRate = 0;
+    let localSemesterTotalDays = 0;
+    let localSemesterPresentDays = 0;
+    let pendingAssignmentsCount = 0;
+    let upcomingExamsCount = 0;
+    let cgpa = 0.0;
 
-        setStudentDetails(student);
+    // 2. Fetch courses for GPA and active course filtering
+    const { data: studentCourses = [] } = await supabase
+      .from('student_courses')
+      .select(`
+        *,
+        courses (id, course_code, course_name, credits, year, semester)
+      `)
+      .eq('student_id', student.id);
 
-        // Default values in case anything fails
-        let attendanceArray = [1, 1, 0, 1, 1]; // for chart
-        let semesterAttendanceRate = 0;
-        let localSemesterTotalDays = 0;
-        let localSemesterPresentDays = 0;
-        let pendingAssignmentsCount = 0;
-        let upcomingExamsCount = 0;
-        let cgpa = 0.0;
+    // Calculate CGPA
+    const coursesWithGrades = studentCourses.map(sc => ({
+      ...sc,
+      grade: sc.grade || getGradeFromMarks(sc.marks),
+      grade_points: sc.grade_points || getGradePoints(sc.grade || getGradeFromMarks(sc.marks)),
+      credits: sc.courses?.credits || 3
+    }));
+    cgpa = calculateGPA(coursesWithGrades);
 
-        // 2. Fetch courses for GPA and active course filtering
-        const { data: studentCourses = [] } = await supabase
-          .from('student_courses')
-          .select(`
-            *,
-            courses (id, course_code, course_name, credits, year, semester)
-          `)
-          .eq('student_id', student.id);
+    // Get active (non-completed) course IDs
+    const activeCourseIds = studentCourses
+      .filter(c => c.status !== 'completed')
+      .map(sc => sc.course_id)
+      .filter(Boolean);
 
-        // Calculate CGPA
-        const coursesWithGrades = studentCourses.map(sc => ({
-          ...sc,
-          grade: sc.grade || getGradeFromMarks(sc.marks),
-          grade_points: sc.grade_points || getGradePoints(sc.grade || getGradeFromMarks(sc.marks)),
-          credits: sc.courses?.credits || 3
-        }));
-        cgpa = calculateGPA(coursesWithGrades);
+    // 3. Semester attendance (last ~4 months)
+    const semesterStart = new Date();
+    semesterStart.setMonth(semesterStart.getMonth() - 4);
+    semesterStart.setDate(1);
 
-        // Get active (non-completed) course IDs
-        const activeCourseIds = studentCourses
-          .filter(c => c.status !== 'completed')
-          .map(sc => sc.course_id)
-          .filter(Boolean);
+    const { data: semesterRecords = [] } = await supabase
+      .from('attendance_records')
+      .select('date, status')
+      .eq('student_id', student.id)
+      .gte('date', semesterStart.toISOString().split('T')[0]);
 
-        // 3. Semester attendance (last ~4 months)
-        const semesterStart = new Date();
-        semesterStart.setMonth(semesterStart.getMonth() - 4);
-        semesterStart.setDate(1);
+    localSemesterTotalDays = semesterRecords.length;
+    localSemesterPresentDays = semesterRecords.filter(r => r.status === 'present').length;
+    semesterAttendanceRate = localSemesterTotalDays > 0
+      ? Math.round((localSemesterPresentDays / localSemesterTotalDays) * 100)
+      : 0;
 
-        const { data: semesterRecords = [] } = await supabase
-          .from('attendance_records')
-          .select('date, status')
-          .eq('student_id', student.id)
-          .gte('date', semesterStart.toISOString().split('T')[0]);
-
-        localSemesterTotalDays = semesterRecords.length;
-        localSemesterPresentDays = semesterRecords.filter(r => r.status === 'present').length;
-        semesterAttendanceRate = localSemesterTotalDays > 0
-          ? Math.round((localSemesterPresentDays / localSemesterTotalDays) * 100)
-          : 0;
-
-        // Set semester state
-        setSemesterTotalDays(localSemesterTotalDays);
-        setSemesterPresentDays(localSemesterPresentDays);
-
-        
-          // 4. Current week attendance for chart (Monday to Sunday)
+    // 4. Current week attendance for chart
     const today = new Date();
-    const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    const dayOfWeek = today.getDay();
     const startOfWeek = new Date(today);
-    startOfWeek.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1)); // Monday
+    startOfWeek.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
     startOfWeek.setHours(0, 0, 0, 0);
 
     const endOfWeek = new Date(startOfWeek);
-    endOfWeek.setDate(startOfWeek.getDate() + 6); // Sunday
+    endOfWeek.setDate(startOfWeek.getDate() + 6);
     endOfWeek.setHours(23, 59, 59, 999);
 
     const { data: weekRecords = [] } = await supabase
@@ -249,128 +236,151 @@ const getGradeFromMarks = (marks) => {
       .lte('date', endOfWeek.toISOString().split('T')[0])
       .order('date', { ascending: true });
 
-    // Create attendance array: index 0 = Monday, 6 = Sunday
     const weekDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     const attendanceMap = {};
     weekRecords.forEach(record => {
       const date = new Date(record.date);
-      const dayIndex = date.getDay(); // 0=Sun → adjust to 0=Mon
+      const dayIndex = date.getDay();
       const adjustedIndex = dayIndex === 0 ? 6 : dayIndex - 1;
       attendanceMap[adjustedIndex] = record.status === 'present' ? 1 : 0;
     });
 
-    // Build final array: 1 = present, 0 = absent, null = no lecture that day
     attendanceArray = weekDays.map((_, index) => attendanceMap[index] ?? null);
 
-    // For chart: treat null (no lecture) as neutral (e.g., 0.5 or keep as null for styling)
-    attendanceArray = weekDays.map((_, index) => attendanceMap[index] ?? null);
-        // 5. Pending assignments (only active courses)
-        if (activeCourseIds.length > 0) {
-          const { data: assignments = [] } = await supabase
-            .from('assignments')
-            .select('id')
-            .in('course_id', activeCourseIds)
-            .eq('status', 'published')
-            .gt('due_date', new Date().toISOString());
+    // 5. Pending assignments
+    if (activeCourseIds.length > 0) {
+      const { data: assignments = [] } = await supabase
+        .from('assignments')
+        .select('id')
+        .in('course_id', activeCourseIds)
+        .eq('status', 'published')
+        .gt('due_date', new Date().toISOString());
 
-          pendingAssignmentsCount = assignments.length;
-        }
+      pendingAssignmentsCount = assignments.length;
+    }
 
-        // 6. Upcoming exams (only active courses)
-        if (activeCourseIds.length > 0) {
-          const { data: exams = [] } = await supabase
-            .from('examinations')
-            .select('id')
-            .in('course_id', activeCourseIds)
-            .eq('status', 'published')
-            .gt('start_time', new Date().toISOString());
+    // 6. Upcoming exams
+    if (activeCourseIds.length > 0) {
+      const { data: exams = [] } = await supabase
+        .from('examinations')
+        .select('id')
+        .in('course_id', activeCourseIds)
+        .eq('status', 'published')
+        .gt('start_time', new Date().toISOString());
 
-          upcomingExamsCount = exams.length;
-        }
+      upcomingExamsCount = exams.length;
+    }
 
-        // 7. Financial summary
-        const { data: financial = [] } = await supabase
-          .from('financial_records')
-          .select('amount, balance_due, status')
-          .eq('student_id', student.id)
-          .eq('academic_year', student.academic_year);
+    // 7. Financial summary
+    const { data: financial = [] } = await supabase
+      .from('financial_records')
+      .select('amount, balance_due, status')
+      .eq('student_id', student.id)
+      .eq('academic_year', student.academic_year);
 
-        const financialSummary = {
-          paid: financial.filter(f => f.status === 'paid').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0),
-          balance: financial.filter(f => f.status === 'partial' || f.status === 'pending')
-            .reduce((sum, f) => sum + (parseFloat(f.balance_due || f.amount) || 0), 0)
-        };
+    const financialSummary = {
+      paid: financial.filter(f => f.status === 'paid').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0),
+      balance: financial.filter(f => f.status === 'partial' || f.status === 'pending')
+        .reduce((sum, f) => sum + (parseFloat(f.balance_due || f.amount) || 0), 0)
+    };
 
-        // 8. Upcoming lectures (this week, active courses only)
-         // 8. Upcoming lectures (this week, active courses only)
+    // 8. Upcoming lectures
     const currentDate = new Date();
     const nextWeek = new Date(currentDate);
     nextWeek.setDate(currentDate.getDate() + 7);
-        let formattedLectures = [];
-        if (activeCourseIds.length > 0) {
-          const { data: lectures = [] } = await supabase
-            .from('lectures')
-            .select(`
-              *,
-              courses(course_code, course_name),
-              lecturers(full_name)
-            `)
-            .in('course_id', activeCourseIds)
-            .gte('scheduled_date', today.toISOString().split('T')[0])
-            .lte('scheduled_date', nextWeek.toISOString().split('T')[0])
-            .in('status', ['scheduled', 'ongoing'])
-            .order('scheduled_date')
-            .order('start_time');
+    let formattedLectures = [];
+    
+    if (activeCourseIds.length > 0) {
+      const { data: lectures = [] } = await supabase
+        .from('lectures')
+        .select(`
+          *,
+          courses(course_code, course_name),
+          lecturers(full_name)
+        `)
+        .in('course_id', activeCourseIds)
+        .gte('scheduled_date', today.toISOString().split('T')[0])
+        .lte('scheduled_date', nextWeek.toISOString().split('T')[0])
+        .in('status', ['scheduled', 'ongoing'])
+        .order('scheduled_date')
+        .order('start_time');
 
-          formattedLectures = lectures.map(l => ({
-            id: l.id,
-            title: l.courses?.course_name || l.title || 'Lecture',
-            date: l.scheduled_date,
-            time: l.start_time || '09:00',
-            endTime: l.end_time || '11:00',
-            lecturer: l.lecturers?.full_name || 'Unknown',
-            duration: 120,
-            courseCode: l.courses?.course_code || 'N/A',
-            google_meet_link: l.google_meet_link,
-            status: l.status
-          }));
-        }
+      formattedLectures = lectures.map(l => ({
+        id: l.id,
+        title: l.courses?.course_name || l.title || 'Lecture',
+        date: l.scheduled_date,
+        time: l.start_time || '09:00',
+        endTime: l.end_time || '11:00',
+        lecturer: l.lecturers?.full_name || 'Unknown',
+        duration: 120,
+        courseCode: l.courses?.course_code || 'N/A',
+        google_meet_link: l.google_meet_link,
+        status: l.status
+      }));
+    }
 
-        // Program progress
-        const programDuration = getProgramDuration(student.program);
-        const completedSemesters = ((student.year_of_study - 1) * 2) + (student.semester - 1);
-        const programProgress = Math.min(Math.round((completedSemesters / programDuration.semesters) * 100), 100);
+    // Program progress
+    const programDuration = getProgramDuration(student.program);
+    const completedSemesters = ((student.year_of_study - 1) * 2) + (student.semester - 1);
+    const programProgress = Math.min(Math.round((completedSemesters / programDuration.semesters) * 100), 100);
 
-        // Final state updates
-        setAttendanceData(attendanceArray);
-
-        setDashboardStats({
-          programProgress,
-          pendingAssignments: pendingAssignmentsCount,
-          upcomingExams: upcomingExamsCount,
-          financialPaid: financialSummary.paid,
-          financialBalance: financialSummary.balance,
-          cgpa,
-          attendanceRate: semesterAttendanceRate
-        });
-
-        setUpcomingLectures(formattedLectures);
-
-      } catch (error) {
-        console.error('Error in fetchDashboardData:', error);
-        // Safe fallback
-        setAttendanceData([1, 1, 0, 1, 1]);
-        setDashboardStats(prev => ({
-          ...prev,
-          attendanceRate: 0
-        }));
-      } finally {
-        setLoading(false);
-      }
+    // Return all data for caching
+    return {
+      student,
+      studentCourses,
+      attendanceArray,
+      semesterAttendanceRate,
+      localSemesterTotalDays,
+      localSemesterPresentDays,
+      pendingAssignmentsCount,
+      upcomingExamsCount,
+      cgpa,
+      financialSummary,
+      formattedLectures,
+      programProgress
     };
+  }, [user?.email]);
 
-    fetchDashboardData();
-  }, [user]);
+  // Use cached data hook
+  const { 
+    data: cachedDashboardData, 
+    loading: dataLoading, 
+    error: dataError,
+    refetch: refetchDashboard 
+  } = useCachedData(
+    `dashboard-${user?.id || user?.email}`,
+    fetchDashboardData,
+    {
+      ttl: 10 * 60 * 1000, // 10 minutes cache
+      enabled: !!user?.email,
+      dependencies: [user?.email]
+    }
+  );
+
+  // Update state when cached data changes
+  useEffect(() => {
+    if (cachedDashboardData) {
+      setStudentDetails(cachedDashboardData.student);
+      setAttendanceData(cachedDashboardData.attendanceArray);
+      setSemesterTotalDays(cachedDashboardData.localSemesterTotalDays);
+      setSemesterPresentDays(cachedDashboardData.localSemesterPresentDays);
+      setDashboardStats({
+        programProgress: cachedDashboardData.programProgress,
+        pendingAssignments: cachedDashboardData.pendingAssignmentsCount,
+        upcomingExams: cachedDashboardData.upcomingExamsCount,
+        financialPaid: cachedDashboardData.financialSummary.paid,
+        financialBalance: cachedDashboardData.financialSummary.balance,
+        cgpa: cachedDashboardData.cgpa,
+        attendanceRate: cachedDashboardData.semesterAttendanceRate
+      });
+      setUpcomingLectures(cachedDashboardData.formattedLectures);
+    }
+  }, [cachedDashboardData]);
+
+  // Update loading state
+  useEffect(() => {
+    setLoading(dataLoading);
+  }, [dataLoading]);
 
   // Initialize attendance chart
   const initializeAttendanceChart = useCallback(() => {
@@ -391,7 +401,7 @@ const getGradeFromMarks = (marks) => {
           labels: weekDays,
           datasets: [{
             label: 'This Week',
-            data: attendanceData.map(val => val === null ? null : val), // null = no lecture
+            data: attendanceData.map(val => val === null ? null : val),
             backgroundColor: 'rgba(46, 204, 113, 0.3)',
             borderColor: 'rgba(46, 204, 113, 1)',
             borderWidth: 2,
@@ -400,7 +410,7 @@ const getGradeFromMarks = (marks) => {
             pointBackgroundColor: attendanceData.map(val => 
               val === 1 ? 'rgba(46, 204, 113, 1)' : 
               val === 0 ? 'rgba(231, 76, 60, 1)' : 
-              'rgba(150, 150, 150, 0.6)' // grey for no lecture
+              'rgba(150, 150, 150, 0.6)'
             ),
             pointBorderColor: '#fff',
             pointBorderWidth: 2,
@@ -917,7 +927,7 @@ const getGradeFromMarks = (marks) => {
     </div>
   );
 
-  // Safe attendance stats calculation - always defined
+  // Safe attendance stats calculation
   const attendanceStats = calculateAttendanceStats(
     attendanceData,
     dashboardStats.attendanceRate,
@@ -959,7 +969,10 @@ const getGradeFromMarks = (marks) => {
     <div className="content" style={{ padding: 'clamp(10px, 3vw, 20px)' }}>
       {/* Dashboard Header */}
       <div className="dashboard-header" style={{
-        marginBottom: 'clamp(20px, 4vw, 30px)'
+        marginBottom: 'clamp(20px, 4vw, 30px)',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start'
       }}>
         <div style={{
           display: 'flex',
@@ -985,6 +998,24 @@ const getGradeFromMarks = (marks) => {
             })}
           </div>
         </div>
+        <button 
+          onClick={() => refetchDashboard()}
+          style={{
+            backgroundColor: '#f8f9fa',
+            color: '#333',
+            border: '1px solid #dee2e6',
+            padding: '8px 12px',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontSize: '14px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            whiteSpace: 'nowrap'
+          }}
+        >
+          <i className="fas fa-sync-alt"></i> Refresh
+        </button>
       </div>
 
       {/* Dashboard Cards - Responsive Grid */}
@@ -1130,7 +1161,6 @@ const getGradeFromMarks = (marks) => {
                 <i className="fas fa-user-check" style={{ color: '#2ecc71', fontSize: 'clamp(16px, 3vw, 20px)' }}></i>
               </div>
             </div>
-            {/* Edit button removed - admin will edit directly from Supabase table */}
           </div>
           <div className="card-content" style={{ flex: '1' }}>
             <p id="attendanceSummary" style={{ 
@@ -1191,8 +1221,6 @@ const getGradeFromMarks = (marks) => {
                 ></canvas>
               </div>
             )}
-            
-            {/* Admin controls removed - admin will edit directly from Supabase table */}
           </div>
         </div>
 
@@ -1405,7 +1433,48 @@ const getGradeFromMarks = (marks) => {
           </div>
         </div>
 
-        
+        {/* CGPA */}
+        <div className="stat-card" style={{
+          backgroundColor: 'white',
+          padding: 'clamp(15px, 3vw, 20px)',
+          borderRadius: '12px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <h4 style={{ 
+                margin: '0 0 5px 0', 
+                color: '#666',
+                fontSize: 'clamp(0.9rem, 2.2vw, 1rem)'
+              }}>
+                CGPA
+              </h4>
+              <p style={{ 
+                margin: 0, 
+                fontSize: 'clamp(1.5rem, 4vw, 1.8rem)', 
+                fontWeight: 'bold', 
+                color: '#9b59b6' 
+              }}>
+                {dashboardStats.cgpa.toFixed(2)}
+              </p>
+            </div>
+            <div style={{
+              width: 'clamp(36px, 8vw, 44px)',
+              height: 'clamp(36px, 8vw, 44px)',
+              borderRadius: '50%',
+              backgroundColor: '#f3e5f5',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: '0'
+            }}>
+              <i className="fas fa-chart-line" style={{ 
+                color: '#9b59b6', 
+                fontSize: 'clamp(16px, 3vw, 20px)' 
+              }}></i>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Upcoming Lectures - Responsive View */}
@@ -1456,12 +1525,10 @@ const getGradeFromMarks = (marks) => {
             </p>
           </div>
         ) : isMobile ? (
-          // Mobile View: Compact Cards
           <div className="mobile-lectures-container">
             {renderMobileLectureCards()}
           </div>
         ) : (
-          // Desktop View: Full Table
           renderDesktopTable()
         )}
       </div>
@@ -1489,7 +1556,6 @@ const getGradeFromMarks = (marks) => {
           background-color: #f5f5f5;
         }
         
-        /* Mobile-specific optimizations */
         @media (max-width: 768px) {
           .dashboard-cards {
             grid-template-columns: 1fr;
@@ -1522,7 +1588,6 @@ const getGradeFromMarks = (marks) => {
           }
         }
         
-        /* Table responsive behavior */
         @media (max-width: 768px) {
           table {
             font-size: 14px;
@@ -1533,7 +1598,6 @@ const getGradeFromMarks = (marks) => {
           }
         }
         
-        /* Hover effects for desktop */
         @media (hover: hover) {
           .stat-card:hover {
             transform: translateY(-2px);
@@ -1556,13 +1620,11 @@ const getGradeFromMarks = (marks) => {
           }
         }
         
-        /* Remove blue focus outlines and use better ones */
         button:focus {
           outline: 2px solid #3498db;
           outline-offset: 2px;
         }
         
-        /* Improve touch targets on mobile */
         @media (max-width: 768px) {
           button, .add-calendar {
             min-height: 44px;
@@ -1574,7 +1636,6 @@ const getGradeFromMarks = (marks) => {
           }
         }
         
-        /* Loading spinner */
         .spinner {
           animation: spin 1s linear infinite;
         }

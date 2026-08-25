@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
 import { useStudentAuth } from '../../context/StudentAuthContext';
+import { useCachedData } from '../../hooks/useCachedData';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import './Results.css'; // Import the separate CSS file
@@ -13,8 +14,6 @@ const Results = () => {
   const [activeYear, setActiveYear] = useState('year1');
   const [resultsData, setResultsData] = useState({});
   const [cgpa, setCgpa] = useState(0.0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [studentInfo, setStudentInfo] = useState(null);
   const [specificExam, setSpecificExam] = useState(null);
   const [examDetails, setExamDetails] = useState(null);
@@ -34,11 +33,11 @@ const Results = () => {
       });
       fetchSpecificExamDetails(location.state.examId);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [examId, location]);
 
   const fetchSpecificExamData = async () => {
     try {
-      setLoading(true);
       
       // Get student data
       const { data: student, error: studentError } = await supabase
@@ -85,9 +84,6 @@ const Results = () => {
       }
     } catch (error) {
       console.error('Error fetching specific exam data:', error);
-      setError(`Failed to load exam results: ${error.message}`);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -109,18 +105,12 @@ const Results = () => {
     }
   };
 
-  useEffect(() => {
-    if (user?.email && !examId) {
-      fetchResults();
+  const fetchResults = useCallback(async () => {
+    if (!user?.email) {
+      throw new Error('No user logged in');
     }
-  }, [user, examId]);
 
-  const fetchResults = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const { data: student, error: studentError } = await supabase
+    const { data: student, error: studentError } = await supabase
         .from('students')
         .select('id, full_name, student_id, program, year_of_study, academic_year, semester')
         .eq('email', user.email)
@@ -128,8 +118,6 @@ const Results = () => {
 
       if (studentError) throw new Error(`Student data error: ${studentError.message}`);
       if (!student) throw new Error('Student not found');
-
-      setStudentInfo(student);
 
       // Fetch exam submissions that are graded
       const { data: examSubmissions, error: subError } = await supabase
@@ -153,10 +141,11 @@ const Results = () => {
 
       if ((!examSubmissions || examSubmissions.length === 0) && 
           (!studentCourses || studentCourses.length === 0)) {
-        setResultsData({});
-        setCgpa(0.0);
-        setLoading(false);
-        return;
+        return {
+          student,
+          resultsData: {},
+          cgpa: 0.0
+        };
       }
 
       // Organize exam results
@@ -243,8 +232,6 @@ const Results = () => {
           }
         });
 
-        setResultsData(organizedExamResults);
-        
         // Calculate overall CGPA from exam results
         let totalPoints = 0;
         let totalCredits = 0;
@@ -255,10 +242,9 @@ const Results = () => {
         });
         
         const weightedGPA = totalCredits > 0 ? totalPoints / totalCredits : 0.0;
-        setCgpa(parseFloat(weightedGPA.toFixed(2)));
 
-        if (studentInfo?.year_of_study) {
-          const currentYearKey = `year${studentInfo.year_of_study}`;
+        if (student?.year_of_study) {
+          const currentYearKey = `year${student.year_of_study}`;
           if (organizedExamResults[currentYearKey]) {
             setActiveYear(currentYearKey);
           } else if (Object.keys(organizedExamResults).length > 0) {
@@ -267,31 +253,48 @@ const Results = () => {
             setActiveYear(`year${maxYear}`);
           }
         }
+
+        return {
+          student,
+          resultsData: organizedExamResults,
+          cgpa: parseFloat(weightedGPA.toFixed(2))
+        };
       }
 
-      // Also handle student courses for academic records
-      if (studentCourses && studentCourses.length > 0) {
-        // This is for academic courses, not exam-specific
-        const courseIds = studentCourses.map(sc => sc.course_id);
-        const { data: courses, error: coursesError } = await supabase
-          .from('courses')
-          .select('*')
-          .in('id', courseIds);
+      return {
+        student,
+        resultsData: {},
+        cgpa: 0.0
+      };
 
-        if (coursesError) throw new Error(`Courses error: ${coursesError.message}`);
 
-        // You can combine this data with exam results if needed
-      }
 
-    } catch (error) {
-      console.error('Error fetching results:', error);
-      setError(`Failed to load results: ${error.message}`);
-      setResultsData({});
-      setCgpa(0.0);
-    } finally {
-      setLoading(false);
+  }, [user?.email]);
+
+  // Use cached data hook
+  const { 
+    data: cachedResultsData, 
+    loading, 
+    error,
+    refetch: refetchResults 
+  } = useCachedData(
+    `results-${user?.id || user?.email}`,
+    fetchResults,
+    {
+      ttl: 10 * 60 * 1000, // 10 minutes cache
+      enabled: !!user?.email && !examId,
+      dependencies: [user?.email, examId]
     }
-  };
+  );
+
+  // Update state when cached data changes
+  useEffect(() => {
+    if (cachedResultsData) {
+      setStudentInfo(cachedResultsData.student);
+      setResultsData(cachedResultsData.resultsData || {});
+      setCgpa(cachedResultsData.cgpa || 0.0);
+    }
+  }, [cachedResultsData]);
 
   const getGradeFromMarks = (marks) => {
     if (!marks && marks !== 0) return 'N/A';
@@ -537,7 +540,7 @@ const Results = () => {
   };
 
   const refreshResults = () => {
-    fetchResults();
+    refetchResults();
   };
 
   const renderSpecificExamResults = () => {

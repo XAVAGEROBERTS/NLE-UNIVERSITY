@@ -1,49 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../services/supabase';
 import { useStudentAuth } from '../../context/StudentAuthContext';
+import { useCachedData } from '../../hooks/useCachedData';
 import './Finance.css';
 
 const Finance = () => {
-  const [currency, setCurrency] = useState('USD');
-  const [financialData, setFinancialData] = useState({
-    semester1: { 
-      total: 0, 
-      paid: 0, 
-      balance: 0, 
-      status: 'pending',
-      items: [],
-      tuition: 0,
-      functional: 0,
-      guild: 0,
-      nche: 0,
-      registration: 0
-    },
-    semester2: { 
-      total: 0, 
-      paid: 0, 
-      balance: 0, 
-      status: 'pending',
-      items: [],
-      tuition: 0,
-      functional: 0,
-      guild: 0,
-      nche: 0,
-      registration: 0
-    }
-  });
-  const [paymentHistory, setPaymentHistory] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [studentInfo, setStudentInfo] = useState(null);
+
+   const [currency, setCurrency] = useState('USD');
   const [isMobile, setIsMobile] = useState(false);
-  const [feeSummary, setFeeSummary] = useState({
-    tuition: 0,
-    functional: 0,
-    guild: 0,
-    nche: 0,
-    registration: 0,
-    total: 0
-  });
   const { user } = useStudentAuth();
 
   useEffect(() => {
@@ -53,39 +17,32 @@ const Finance = () => {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  useEffect(() => {
-    if (user?.email) {
-      fetchFinancialData();
+  // Main data fetching function
+  const fetchFinancialData = useCallback(async () => {
+    if (!user?.email) {
+      throw new Error('No user logged in');
     }
-  }, [user]);
+    // First, get student information
+    const { data: student, error: studentError } = await supabase
+      .from('students')
+      .select(`
+        id, 
+        full_name, 
+        student_id, 
+        academic_year, 
+        program,
+        program_code,
+        year_of_study, 
+        semester,
+        intake
+      `)
+      .eq('email', user.email)
+      .single();
 
-  const fetchFinancialData = async () => {
-    try {
-      setLoading(true);
-      setError(null);
+    if (studentError) throw new Error(`Student data error: ${studentError.message}`);
+    if (!student) throw new Error('Student not found');
 
-      // First, get student information
-      const { data: student, error: studentError } = await supabase
-        .from('students')
-        .select(`
-          id, 
-          full_name, 
-          student_id, 
-          academic_year, 
-          program,
-          program_code,
-          year_of_study, 
-          semester,
-          intake
-        `)
-        .eq('email', user.email)
-        .single();
-
-      if (studentError) throw new Error(`Student data error: ${studentError.message}`);
-      if (!student) throw new Error('Student not found');
-
-      setStudentInfo(student);
-      const currentYear = student.academic_year || '2024/2025';
+    const currentYear = student.academic_year || '2024/2025';
 
       // Initialize data structures
       const semesterData = {
@@ -232,9 +189,6 @@ const Finance = () => {
       } else {
         // If no financial records exist, check if we should generate them
         console.log('No financial records found for student. Fees may not be assigned yet.');
-        
-        // Show message to user
-        setError('No fees have been assigned to your account yet. Please contact the finance department.');
       }
 
       // Calculate status for each semester
@@ -246,31 +200,16 @@ const Finance = () => {
           semData.total > 0 ? 'pending' : 'no_fees';
       });
 
-      setFinancialData(semesterData);
-      setFeeSummary(feeSummaryInit);
-      
       // Fetch payment history
-      await fetchPaymentHistory(student.id, currentYear);
-
-    } catch (error) {
-      console.error('Error fetching financial data:', error);
-      setError(`Failed to load financial data: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchPaymentHistory = async (studentId, academicYear) => {
-    try {
-      const { data: payments, error } = await supabase
+      const { data: payments, error: paymentsError } = await supabase
         .from('financial_records')
         .select('*')
-        .eq('student_id', studentId)
-        .eq('academic_year', academicYear)
+        .eq('student_id', student.id)
+        .eq('academic_year', currentYear)
         .eq('status', 'paid')
         .order('payment_date', { ascending: false });
 
-      if (error) throw error;
+      if (paymentsError) throw paymentsError;
 
       const history = (payments || []).map(payment => ({
         id: payment.id,
@@ -285,14 +224,40 @@ const Finance = () => {
         receipt: payment.receipt_number || 'N/A',
         status: payment.status,
         semester: payment.semester || 1,
-        feeType: payment.category || 'tuition' // Use category instead of fee_type
+        feeType: payment.category || 'tuition'
       }));
 
-      setPaymentHistory(history);
-    } catch (error) {
-      console.error('Error fetching payment history:', error);
+      return {
+        student,
+        semesterData,
+        feeSummary: feeSummaryInit,
+        paymentHistory: history
+      };
+  }, [user]);
+
+  // Use cached data hook
+  const { 
+    data: cachedFinanceData, 
+    loading, 
+    error,
+    refetch: refetchFinanceData 
+  } = useCachedData(
+    `finance-${user?.id || user?.email}`,
+    fetchFinancialData,
+    {
+      ttl: 15 * 60 * 1000, // 15 minutes cache
+      enabled: !!user?.email,
+      dependencies: [user?.email]
     }
+  );
+
+  const studentInfo = cachedFinanceData?.student || null;
+  const financialData = cachedFinanceData?.semesterData || {
+    semester1: { total: 0, paid: 0, balance: 0, status: 'pending', items: [] },
+    semester2: { total: 0, paid: 0, balance: 0, status: 'pending', items: [] }
   };
+  const feeSummary = cachedFinanceData?.feeSummary || { tuition: 0, functional: 0, guild: 0, nche: 0, registration: 0, total: 0 };
+  const paymentHistory = cachedFinanceData?.paymentHistory || [];
 
   const formatCurrency = (amount) => {
     const numAmount = parseFloat(amount) || 0;
@@ -351,13 +316,12 @@ const Finance = () => {
   };
 
   const refreshFinancialData = () => {
-    setError(null);
-    fetchFinancialData();
+    refetchFinanceData();
   };
 
   const makePayment = (semester) => {
     const semesterData = financialData[`semester${semester}`];
-    alert(`Payment for Semester ${semester}\nAmount Due: ${formatCurrency(semesterData.balance)}\n\nPayment integration would be implemented here.`);
+    alert(`Payment for Semester ${semester}\nAmount Due: ${formatCurrency(semesterData.balance)}\n\nPayment integration not yet implemented, coming in future updates.`);
   };
 
   const viewReceipt = (receiptNumber) => {

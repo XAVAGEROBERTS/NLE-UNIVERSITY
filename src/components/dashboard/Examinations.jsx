@@ -1,9 +1,10 @@
 // components/Examinations.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
 import { useStudentAuth } from '../../context/StudentAuthContext';
 import { checkExamClearance } from '../../utils/clearanceUtils';
+import { useCachedData } from '../../hooks/useCachedData';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import './Examinations.css';
@@ -11,8 +12,6 @@ import './Examinations.css';
 const Examinations = () => {
   const navigate = useNavigate();
   const [exams, setExams] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [studentInfo, setStudentInfo] = useState(null);
   const [clearanceStatus, setClearanceStatus] = useState(null);
   const { user } = useStudentAuth();
@@ -43,295 +42,235 @@ const Examinations = () => {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  useEffect(() => {
-    if (user?.email) {
-      fetchStudentData();
+  // Main data fetching function
+  const fetchExaminationsData = useCallback(async () => {
+    if (!user?.email) {
+      throw new Error('No user logged in');
     }
-  }, [user]);
 
-  const fetchStudentData = async () => {
-    try {
-      setLoading(true);
-      setError(null);
+    const { data: student, error: studentError } = await supabase
+      .from('students')
+      .select(`
+        id, full_name, student_id, program, program_code,
+        year_of_study, semester, academic_year, program_id, email, phone,
+        department_code, fees_clearance_bypassed,
+        attendance_clearance_bypassed, exam_clearance_bypassed
+      `)
+      .eq('email', user.email)
+      .single();
 
-      const { data: student, error: studentError } = await supabase
-        .from('students')
-        .select(`
-          id, 
-          full_name, 
-          student_id, 
-          program, 
-          program_code,
-          year_of_study, 
-          semester, 
-          academic_year, 
-          program_id, 
-          email, 
-          phone,
-          department_code,
-          fees_clearance_bypassed,
-          attendance_clearance_bypassed,
-          exam_clearance_bypassed
-        `)
-        .eq('email', user.email)
-        .single();
+    if (studentError) throw new Error(`Student data error: ${studentError.message}`);
+    if (!student) throw new Error('Student not found');
 
-      if (studentError) throw new Error(`Student data error: ${studentError.message}`);
-      if (!student) throw new Error('Student not found');
+    // Fetch student's enrolled courses
+    const { data: studentCourses, error: coursesError } = await supabase
+      .from('student_courses')
+      .select('course_id, status')
+      .eq('student_id', student.id)
+      .neq('status', 'completed');
 
-      console.log('Student data loaded:', student);
-      setStudentInfo(student);
+    if (coursesError) throw new Error(`Courses error: ${coursesError.message}`);
 
-      // Always fetch exams first
-      const fetchedExams = await fetchExams(student);
+    const courseIds = studentCourses?.map(sc => sc.course_id) || [];
 
-      // Check if any exam is scheduled/active/upcoming (not ended)
-      const hasScheduled = fetchedExams.some(exam => 
-        !exam.isEnded && (exam.status === 'upcoming' || exam.status === 'active')
-      );
+    if (courseIds.length === 0) {
+      return {
+        student,
+        exams: [],
+        hasScheduledExams: false,
+        clearanceStatus: null
+      };
+    }
+
+    // Fetch exams
+    let query = supabase
+      .from('examinations')
+      .select(`
+        *,
+        courses (id, course_code, course_name, credits)
+      `)
+      .in('course_id', courseIds)
+      .in('status', ['scheduled', 'published', 'active', 'completed'])
+      .order('start_time', { ascending: true });
+
+    // Apply cohort targeting
+    const cleanAY = (student.academic_year || '2025/2029').trim().replace(/\s/g, '');
+    
+    if (cleanAY || student.year_of_study || student.semester || student.program_id) {
+      const orConditions = [];
       
-      console.log('Has scheduled exams:', hasScheduled, 'Exams count:', fetchedExams.length);
+      if (cleanAY) {
+        orConditions.push(`target_academic_year.eq.${cleanAY}`);
+        orConditions.push(`target_academic_year.is.null`);
+      }
       
-      // Only check clearance if there are scheduled exams
-      if (hasScheduled) {
-        console.log('Checking clearance because there are scheduled exams');
-        setCheckingClearance(true);
-        const clearance = await checkExamClearance(
-          student.id,
-          student.academic_year || '2025/2029',
-          student.semester || 1
-        );
-        
-        console.log('Clearance result:', clearance);
-        setClearanceStatus(clearance);
-        setCheckingClearance(false);
+      if (student.year_of_study != null) {
+        orConditions.push(`target_year_of_study.eq.${student.year_of_study}`);
+        orConditions.push(`target_year_of_study.is.null`);
+      }
+      
+      if (student.semester != null) {
+        orConditions.push(`target_semester.eq.${student.semester}`);
+        orConditions.push(`target_semester.is.null`);
+      }
+      
+      if (student.program_id) {
+        orConditions.push(`target_program_id.eq.${student.program_id}`);
+        orConditions.push(`target_program_id.is.null`);
+      }
+      
+      if (orConditions.length > 0) {
+        query = query.or(orConditions.join(','));
+      }
+    }
 
-        // Only show modal if NOT effectively cleared AND there are scheduled exams
-        if (clearance && !clearance.cleared && !isBypassed) {
-          setTimeout(() => {
-            setShowClearanceModal(true);
-          }, 1000);
-        }
-      } else {
-        // No scheduled exams, don't check clearance
-        console.log('No scheduled exams, skipping clearance check');
-        setClearanceStatus(null);
+    const { data: examsData, error: examsError } = await query;
+    
+    if (examsError) throw new Error(`Exams error: ${examsError.message}`);
+
+    // Fetch submissions
+    const { data: submissionsData } = await supabase
+      .from('exam_submissions')
+      .select('*')
+      .eq('student_id', student.id);
+
+    // Process exams
+    const processedExams = examsData ? examsData.map(exam => {
+      const studentSubmission = submissionsData?.find(sub => sub.exam_id === exam.id);
+      const now = new Date();
+      const startTime = new Date(exam.start_time);
+      const endTime = new Date(exam.end_time);
+
+      const isActiveByTime = now >= startTime && now <= endTime;
+      const isUpcoming = now < startTime;
+      const isEndedByTime = now > endTime;
+      const isOnlineExam = exam.exam_type === 'online' || exam.exam_type === 'written_online';
+      
+      const hasSubmission = !!studentSubmission;
+      
+      let isSubmitted = false;
+      let isGraded = false;
+      
+      if (studentSubmission) {
+        const status = studentSubmission.status?.toLowerCase();
+        isSubmitted = status === 'submitted' || studentSubmission.submitted_at !== null;
+        isGraded = status === 'graded' || studentSubmission.graded_at !== null;
+      }
+      
+      const isStartedButNotSubmitted = studentSubmission && studentSubmission.status === 'started' && !isSubmitted;
+      const canResume = isStartedButNotSubmitted && (isActiveByTime || !isEndedByTime);
+      const canStart = !hasSubmission && isActiveByTime && isOnlineExam;
+      
+      let finalStatus = 'upcoming';
+      
+      if (isGraded) {
+        finalStatus = 'graded';
+      } else if (isSubmitted) {
+        finalStatus = 'submitted';
+      } else if (canResume || isActiveByTime) {
+        finalStatus = 'active';
+      } else if (isEndedByTime) {
+        finalStatus = 'ended';
       }
 
-      setHasScheduledExams(hasScheduled);
+      return {
+        id: exam.id,
+        title: exam.title === 'NA' ? `${exam.courses?.course_code || 'Exam'} Final` : exam.title,
+        description: exam.description === 'NA' ? 'Final examination for the course' : exam.description,
+        courseId: exam.course_id,
+        courseCode: exam.courses?.course_code || 'N/A',
+        courseName: exam.courses?.course_name || 'N/A',
+        courseCredits: exam.courses?.credits || 0,
+        examType: exam.exam_type,
+        startTime: exam.start_time,
+        endTime: exam.end_time,
+        duration: exam.duration_minutes,
+        totalMarks: exam.total_marks,
+        passingMarks: exam.passing_marks,
+        location: exam.location || exam.venue || 'TBA',
+        supervisor: exam.supervisor,
+        instructions: exam.instructions === 'NA' ? 'Complete all questions within the given time frame.' : exam.instructions,
+        status: finalStatus,
+        submitted: isSubmitted,
+        graded: isGraded,
+        submission: studentSubmission || null,
+        isActive: finalStatus === 'active',
+        isUpcoming: isUpcoming,
+        isEnded: isEndedByTime,
+        canStart: canStart,
+        canResume: canResume,
+        hasIncompleteSubmission: isStartedButNotSubmitted,
+        isOnline: isOnlineExam,
+        targetDetails: {
+          academicYear: exam.target_academic_year,
+          yearOfStudy: exam.target_year_of_study,
+          semester: exam.target_semester,
+          programId: exam.target_program_id
+        }
+      };
+    }) : [];
 
-    } catch (error) {
-      console.error('Error fetching student data:', error);
-      setError(`Failed to load examinations: ${error.message}`);
-      setExams([]);
-      setCheckingClearance(false);
-      setHasScheduledExams(false);
-    } finally {
-      setLoading(false);
+    const hasScheduled = processedExams.some(exam => 
+      !exam.isEnded && (exam.status === 'upcoming' || exam.status === 'active')
+    );
+
+    let clearance = null;
+    if (hasScheduled) {
+      clearance = await checkExamClearance(
+        student.id,
+        student.academic_year || '2025/2029',
+        student.semester || 1
+      );
     }
-  };
+
+    return {
+      student,
+      exams: processedExams,
+      hasScheduledExams: hasScheduled,
+      clearanceStatus: clearance
+    };
+  }, [user?.email]);
+
+  // Use cached data hook
+  const { 
+    data: cachedExamData, 
+    loading, 
+    error,
+    refetch: refetchExams 
+  } = useCachedData(
+    `examinations-${user?.id || user?.email}`,
+    fetchExaminationsData,
+    {
+      ttl: 5 * 60 * 1000,
+      enabled: !!user?.email,
+      dependencies: [user?.email]
+    }
+  );
+
+  // Update state when cached data changes
+  useEffect(() => {
+    if (cachedExamData) {
+      setStudentInfo(cachedExamData.student);
+      setExams(cachedExamData.exams || []);
+      setHasScheduledExams(cachedExamData.hasScheduledExams);
+      setClearanceStatus(cachedExamData.clearanceStatus);
+      
+      if (cachedExamData.clearanceStatus && 
+          !cachedExamData.clearanceStatus.cleared && 
+          !cachedExamData.student?.fees_clearance_bypassed &&
+          !cachedExamData.student?.attendance_clearance_bypassed &&
+          !cachedExamData.student?.exam_clearance_bypassed &&
+          cachedExamData.hasScheduledExams) {
+        setTimeout(() => {
+          setShowClearanceModal(true);
+        }, 1000);
+      }
+    }
+  }, [cachedExamData]);
+
+ 
   
 
-  const fetchExams = async (student) => {
-    try {
-      // Fetch student's enrolled courses - ONLY non-completed courses
-      const { data: studentCourses, error: coursesError } = await supabase
-        .from('student_courses')
-        .select('course_id, status')
-        .eq('student_id', student.id)
-        .neq('status', 'completed');
-
-      if (coursesError) {
-        console.error('Courses error:', coursesError);
-        throw new Error(`Courses error: ${coursesError.message}`);
-      }
-
-      const courseIds = studentCourses?.map(sc => sc.course_id) || [];
-      console.log('Enrolled course IDs:', courseIds);
-
-      if (courseIds.length === 0) {
-        setExams([]);
-        setHasScheduledExams(false);
-        return [];
-      }
-
-      // Fetch exams with cohort targeting
-      let query = supabase
-        .from('examinations')
-        .select(`
-          *,
-          courses (id, course_code, course_name, credits)
-        `)
-        .in('course_id', courseIds)
-        .in('status', ['scheduled', 'published', 'active', 'completed'])
-        .order('start_time', { ascending: true });
-
-      // Apply cohort targeting
-      const cleanAY = (student.academic_year || '2025/2029').trim().replace(/\s/g, '');
-      
-      if (cleanAY || student.year_of_study || student.semester || student.program_id) {
-        const orConditions = [];
-        
-        if (cleanAY) {
-          orConditions.push(`target_academic_year.eq.${cleanAY}`);
-          orConditions.push(`target_academic_year.is.null`);
-        }
-        
-        if (student.year_of_study != null) {
-          orConditions.push(`target_year_of_study.eq.${student.year_of_study}`);
-          orConditions.push(`target_year_of_study.is.null`);
-        }
-        
-        if (student.semester != null) {
-          orConditions.push(`target_semester.eq.${student.semester}`);
-          orConditions.push(`target_semester.is.null`);
-        }
-        
-        if (student.program_id) {
-          orConditions.push(`target_program_id.eq.${student.program_id}`);
-          orConditions.push(`target_program_id.is.null`);
-        }
-        
-        if (orConditions.length > 0) {
-          query = query.or(orConditions.join(','));
-        }
-      }
-
-      const { data: examsData, error: examsError } = await query;
-      
-      if (examsError) {
-        console.error('Exams error:', examsError);
-        throw new Error(`Exams error: ${examsError.message}`);
-      }
-
-      console.log('Exams found:', examsData?.length || 0);
-
-      // Fetch student's exam submissions
-      const { data: submissionsData, error: submissionsError } = await supabase
-        .from('exam_submissions')
-        .select('*')
-        .eq('student_id', student.id);
-
-      if (submissionsError) {
-        console.error('Submissions error:', submissionsError);
-      }
-
-      // Process exams
-      const processedExams = examsData ? examsData.map(exam => {
-        const studentSubmission = submissionsData?.find(sub => sub.exam_id === exam.id);
-        const now = new Date();
-        const startTime = new Date(exam.start_time);
-        const endTime = new Date(exam.end_time);
-
-        const isActiveByTime = now >= startTime && now <= endTime;
-        const isUpcoming = now < startTime;
-        const isEndedByTime = now > endTime;
-        
-        // Determine if it's an online exam
-        const isOnlineExam = exam.exam_type === 'online' || exam.exam_type === 'written_online';
-        
-        // Submission status
-        const hasSubmission = !!studentSubmission;
-        
-        // Check submission status
-        let isSubmitted = false;
-        let isGraded = false;
-        
-        if (studentSubmission) {
-          const status = studentSubmission.status?.toLowerCase();
-          
-          isSubmitted = status === 'submitted' || studentSubmission.submitted_at !== null;
-          isGraded = status === 'graded' || studentSubmission.graded_at !== null;
-        }
-        
-        const isStartedButNotSubmitted = studentSubmission && studentSubmission.status === 'started' && !isSubmitted;
-        
-        // For resumed exams: If exam was started but not submitted
-        const canResume = isStartedButNotSubmitted && (isActiveByTime || !isEndedByTime);
-        
-        // Can start only if: no submission AND exam is active AND it's online
-        const canStart = !hasSubmission && isActiveByTime && isOnlineExam;
-        
-        // Final status determination
-        let finalStatus = 'upcoming';
-        let showAsActive = false;
-        
-        if (isGraded) {
-          finalStatus = 'graded';
-        } else if (isSubmitted) {
-          finalStatus = 'submitted';
-        } else if (canResume) {
-          finalStatus = 'active';
-          showAsActive = true;
-        } else if (isActiveByTime) {
-          finalStatus = 'active';
-          showAsActive = true;
-        } else if (isUpcoming) {
-          finalStatus = 'upcoming';
-        } else if (isEndedByTime) {
-          finalStatus = 'ended';
-        }
-
-        return {
-          id: exam.id,
-          title: exam.title === 'NA' ? `${exam.courses?.course_code || 'Exam'} Final` : exam.title,
-          description: exam.description === 'NA' ? 'Final examination for the course' : exam.description,
-          courseId: exam.course_id,
-          courseCode: exam.courses?.course_code || 'N/A',
-          courseName: exam.courses?.course_name || 'N/A',
-          courseCredits: exam.courses?.credits || 0,
-          examType: exam.exam_type,
-          startTime: exam.start_time,
-          endTime: exam.end_time,
-          duration: exam.duration_minutes,
-          totalMarks: exam.total_marks,
-          passingMarks: exam.passing_marks,
-          location: exam.location || exam.venue || 'TBA',
-          supervisor: exam.supervisor,
-          instructions: exam.instructions === 'NA' ? 'Complete all questions within the given time frame.' : exam.instructions,
-          status: finalStatus,
-          submitted: isSubmitted,
-          graded: isGraded,
-          submission: studentSubmission || null,
-          isActive: showAsActive,
-          isUpcoming: isUpcoming,
-          isEnded: isEndedByTime,
-          canStart: canStart,
-          canResume: canResume,
-          hasIncompleteSubmission: isStartedButNotSubmitted,
-          isOnline: isOnlineExam,
-          targetDetails: {
-            academicYear: exam.target_academic_year,
-            yearOfStudy: exam.target_year_of_study,
-            semester: exam.target_semester,
-            programId: exam.target_program_id
-          }
-        };
-      }) : [];
-
-      console.log('Processed exams:', processedExams);
-      
-      // Check if any exam is scheduled/active/upcoming (not ended)
-      const hasScheduled = processedExams.some(exam => 
-        !exam.isEnded && (exam.status === 'upcoming' || exam.status === 'active')
-      );
-      
-      console.log('Has scheduled exams (in fetchExams):', hasScheduled, 'Total exams:', processedExams.length);
-      
-      // Update state
-      setHasScheduledExams(hasScheduled);
-      setExams(processedExams);
-      
-      return processedExams;
-      
-    } catch (error) {
-      console.error('Error fetching exams:', error);
-      setError(`Failed to load examinations: ${error.message}`);
-      setExams([]);
-      setHasScheduledExams(false);
-      return [];
-    }
-  };
 
   const handleStartExam = (exam) => {
     // Check clearance only if there are scheduled exams
@@ -414,7 +353,7 @@ const Examinations = () => {
   };
 
   const refreshExams = () => {
-    fetchStudentData();
+    refetchExams();
   };
 
   const recheckClearance = async () => {
