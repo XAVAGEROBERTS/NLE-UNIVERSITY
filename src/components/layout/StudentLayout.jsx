@@ -1,4 +1,4 @@
-// src/components/layout/StudentLayout.jsx - CLEANED VERSION
+// src/components/layout/StudentLayout.jsx - COMPLETE WITH PROFILE PICTURE
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useStudentAuth } from '../../context/StudentAuthContext';
@@ -15,6 +15,7 @@ const StudentLayout = () => {
   const [studentData, setStudentData] = useState(null);
   const [isLoadingUser, setIsLoadingUser] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
+  const [profilePicture, setProfilePicture] = useState(null);
 
   const logoutModalRef = useRef(null);
   const mobileMenuRef = useRef(null);
@@ -38,7 +39,7 @@ const StudentLayout = () => {
     return location.pathname === path;
   };
 
-  // Check mobile on mount and resize - RESTORED TO 1024px
+  // Check mobile on mount and resize
   useEffect(() => {
     const checkMobile = () => {
       const mobile = window.innerWidth < 1024;
@@ -57,7 +58,7 @@ const StudentLayout = () => {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Fetch detailed student data
+  // Fetch detailed student data with profile picture
   const fetchStudentData = useCallback(async () => {
     try {
       if (!user?.email) {
@@ -85,7 +86,8 @@ const StudentLayout = () => {
             year_of_study: user.yearOfStudy || 1,
             semester: user.semester || 1,
             phone: user.phone || '',
-            email: user.email || ''
+            email: user.email || '',
+            profile_picture_url: null
           });
         }
         return;
@@ -93,7 +95,9 @@ const StudentLayout = () => {
 
       if (student) {
         console.log('✅ Student data loaded from database:', student.full_name);
+        console.log('📸 Profile picture URL:', student.profile_picture_url);
         setStudentData(student);
+        setProfilePicture(student.profile_picture_url || null);
       }
     } catch (error) {
       console.error('Error in fetchStudentData:', error);
@@ -157,18 +161,14 @@ const StudentLayout = () => {
     setMobileMenuOpen(!mobileMenuOpen);
   };
 
-  // SIMPLIFIED LOGOUT FUNCTION - auth context handles loading
   const confirmLogout = async () => {
     console.log('Starting logout process');
     
     try {
-      // Call signOut from context - it will handle the loading animation
       await signOut();
-      // Hide modal - logout loader will be shown by auth context
       setShowLogoutModal(false);
     } catch (error) {
       console.error('Logout error:', error);
-      // Hide logout modal on error
       setShowLogoutModal(false);
     }
   };
@@ -179,9 +179,13 @@ const StudentLayout = () => {
     }
   };
 
+  // Get user display name and initial
+  const displayName = studentData?.full_name || user?.name || 'Student';
+  const displayInitial = displayName.charAt(0).toUpperCase();
+
   // If logout is loading, auth context will show the loader globally
   if (logoutLoading) {
-    return null; // Return nothing - LogoutLoader will be shown by App.jsx
+    return null;
   }
 
   return (
@@ -228,7 +232,7 @@ const StudentLayout = () => {
               <div className="user-info-card">
                 <div className="user-info-item">
                   <i className="fas fa-user"></i>
-                  <span>{studentData?.full_name || user?.name || 'Student'}</span>
+                  <span>{displayName}</span>
                 </div>
                 <div className="user-info-item">
                   <i className="fas fa-id-card"></i>
@@ -317,13 +321,23 @@ const StudentLayout = () => {
                       <div className="user-loading-spinner"></div>
                     </div>
                   )}
-                  <img 
-                    src={`https://ui-avatars.com/api/?name=${encodeURIComponent(studentData?.full_name || user?.name || 'Student')}&background=3498db&color=fff&size=128`} 
-                    alt="User"
-                  />
+                  
+                  {/* Profile Picture or Initials */}
+                  {profilePicture ? (
+                    <img 
+                      src={profilePicture} 
+                      alt={displayName}
+                      className="profile-avatar"
+                    />
+                  ) : (
+                    <div className="avatar-initials">
+                      {displayInitial}
+                    </div>
+                  )}
+                  
                   <div>
                     <div className="user-name">
-                      {studentData?.full_name || user?.name || 'Loading...'}
+                      {displayName}
                       {isLoadingUser && (
                         <div className="name-loading-spinner"></div>
                       )}
@@ -403,13 +417,19 @@ const StudentLayout = () => {
                 className="mobile-menu"
               >
                 <div className="mobile-user-info">
-                  <img 
-                    src={`https://ui-avatars.com/api/?name=${encodeURIComponent(studentData?.full_name || user?.name || 'Student')}&background=3498db&color=fff&size=128`} 
-                    alt="User"
-                  />
+                  {profilePicture ? (
+                    <img 
+                      src={profilePicture} 
+                      alt={displayName}
+                    />
+                  ) : (
+                    <div className="mobile-avatar-initials">
+                      {displayInitial}
+                    </div>
+                  )}
                   <div>
                     <div className="mobile-user-name">
-                      {studentData?.full_name || user?.name || 'Loading...'}
+                      {displayName}
                     </div>
                     <div className="mobile-user-role">
                       Student
@@ -456,7 +476,7 @@ const StudentLayout = () => {
         </div>
       </div>
 
-      {/* CSS Styles - RESTORED PROPER BREAKPOINTS */}
+      {/* CSS Styles */}
       <style jsx="true">{`
         /* Global Styles */
         * {
@@ -524,7 +544,46 @@ const StudentLayout = () => {
           }
         }
         
-        /* Logout Modal - RESTORED STYLES */
+        /* Profile Picture Styles */
+        .profile-avatar {
+          width: 36px;
+          height: 36px;
+          border-radius: 50%;
+          object-fit: cover;
+          border: 2px solid #e9ecef;
+        }
+        
+        .avatar-initials {
+          width: 36px;
+          height: 36px;
+          border-radius: 50%;
+          background: linear-gradient(135deg, #4361ee, #3f37c9);
+          color: white;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-weight: 600;
+          font-size: 16px;
+          border: 2px solid #e9ecef;
+          flex-shrink: 0;
+        }
+        
+        .mobile-avatar-initials {
+          width: 48px;
+          height: 48px;
+          border-radius: 50%;
+          background: linear-gradient(135deg, #4361ee, #3f37c9);
+          color: white;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-weight: 600;
+          font-size: 20px;
+          border: 2px solid #e9ecef;
+          flex-shrink: 0;
+        }
+        
+        /* Logout Modal */
         .logout-modal-overlay {
           position: fixed;
           top: 0;
@@ -764,7 +823,7 @@ const StudentLayout = () => {
           pointer-events: none;
         }
         
-        /* Header - RESTORED TO ORIGINAL WITH IMPROVEMENTS */
+        /* Header */
         .layout-header {
           height: 70px;
           background-color: white;
@@ -778,7 +837,6 @@ const StudentLayout = () => {
           border-bottom: 1px solid #e9ecef;
         }
         
-        /* Tablet and Mobile */
         @media (max-width: 1024px) {
           .layout-header {
             height: 60px;
@@ -786,11 +844,27 @@ const StudentLayout = () => {
           }
         }
         
-        /* Small mobile devices - ADDED FOR EXTRA SMALL SCREENS */
         @media (max-width: 480px) {
           .layout-header {
             height: 56px;
             padding: 0 0.75rem;
+          }
+          
+          .profile-avatar {
+            width: 32px;
+            height: 32px;
+          }
+          
+          .avatar-initials {
+            width: 32px;
+            height: 32px;
+            font-size: 14px;
+          }
+          
+          .mobile-avatar-initials {
+            width: 40px;
+            height: 40px;
+            font-size: 16px;
           }
         }
         
@@ -984,7 +1058,6 @@ const StudentLayout = () => {
           }
         }
         
-        /* User Info - RESTORED */
         .user-info {
           display: flex;
           align-items: center;
@@ -1022,14 +1095,6 @@ const StudentLayout = () => {
           border-top-color: white;
           border-radius: 50%;
           animation: spin 1s linear infinite;
-        }
-        
-        .user-info img {
-          width: 36px;
-          height: 36px;
-          border-radius: 50%;
-          object-fit: cover;
-          border: 2px solid #e9ecef;
         }
         
         .user-name {
@@ -1070,7 +1135,7 @@ const StudentLayout = () => {
           }
         }
         
-        /* Sidebar - RESTORED AND FIXED */
+        /* Sidebar */
         .sidebar {
           width: 260px;
           background-color: white;
@@ -1087,7 +1152,22 @@ const StudentLayout = () => {
         
         @media (max-width: 1024px) {
           .sidebar {
-            display: none; /* Hide sidebar on mobile/tablet */
+            display: none;
+          }
+        }
+        
+        @media (min-width: 769px) and (max-width: 1024px) {
+          .sidebar {
+            display: block;
+            width: 220px;
+          }
+          
+          .sidebar.collapsed {
+            width: 70px;
+          }
+          
+          .sidebar-toggle {
+            right: 15px;
           }
         }
         
@@ -1204,7 +1284,7 @@ const StudentLayout = () => {
           background-color: #f8f9fa;
         }
         
-        /* Mobile Menu - IMPROVED */
+        /* Mobile Menu */
         .mobile-menu-backdrop {
           position: fixed;
           top: 60px;
@@ -1259,7 +1339,7 @@ const StudentLayout = () => {
           display: flex;
           align-items: center;
           gap: 1rem;
-          padding: 1.5rem 1rem;
+          padding: 1rem 1rem;
           background-color: #f8f9fa;
           border-bottom: 1px solid #e9ecef;
         }
@@ -1267,6 +1347,11 @@ const StudentLayout = () => {
         @media (max-width: 480px) {
           .mobile-user-info {
             padding: 1rem;
+          }
+          
+          .mobile-user-info img {
+            width: 40px;
+            height: 40px;
           }
         }
         
@@ -1276,13 +1361,6 @@ const StudentLayout = () => {
           border-radius: 50%;
           object-fit: cover;
           border: 2px solid #e9ecef;
-        }
-        
-        @media (max-width: 480px) {
-          .mobile-user-info img {
-            width: 40px;
-            height: 40px;
-          }
         }
         
         .mobile-user-name {
@@ -1333,6 +1411,8 @@ const StudentLayout = () => {
           font-weight: 500;
           border-left: 3px solid transparent;
           transition: all 0.2s;
+          min-height: 44px;
+          min-width: 44px;
         }
         
         @media (max-width: 480px) {
@@ -1396,6 +1476,8 @@ const StudentLayout = () => {
           margin-top: 0.5rem;
           border-left: 3px solid transparent;
           transition: all 0.2s;
+          min-height: 44px;
+          min-width: 44px;
         }
         
         @media (max-width: 480px) {
@@ -1409,7 +1491,7 @@ const StudentLayout = () => {
           background-color: #f8f9fa;
         }
         
-        /* Content Area - RESTORED */
+        /* Content Area */
         .content-area {
           flex: 1;
           padding: 2rem;
@@ -1434,37 +1516,13 @@ const StudentLayout = () => {
           }
         }
         
-        /* Tablet-specific improvements (769px-1024px) */
         @media (min-width: 769px) and (max-width: 1024px) {
           .content-area {
             padding: 1.5rem;
           }
-          
-          .sidebar {
-            display: block; /* Show sidebar on tablet */
-            width: 220px;
-          }
-          
-          .sidebar.collapsed {
-            width: 70px;
-          }
-          
-          .sidebar-toggle {
-            right: 15px;
-          }
         }
         
-        /* Additional responsive improvements */
-        @media (max-width: 768px) {
-          /* Better touch targets for mobile */
-          .mobile-nav-button,
-          .mobile-menu-toggle {
-            min-height: 44px;
-            min-width: 44px;
-          }
-        }
-        
-        /* Scrollbar Styling - RESTORED */
+        /* Scrollbar Styling */
         .sidebar::-webkit-scrollbar {
           width: 4px;
         }
@@ -1477,11 +1535,48 @@ const StudentLayout = () => {
           background: #c1c1c1;
           border-radius: 2px;
         }
-        
-        /* Body class for mobile menu open */
-        body.mobile-menu-open {
-          overflow: hidden;
-        }
+
+        /* User Info - REDUCED SPACING */
+.user-info {
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.15rem !important;      /* ← THIS IS THE KEY - reduces space between image and text */
+  padding: 0.1rem 0.3rem !important;
+  border-radius: 30px;
+  cursor: pointer;
+  position: relative;
+  transition: background-color 0.2s;
+}
+
+.user-info:hover {
+  background-color: #f1f3f5;
+}
+
+.user-text {
+  display: flex !important;
+  flex-direction: column !important;
+  line-height: 1 !important;
+  gap: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+
+.user-role {
+  font-size: 0.5rem !important;
+  color: #adb5bd;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 1 !important;
+}
+
+.profile-avatar,
+.avatar-initials {
+  flex-shrink: 0 !important;
+  margin: 0 !important;
+}
       `}</style>
     </>
   );

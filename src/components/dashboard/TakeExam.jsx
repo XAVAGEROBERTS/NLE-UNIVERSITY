@@ -25,7 +25,21 @@ const TakeExam = () => {
   const [downloadedPapers, setDownloadedPapers] = useState([]);
   const [showDownloadDropdown, setShowDownloadDropdown] = useState(false);
   const [studentInfo, setStudentInfo] = useState(null);
+  const [isStartingExam, setIsStartingExam] = useState(false);
+  const [submissionType, setSubmissionType] = useState('both');
   
+  // Modal states
+  const [modal, setModal] = useState({
+    isOpen: false,
+    type: '',
+    title: '',
+    message: '',
+    onConfirm: null,
+    onCancel: null,
+    confirmText: 'OK',
+    cancelText: 'Cancel'
+  });
+
   // Timer states
   const [timeRemaining, setTimeRemaining] = useState({ hours: 0, minutes: 0, seconds: 0 });
   const [totalDurationMinutes, setTotalDurationMinutes] = useState(0);
@@ -37,14 +51,356 @@ const TakeExam = () => {
   const [isExamEnded, setIsExamEnded] = useState(false);
   const [isTimeUp, setIsTimeUp] = useState(false);
   
-  // New state for showing start confirmation
   const [showStartConfirmation, setShowStartConfirmation] = useState(false);
   
   const fileInputRef = useRef(null);
   const timerIntervalRef = useRef(null);
   const timeRemainingIntervalRef = useRef(null);
-  
-  // Cleanup intervals on unmount
+  const isSubmittingRef = useRef(false);
+
+  // Helper function to get plain text from HTML
+  const getPlainTextFromHTML = (html) => {
+    if (!html) return '';
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = html;
+    return tempDiv.textContent || tempDiv.innerText || '';
+  };
+
+  // Get word count from text
+  const getWordCount = (text) => {
+    if (!text) return 0;
+    const plainText = getPlainTextFromHTML(text);
+    return plainText.split(/\s+/).filter(word => word.length > 0).length;
+  };
+
+  // Modal functions
+  const showConfirmModal = (title, message, onConfirm, onCancel = null, confirmText = 'Yes', cancelText = 'Cancel') => {
+    setModal({
+      isOpen: true,
+      type: 'confirm',
+      title,
+      message,
+      onConfirm,
+      onCancel,
+      confirmText,
+      cancelText
+    });
+  };
+
+  const showAlertModal = (title, message, type = 'alert', onClose = null) => {
+    setModal({
+      isOpen: true,
+      type,
+      title,
+      message,
+      onConfirm: onClose,
+      onCancel: null,
+      confirmText: 'OK',
+      cancelText: ''
+    });
+  };
+
+  const closeModal = () => {
+    setModal(prev => ({ ...prev, isOpen: false }));
+  };
+
+  const handleModalConfirm = () => {
+    const { onConfirm } = modal;
+    closeModal();
+    if (onConfirm && typeof onConfirm === 'function') {
+      setTimeout(() => {
+        onConfirm();
+      }, 100);
+    }
+  };
+
+  const handleModalCancel = () => {
+    const { onCancel } = modal;
+    closeModal();
+    if (onCancel && typeof onCancel === 'function') {
+      setTimeout(() => {
+        onCancel();
+      }, 100);
+    }
+  };
+
+  // Security measures
+  useEffect(() => {
+    if (!isExamActive) return;
+
+    const blockPaste = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showAlertModal('Action Blocked', 'Pasting is not allowed during exams.', 'alert');
+      return false;
+    };
+
+    const blockPasteOnInputs = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showAlertModal('Action Blocked', 'Pasting is not allowed during exams.', 'alert');
+      return false;
+    };
+
+    document.addEventListener('paste', blockPaste, true);
+    
+    const inputs = document.querySelectorAll('input, textarea, [contenteditable="true"]');
+    inputs.forEach(el => {
+      el.addEventListener('paste', blockPasteOnInputs, true);
+    });
+
+    return () => {
+      document.removeEventListener('paste', blockPaste, true);
+      inputs.forEach(el => {
+        el.removeEventListener('paste', blockPasteOnInputs, true);
+      });
+    };
+  }, [isExamActive]);
+
+  useEffect(() => {
+    if (!isExamActive) return;
+
+    const blockCut = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showAlertModal('Action Blocked', 'Cutting is not allowed during exams.', 'alert');
+      return false;
+    };
+
+    const blockPaste = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showAlertModal('Action Blocked', 'Pasting is not allowed during exams.', 'alert');
+      return false;
+    };
+
+    document.addEventListener('cut', blockCut, true);
+    document.addEventListener('paste', blockPaste, true);
+
+    return () => {
+      document.removeEventListener('cut', blockCut, true);
+      document.removeEventListener('paste', blockPaste, true);
+    };
+  }, [isExamActive]);
+
+  useEffect(() => {
+    if (!isExamActive) return;
+
+    const preventContextMenu = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showAlertModal('Action Blocked', 'Right-click is not allowed during exams.', 'alert');
+      return false;
+    };
+
+    document.addEventListener('contextmenu', preventContextMenu, true);
+
+    return () => {
+      document.removeEventListener('contextmenu', preventContextMenu, true);
+    };
+  }, [isExamActive]);
+
+  useEffect(() => {
+    if (!isExamActive) return;
+
+    const preventDragDrop = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      return false;
+    };
+
+    document.addEventListener('dragstart', preventDragDrop, true);
+    document.addEventListener('drop', preventDragDrop, true);
+    document.addEventListener('dragover', preventDragDrop, true);
+
+    return () => {
+      document.removeEventListener('dragstart', preventDragDrop, true);
+      document.removeEventListener('drop', preventDragDrop, true);
+      document.removeEventListener('dragover', preventDragDrop, true);
+    };
+  }, [isExamActive]);
+
+  useEffect(() => {
+    if (!isExamActive) return;
+
+    const preventDevTools = (e) => {
+      if (e.key === 'F12') {
+        e.preventDefault();
+        e.stopPropagation();
+        showAlertModal('Action Blocked', 'Developer tools are not allowed during exams.', 'alert');
+        return false;
+      }
+      if (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'i' || e.key === 'j')) {
+        e.preventDefault();
+        e.stopPropagation();
+        showAlertModal('Action Blocked', 'Developer tools are not allowed during exams.', 'alert');
+        return false;
+      }
+      if (e.ctrlKey && (e.key === 'u' || e.key === 'U')) {
+        e.preventDefault();
+        e.stopPropagation();
+        showAlertModal('Action Blocked', 'View source is not allowed during exams.', 'alert');
+        return false;
+      }
+      return true;
+    };
+
+    document.addEventListener('keydown', preventDevTools, true);
+
+    return () => {
+      document.removeEventListener('keydown', preventDevTools, true);
+    };
+  }, [isExamActive]);
+
+  // Persist exam active state to localStorage
+  useEffect(() => {
+    if (isExamActive) {
+      localStorage.setItem(`exam-active-${examId}`, 'true');
+    } else {
+      localStorage.removeItem(`exam-active-${examId}`);
+    }
+  }, [isExamActive, examId]);
+
+  // Restore exam from cache
+  useEffect(() => {
+    if (examId) {
+      const cachedExam = localStorage.getItem(`exam-cache-${examId}`);
+      if (cachedExam) {
+        try {
+          const parsed = JSON.parse(cachedExam);
+          setExam(parsed.exam);
+          setExamQuestions(parsed.questions || []);
+          setExamStartTime(parsed.exam.startTime);
+          setExamEndTime(parsed.exam.endTime);
+          setSubmissionType(parsed.exam.submissionType || 'both');
+          setLoading(false);
+        } catch (e) {
+          console.log('Could not restore exam cache');
+        }
+      }
+    }
+  }, [examId]);
+
+  // Restore exam state from localStorage
+  useEffect(() => {
+    if (examId) {
+      const savedActiveState = localStorage.getItem(`exam-active-${examId}`);
+      if (savedActiveState === 'true') {
+        console.log('✅ Exam was active, restoring immediately');
+        setIsExamActive(true);
+        setShowStartConfirmation(false);
+        setIsResuming(false);
+      }
+      
+      const savedAnswers = localStorage.getItem(`exam-answers-${examId}`);
+      if (savedAnswers) {
+        try {
+          const parsed = JSON.parse(savedAnswers);
+          console.log('✅ Restored answers from localStorage:', Object.keys(parsed).length, 'answers');
+          setExamAnswers(parsed);
+        } catch (e) {
+          console.log('Could not restore answers');
+        }
+      }
+      
+      const savedText = localStorage.getItem(`exam-text-${examId}`);
+      if (savedText) {
+        console.log('✅ Restored answer text from localStorage');
+        setAnswerText(savedText);
+      }
+      
+      const savedIndex = localStorage.getItem(`exam-question-index-${examId}`);
+      if (savedIndex) {
+        const index = parseInt(savedIndex);
+        if (!isNaN(index) && index >= 0) {
+          console.log('✅ Restored question index:', index);
+          setActiveQuestionIndex(index);
+        }
+      }
+    }
+  }, [examId]);
+
+  // Force exam to stay active
+  useEffect(() => {
+    if (exam && isExamActive) {
+      console.log('✅ Exam is active, keeping exam interface open');
+      setIsResuming(false);
+      setShowStartConfirmation(false);
+      
+      if (!timerIntervalRef.current) {
+        startTimer();
+      }
+    }
+  }, [exam, isExamActive]);
+
+  // Save answers to localStorage AND Supabase
+  useEffect(() => {
+    if (examId && Object.keys(examAnswers).length > 0) {
+      localStorage.setItem(`exam-answers-${examId}`, JSON.stringify(examAnswers));
+      
+      if (examSubmission?.id) {
+        const saveToServer = async () => {
+          try {
+            await supabase
+              .from('exam_submissions')
+              .update({ 
+                answers: examAnswers,
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', examSubmission.id);
+            console.log('✅ Answers saved to server');
+          } catch (error) {
+            console.log('Could not save to server:', error.message);
+          }
+        };
+        saveToServer();
+      }
+    }
+  }, [examAnswers, examId, examSubmission?.id]);
+
+  // Save current question index
+  useEffect(() => {
+    if (examId) {
+      localStorage.setItem(`exam-question-index-${examId}`, String(activeQuestionIndex));
+    }
+  }, [activeQuestionIndex, examId]);
+
+  // Save answer text
+  useEffect(() => {
+    if (examId && answerText) {
+      localStorage.setItem(`exam-text-${examId}`, answerText);
+      
+      if (examSubmission?.id) {
+        const saveToServer = async () => {
+          try {
+            await supabase
+              .from('exam_submissions')
+              .update({ 
+                answer_text: answerText,
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', examSubmission.id);
+            console.log('✅ Answer text saved to server');
+          } catch (error) {
+            console.log('Could not save text to server:', error.message);
+          }
+        };
+        saveToServer();
+      }
+    }
+  }, [answerText, examId, examSubmission?.id]);
+
+  // Auto-start timer
+  useEffect(() => {
+    if (isExamActive) {
+      startTimer();
+      if (examSubmission) {
+        startAutoSave(examSubmission.id);
+      }
+    }
+  }, [isExamActive, examSubmission]);
+
+  // Cleanup intervals
   useEffect(() => {
     return () => {
       if (timerIntervalRef.current) {
@@ -60,16 +416,14 @@ const TakeExam = () => {
     };
   }, []);
 
-  // Get current time in EAT (East Africa Time)
+  // Get current time in EAT
   const getCurrentEATTime = () => {
-    // EAT is UTC+3
     const now = new Date();
     const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-    const eat = new Date(utc + (3 * 3600000)); // UTC+3
+    const eat = new Date(utc + (3 * 3600000));
     return eat;
   };
 
-  // Format date in EAT timezone
   const formatEATDate = (dateString) => {
     if (!dateString) return 'Not set';
     const date = new Date(dateString);
@@ -80,18 +434,16 @@ const TakeExam = () => {
       hour: '2-digit',
       minute: '2-digit',
       hour12: true,
-      timeZone: 'Africa/Nairobi' // EAT timezone
+      timeZone: 'Africa/Nairobi'
     }) + ' EAT';
   };
 
-  // Format time only (no date)
   const formatEATTimeOnly = (dateString) => {
     if (!dateString) return 'Not set';
     const date = new Date(dateString);
     return date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) + ' EAT';
   };
 
-  // Calculate time remaining until exam start
   const calculateTimeUntilStart = () => {
     if (!examStartTime) return;
     
@@ -111,7 +463,6 @@ const TakeExam = () => {
     return { hours, minutes, seconds };
   };
 
-  // Calculate time remaining and elapsed
   const calculateTimeRemaining = () => {
     if (!examStartTime || !examEndTime) return;
     
@@ -119,24 +470,20 @@ const TakeExam = () => {
     const startTime = new Date(examStartTime);
     const endTime = new Date(examEndTime);
     
-    // Check if exam has ended
     if (now >= endTime) {
       setIsExamEnded(true);
       setIsTimeUp(true);
       return { hours: 0, minutes: 0, seconds: 0 };
     }
     
-    // Check if exam has started
     if (now >= startTime) {
       setIsExamStarted(true);
       
-      // Calculate time remaining
       const diffMs = endTime - now;
       const hours = Math.floor(diffMs / (1000 * 60 * 60));
       const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
       const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
       
-      // Calculate time elapsed
       const elapsedMs = now - startTime;
       const elapsedHours = Math.floor(elapsedMs / (1000 * 60 * 60));
       const elapsedMinutes = Math.floor((elapsedMs % (1000 * 60 * 60)) / (1000 * 60));
@@ -149,7 +496,6 @@ const TakeExam = () => {
     return { hours: 0, minutes: 0, seconds: 0 };
   };
 
-  // Start the countdown timer
   const startTimer = () => {
     if (timerIntervalRef.current) {
       clearInterval(timerIntervalRef.current);
@@ -160,7 +506,6 @@ const TakeExam = () => {
       if (remaining) {
         setTimeRemaining(remaining);
         
-        // Check if time is up
         if (remaining.hours === 0 && remaining.minutes === 0 && remaining.seconds === 0) {
           setIsTimeUp(true);
           if (timerIntervalRef.current) {
@@ -171,7 +516,6 @@ const TakeExam = () => {
     }, 1000);
   };
 
-  // Start time until start countdown
   const startTimeUntilStartTimer = () => {
     if (timeRemainingIntervalRef.current) {
       clearInterval(timeRemainingIntervalRef.current);
@@ -182,7 +526,6 @@ const TakeExam = () => {
       if (untilStart) {
         setTimeUntilStart(untilStart);
         
-        // Check if exam has started
         if (untilStart.hours === 0 && untilStart.minutes === 0 && untilStart.seconds === 0) {
           setIsExamStarted(true);
           if (timeRemainingIntervalRef.current) {
@@ -194,7 +537,6 @@ const TakeExam = () => {
     }, 1000);
   };
 
-  // Start exam based on scheduled time
   const startExamBasedOnSchedule = () => {
     if (!examStartTime) return;
     
@@ -202,25 +544,20 @@ const TakeExam = () => {
     const startTime = new Date(examStartTime);
     const endTime = new Date(examEndTime);
     
-    // Check if exam has ended
     if (now >= endTime) {
       setIsExamEnded(true);
       setIsTimeUp(true);
       return;
     }
     
-    // Check if exam is currently active
     if (now >= startTime && now < endTime) {
       setIsExamStarted(true);
       
-      // If there's an existing submission in 'started' status, use it
       if (examSubmission?.status === 'started') {
         setIsResuming(true);
-        // Don't show start confirmation when resuming
         setShowStartConfirmation(false);
       }
     } else if (now < startTime) {
-      // Exam hasn't started yet
       setIsExamStarted(false);
       startTimeUntilStartTimer();
     }
@@ -238,14 +575,12 @@ const TakeExam = () => {
     }
   }, [examStartTime, examEndTime]);
 
-  // Save progress when leaving tab
+  // Save progress silently when leaving
   useEffect(() => {
-    const handleBeforeUnload = (e) => {
+    const handleBeforeUnload = () => {
       if (isExamActive && examSubmission) {
         saveProgressSilently();
-        e.preventDefault();
-        e.returnValue = 'Your exam progress will be saved.';
-        return 'Your exam progress will be saved.';
+        localStorage.setItem(`exam-active-${examId}`, 'true');
       }
     };
 
@@ -254,7 +589,7 @@ const TakeExam = () => {
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [isExamActive, examSubmission]);
+  }, [isExamActive, examSubmission, examId]);
 
   const fetchStudentInfo = async () => {
     try {
@@ -289,7 +624,6 @@ const TakeExam = () => {
       setLoading(true);
       setError(null);
 
-      // Fetch exam details
       const { data: examData, error: examError } = await supabase
         .from('examinations')
         .select('*')
@@ -300,7 +634,9 @@ const TakeExam = () => {
         throw new Error('Exam not found');
       }
 
-      // Try to fetch course details
+      const examSubmissionType = examData.submission_type || 'both';
+      setSubmissionType(examSubmissionType);
+
       let courseCode = 'N/A';
       let courseName = 'N/A';
       if (examData.course_id) {
@@ -320,7 +656,6 @@ const TakeExam = () => {
         }
       }
 
-      // Try to fetch student's exam submission
       let submission = null;
       try {
         const { data: submissionData } = await supabase
@@ -337,10 +672,18 @@ const TakeExam = () => {
 
       if (submission) {
         if (submission.status === 'started') {
-          setIsResuming(true);
           setExamSubmission(submission);
           
-          // Restore answers if any
+          const wasActive = localStorage.getItem(`exam-active-${examId}`);
+          if (wasActive === 'true') {
+            setIsExamActive(true);
+            setIsResuming(false);
+            setShowStartConfirmation(false);
+            console.log('🔄 Auto-resuming active exam session after refresh');
+          } else {
+            setIsResuming(true);
+          }
+          
           if (submission.answers) {
             try {
               const answers = typeof submission.answers === 'string' 
@@ -356,12 +699,13 @@ const TakeExam = () => {
           }
         } else if (submission.status === 'submitted') {
           setExamSubmission(submission);
-          alert('This exam has already been submitted.');
-          navigate('/examinations');
+          showAlertModal('Already Submitted', 'This exam has already been submitted.', 'alert', () => {
+            navigate('/examinations');
+          });
+          return;
         }
       }
 
-      // Try to fetch exam questions
       try {
         const { data: questions } = await supabase
           .from('exam_questions')
@@ -375,7 +719,6 @@ const TakeExam = () => {
         console.log('No questions found or permission denied');
       }
 
-      // Process exam data
       const processedExam = {
         id: examData.id,
         title: examData.title === 'NA' ? `${courseCode} Final` : examData.title,
@@ -384,6 +727,7 @@ const TakeExam = () => {
         courseCode,
         courseName,
         examType: examData.exam_type || 'online',
+        submissionType: examSubmissionType,
         startTime: examData.start_time,
         endTime: examData.end_time,
         duration: examData.duration_minutes || 60,
@@ -401,7 +745,15 @@ const TakeExam = () => {
       setExamEndTime(examData.end_time);
       setTotalDurationMinutes(examData.duration_minutes || 60);
 
-      // Calculate initial times
+      try {
+        localStorage.setItem(`exam-cache-${examId}`, JSON.stringify({
+          exam: processedExam,
+          questions: examQuestions,
+        }));
+      } catch (e) {
+        console.log('Could not cache exam');
+      }
+
       const now = getCurrentEATTime();
       const startTime = new Date(examData.start_time);
       const endTime = new Date(examData.end_time);
@@ -468,64 +820,42 @@ const TakeExam = () => {
 
       if (error) {
         console.error('Error saving progress:', error);
-        if (showAlert) alert('Failed to save progress. Please try again.');
+        if (showAlert) showAlertModal('Save Failed', 'Failed to save progress. Please try again.', 'error');
       } else {
         console.log('Progress saved successfully');
-        if (showAlert) alert('Progress saved successfully!');
+        if (showAlert) showAlertModal('Success', 'Progress saved successfully!', 'success');
       }
     } catch (error) {
       console.error('Error saving progress:', error);
-      if (showAlert) alert('Failed to save progress. Please check your connection.');
+      if (showAlert) showAlertModal('Save Failed', 'Failed to save progress. Please check your connection.', 'error');
     }
   };
 
-  const handleStartConfirmation = async () => {
+  const handleStartExam = () => {
+    if (isStartingExam) return;
+    
+    if (isExamEnded) {
+      showAlertModal('Exam Ended', 'This exam has already ended. Please contact your lecturer.', 'alert');
+      return;
+    }
+    
+    if (!isExamStarted) {
+      showAlertModal('Not Started', `Exam has not started yet. It starts at ${formatEATDate(examStartTime)}`, 'alert');
+      return;
+    }
+    
+    proceedWithStart();
+  };
+
+  const proceedWithStart = async () => {
+    if (isStartingExam) return;
+    setIsStartingExam(true);
+    
     try {
       if (!studentInfo) {
         throw new Error('Student information not available');
       }
-      
-      // Check if exam has ended
-      if (isExamEnded) {
-        alert('This exam has already ended. Please contact your lecturer.');
-        return;
-      }
-      
-      // Check if exam has started based on schedule
-      if (!isExamStarted) {
-        alert(`Exam has not started yet. It starts at ${formatEATDate(examStartTime)}`);
-        return;
-      }
-      
-      // Check if student has confirmed they started the exam
-      const hasConfirmed = localStorage.getItem(`exam_confirmed_${examId}`);
-      
-      if (!hasConfirmed) {
-        const startConfirmation = window.confirm(
-          `Have you started the ${exam.title} exam?\n\n` +
-          `Exam ends at: ${formatEATTimeOnly(exam.endTime)}\n` +
-          `Total Marks: ${exam.totalMarks}\n\n` +
-          `Only confirm "OK" when you have physically started the exam.\n\n` +
-          `Click "OK" to proceed to download exam papers.`
-        );
-        
-        if (!startConfirmation) {
-          return;
-        }
-        
-        localStorage.setItem(`exam_confirmed_${examId}`, 'true');
-      }
-      
-      const confirmed = window.confirm(
-        `Are you ready to start the ${exam.title} exam?\n\n` +
-        `Exam ends at: ${formatEATTimeOnly(exam.endTime)}\n` +
-        `Total Marks: ${exam.totalMarks}\n\n` +
-        `Do you want to continue?`
-      );
-      
-      if (!confirmed) return;
 
-      // Prepare submission data
       const submissionData = {
         exam_id: exam.id,
         student_id: studentInfo.student_id,
@@ -536,7 +866,6 @@ const TakeExam = () => {
 
       let submissionId;
       if (examSubmission) {
-        // Update existing submission
         const { data, error } = await supabase
           .from('exam_submissions')
           .update(submissionData)
@@ -549,7 +878,6 @@ const TakeExam = () => {
         setExamSubmission(data);
         submissionId = data.id;
       } else {
-        // Create new submission
         try {
           const { data, error } = await supabase
             .from('exam_submissions')
@@ -570,7 +898,6 @@ const TakeExam = () => {
         } catch (insertError) {
           console.error('Insert failed:', insertError);
           
-          // Try simpler insert
           const { data, error } = await supabase
             .from('exam_submissions')
             .insert({
@@ -588,46 +915,113 @@ const TakeExam = () => {
         }
       }
 
-      // Hide the start confirmation and start the exam
       setShowStartConfirmation(false);
       setIsResuming(false);
       setIsExamActive(true);
       
-      // Start auto-save
       startAutoSave(submissionId);
       startTimer();
       
     } catch (error) {
       console.error('Error starting exam:', error);
-      alert(`Failed to start exam. Please try again.\n\nError: ${error.message}`);
+      showAlertModal('Error', `Failed to start exam: ${error.message}`, 'error');
+    } finally {
+      setIsStartingExam(false);
     }
+  };
+
+  const validateSubmissionRequirements = () => {
+    // If submission_type is 'file' or 'both', check for files
+    if (submissionType === 'file' || submissionType === 'both') {
+      if (exam.examType === 'online' && examQuestions.length > 0) {
+        const answeredCount = Object.keys(examAnswers).length;
+        if (answeredCount < examQuestions.length) {
+          showAlertModal('Incomplete', `Please answer all ${examQuestions.length} questions before submitting.`, 'alert');
+          return false;
+        }
+        return true;
+      }
+      
+      if (exam.examType === 'written_online' || exam.examType === 'written') {
+        if (examFiles.length === 0) {
+          showAlertModal('No Files', 'This exam requires file upload. Please upload your answer files before submitting.', 'alert');
+          return false;
+        }
+        return true;
+      }
+    }
+    
+    // If submission_type is 'text' or 'both', check for text
+    if (submissionType === 'text' || submissionType === 'both') {
+      if (exam.examType === 'online' && examQuestions.length > 0) {
+        const answeredCount = Object.keys(examAnswers).length;
+        if (answeredCount < examQuestions.length) {
+          showAlertModal('Incomplete', `Please answer all ${examQuestions.length} questions before submitting.`, 'alert');
+          return false;
+        }
+        return true;
+      }
+      
+      if (exam.examType === 'written_online' || exam.examType === 'written') {
+        const plainText = getPlainTextFromHTML(answerText);
+        if (!answerText || answerText.trim().length < 20 || plainText.trim().length < 10) {
+          showAlertModal('No Answer', 'Please write your answer (at least 10 characters) before submitting.', 'alert');
+          return false;
+        }
+        return true;
+      }
+    }
+    
+    return true;
   };
 
   const handleSubmitExam = async () => {
     if (!exam || !studentInfo) return;
     
-    const confirmed = window.confirm(
-      'Are you sure you want to submit the exam?\n\n' +
-      'Once submitted, you cannot make changes.'
+    if (!validateSubmissionRequirements()) {
+      return;
+    }
+    
+    let confirmMessage = 'Are you sure you want to submit the exam?\n\nOnce submitted, you cannot make changes.';
+    
+    if (submissionType === 'file') {
+      confirmMessage = `Are you sure you want to submit the exam?\n\nYou have uploaded ${examFiles.length} file(s).\nOnce submitted, you cannot make changes.`;
+    } else if (submissionType === 'text') {
+      const wordCount = getWordCount(answerText);
+      confirmMessage = `Are you sure you want to submit the exam?\n\nYour answer contains approximately ${wordCount} words.\nOnce submitted, you cannot make changes.`;
+    } else {
+      const wordCount = getWordCount(answerText);
+      confirmMessage = `Are you sure you want to submit the exam?\n\nText answer: ${wordCount} words\nFiles uploaded: ${examFiles.length}\nOnce submitted, you cannot make changes.`;
+    }
+    
+    showConfirmModal(
+      'Submit Exam',
+      confirmMessage,
+      async () => {
+        await submitExamToServer();
+      },
+      null,
+      'Yes, Submit',
+      'Cancel'
     );
-    
-    if (!confirmed) return;
-    
-    await submitExamToServer();
   };
 
   const submitExamToServer = async () => {
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+    
     if (!studentInfo) {
-      alert('Student information not available. Please try again.');
+      showAlertModal('Error', 'Student information not available. Please try again.', 'error');
+      isSubmittingRef.current = false;
       return;
     }
     
     setSubmittingExam(true);
     
     try {
-      // Upload answer files if any
       let answerFileUrls = [];
-      if (examFiles.length > 0) {
+      
+      if ((submissionType === 'file' || submissionType === 'both') && examFiles.length > 0) {
         try {
           answerFileUrls = await uploadExamFiles(exam.id, studentInfo.student_id);
         } catch (uploadError) {
@@ -635,28 +1029,26 @@ const TakeExam = () => {
         }
       }
 
-      // Prepare submission data
       const submissionData = {
         status: 'submitted',
         submitted_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
 
-      // Add answers based on exam type
-      if (exam.examType === 'online' && examQuestions.length > 0) {
-        submissionData.answers = examAnswers;
-      } else if (exam.examType === 'written_online') {
-        if (answerText) {
-          submissionData.answer_text = answerText;
+      if (submissionType === 'text' || submissionType === 'both') {
+        if (exam.examType === 'online' && examQuestions.length > 0) {
+          submissionData.answers = examAnswers;
+        } else if (exam.examType === 'written_online') {
+          if (answerText) {
+            submissionData.answer_text = answerText;
+          }
         }
       }
 
-      // Add file URLs
-      if (answerFileUrls.length > 0) {
+      if ((submissionType === 'file' || submissionType === 'both') && answerFileUrls.length > 0) {
         submissionData.answer_files = answerFileUrls;
       }
 
-      // Update submission record
       const { error } = await supabase
         .from('exam_submissions')
         .update(submissionData)
@@ -679,29 +1071,68 @@ const TakeExam = () => {
         }
       }
 
-      // Clear intervals
+      const { data: verifyData, error: verifyError } = await supabase
+        .from('exam_submissions')
+        .select('status, submitted_at')
+        .eq('exam_id', exam.id)
+        .eq('student_id', studentInfo.student_id)
+        .single();
+
+      if (verifyError) {
+        console.warn('Could not verify submission:', verifyError);
+      } else {
+        console.log('✅ Submission verified - Status:', verifyData.status);
+        console.log('✅ Submitted at:', verifyData.submitted_at);
+      }
+
       if (timerIntervalRef.current) {
         clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
       }
       if (timeRemainingIntervalRef.current) {
         clearInterval(timeRemainingIntervalRef.current);
+        timeRemainingIntervalRef.current = null;
       }
       if (window.autoSaveInterval) {
         clearInterval(window.autoSaveInterval);
         delete window.autoSaveInterval;
       }
 
-      // Clear confirmation
       localStorage.removeItem(`exam_confirmed_${examId}`);
-
+      localStorage.removeItem(`exam-answers-${examId}`);
+      localStorage.removeItem(`exam-text-${examId}`);
+      localStorage.removeItem(`exam-active-${examId}`);
+      localStorage.removeItem(`exam-cache-${examId}`);
+      
       setIsExamActive(false);
-      alert('Exam submitted successfully!');
-      navigate('/examinations');
+      setSubmittingExam(false);
+      isSubmittingRef.current = false;
+
+      let successMessage = 'Your exam has been submitted successfully.\n\nYou will now be redirected to the examinations page.';
+      
+      if (submissionType === 'file') {
+        successMessage = `✅ Your exam has been submitted successfully!\n\n${answerFileUrls.length} file(s) uploaded.\n\nYou will now be redirected to the examinations page.`;
+      } else if (submissionType === 'text') {
+        const wordCount = getWordCount(answerText);
+        successMessage = `✅ Your exam has been submitted successfully!\n\nYour answer (${wordCount} words) has been saved.\n\nYou will now be redirected to the examinations page.`;
+      }
+
+      showAlertModal(
+        '✅ Exam Submitted Successfully!', 
+        successMessage,
+        'success',
+        () => {
+          navigate('/examinations?fromExam=true&status=submitted', { 
+            replace: true 
+          });
+        }
+      );
+
     } catch (error) {
       console.error('Error submitting exam:', error);
-      alert(`Failed to submit exam: ${error.message}\n\nPlease save your work and contact support.`);
-    } finally {
       setSubmittingExam(false);
+      isSubmittingRef.current = false;
+      showAlertModal('Submission Failed', `Failed to submit exam: ${error.message}\n\nPlease save your work and contact support.`, 'error');
     }
   };
 
@@ -771,17 +1202,17 @@ const TakeExam = () => {
       setDownloadedPapers(prev => [...prev, filePath]);
       setShowDownloadDropdown(false);
       
-      alert(`Downloaded: ${fileName}`);
+      showAlertModal('Downloaded', `Downloaded: ${fileName}`, 'success');
     } catch (error) {
       console.error('Error downloading exam paper:', error);
-      alert(`Failed to download file: ${error.message}`);
+      showAlertModal('Download Failed', `Failed to download file: ${error.message}`, 'error');
     }
   };
 
   const handleFileSelect = (e) => {
     const files = Array.from(e.target.files);
     if (files.length + examFiles.length > 5) {
-      alert('Maximum 5 files allowed');
+      showAlertModal('File Limit', 'Maximum 5 files allowed', 'alert');
       return;
     }
     setExamFiles([...examFiles, ...files]);
@@ -821,43 +1252,45 @@ const TakeExam = () => {
       return;
     }
 
-    const confirmed = window.confirm(
-      'Are you sure you want to exit the exam?\n\n' +
-      'Your progress will be saved automatically.\n' +
-      'You can resume the exam later from where you left off.'
+    showConfirmModal(
+      'Exit Exam',
+      'Are you sure you want to exit the exam?\n\nYour progress will be saved automatically.\nYou can resume the exam later from where you left off.',
+      async () => {
+        try {
+          await saveProgressSilently();
+        } catch (error) {
+          console.error('Error saving on exit:', error);
+        }
+        
+        if (timerIntervalRef.current) {
+          clearInterval(timerIntervalRef.current);
+          timerIntervalRef.current = null;
+        }
+        if (window.autoSaveInterval) {
+          clearInterval(window.autoSaveInterval);
+          delete window.autoSaveInterval;
+        }
+        
+        setIsExamActive(false);
+        localStorage.removeItem(`exam-active-${examId}`);
+        showAlertModal('Exited', 'Exam exited successfully. You can resume it later from the examinations page.', 'success', () => {
+          navigate('/examinations?fromExam=true&status=resume', { replace: true });
+        });
+      },
+      null,
+      'Exit Exam',
+      'Stay'
     );
-    
-    if (!confirmed) return;
-
-    try {
-      await saveProgressSilently();
-    } catch (error) {
-      console.error('Error saving on exit:', error);
-    }
-    
-    if (timerIntervalRef.current) {
-      clearInterval(timerIntervalRef.current);
-    }
-    if (window.autoSaveInterval) {
-      clearInterval(window.autoSaveInterval);
-      delete window.autoSaveInterval;
-    }
-    
-    setIsExamActive(false);
-    alert('Exam exited successfully. You can resume it later from the examinations page.');
-    navigate('/examinations');
   };
 
   const handleResumeExam = () => {
-    // Check if exam has ended
     if (isExamEnded) {
-      alert('Exam time has ended. Please contact your lecturer.');
+      showAlertModal('Exam Ended', 'Exam time has ended. Please contact your lecturer.', 'alert');
       return;
     }
     
-    // Check if exam has started based on schedule
     if (!isExamStarted) {
-      alert(`Exam has not started yet. It starts at ${formatEATDate(examStartTime)}`);
+      showAlertModal('Not Started', `Exam has not started yet. It starts at ${formatEATDate(examStartTime)}`, 'alert');
       return;
     }
     
@@ -870,35 +1303,101 @@ const TakeExam = () => {
     startTimer();
   };
 
-  const handleStartExam = () => {
-    // Show the start confirmation screen
-    setShowStartConfirmation(true);
-  };
-
   const handleCancelStart = () => {
-    // Go back to examinations page
     navigate('/examinations');
   };
 
   // Auto-submit when time is up
   useEffect(() => {
-    if (isTimeUp && isExamActive) {
+    if (isTimeUp && isExamActive && !isSubmittingRef.current) {
       const autoSubmit = async () => {
-        alert('Time is up! Your exam will be submitted automatically.');
-        await submitExamToServer();
+        showAlertModal('Time\'s Up!', 'Time is up! Your exam will be submitted automatically.', 'alert', async () => {
+          await submitExamToServer();
+        });
       };
       autoSubmit();
     }
   }, [isTimeUp, isExamActive]);
 
+  // Custom Modal Component
+  const Modal = () => {
+    if (!modal.isOpen) return null;
+
+    const getIcon = () => {
+      switch (modal.type) {
+        case 'confirm':
+          return 'fa-question-circle';
+        case 'success':
+          return 'fa-check-circle';
+        case 'error':
+          return 'fa-exclamation-circle';
+        default:
+          return 'fa-info-circle';
+      }
+    };
+
+    const getIconColor = () => {
+      switch (modal.type) {
+        case 'confirm':
+          return '#3498db';
+        case 'success':
+          return '#28a745';
+        case 'error':
+          return '#dc3545';
+        default:
+          return '#ffc107';
+      }
+    };
+
+    return (
+      <div style={styles.modalOverlay} onClick={(e) => {
+        if (e.target === e.currentTarget) closeModal();
+      }}>
+        <div style={styles.modalContent}>
+          <div style={styles.modalHeader}>
+            <i className={`fas ${getIcon()}`} style={{ ...styles.modalIcon, color: getIconColor() }}></i>
+            <h2 style={styles.modalTitle}>{modal.title}</h2>
+          </div>
+          
+          <div style={styles.modalBody}>
+            <p style={styles.modalMessage}>{modal.message}</p>
+          </div>
+          
+          <div style={styles.modalFooter}>
+            {modal.type === 'confirm' && modal.cancelText && (
+              <button
+                onClick={handleModalCancel}
+                style={{ ...styles.modalButton, ...styles.modalCancelButton }}
+              >
+                {modal.cancelText}
+              </button>
+            )}
+            <button
+              onClick={handleModalConfirm}
+              style={{
+                ...styles.modalButton,
+                ...styles.modalConfirmButton,
+                backgroundColor: modal.type === 'error' ? '#dc3545' : 
+                               modal.type === 'success' ? '#28a745' : '#007bff'
+              }}
+            >
+              {modal.confirmText}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // Render loading state
-  if (loading) {
+  if (loading && !exam && !isExamActive) {
     return (
       <div style={styles.container}>
         <div style={styles.loadingContainer}>
           <div style={styles.spinner}></div>
           <p>Loading exam...</p>
         </div>
+        <Modal />
       </div>
     );
   }
@@ -924,14 +1423,576 @@ const TakeExam = () => {
             Back to Examinations
           </button>
         </div>
+        <Modal />
       </div>
     );
   }
 
-  // Render START CONFIRMATION SCREEN (shown only when starting NEW exam)
+  // If exam is active, render the active exam interface
+  if (isExamActive) {
+    const activeQuestion = examQuestions[activeQuestionIndex];
+    const totalQuestions = examQuestions.length;
+    const isLastQuestion = activeQuestionIndex === totalQuestions - 1;
+    const isFirstQuestion = activeQuestionIndex === 0;
+
+    const showTextArea = submissionType === 'text' || submissionType === 'both';
+    const showFileUpload = submissionType === 'file' || submissionType === 'both';
+
+    return (
+      <div style={styles.container}>
+        <Modal />
+
+        <div style={styles.examHeader}>
+          <div style={styles.headerLeft}>
+            <div style={styles.courseInfo}>
+              <h1 style={styles.courseCode}>{exam.courseCode}</h1>
+              <div style={styles.examMeta}>
+                <span style={styles.metaItem}>
+                  <i className="fas fa-clock"></i> Ends: {formatEndTime(exam.endTime)}
+                </span>
+                <span style={styles.metaItem}>
+                  <i className="fas fa-chart-bar"></i> {exam.totalMarks} marks
+                </span>
+                <span style={styles.metaItem}>
+                  <i className="fas fa-user"></i> {studentInfo?.name || 'Student'}
+                </span>
+                <span style={{
+                  ...styles.metaItem,
+                  backgroundColor: submissionType === 'text' ? '#6f42c1' : 
+                                  submissionType === 'file' ? '#dc3545' : '#28a745',
+                  color: 'white',
+                  padding: '4px 12px',
+                  borderRadius: '20px',
+                  fontSize: '11px',
+                  fontWeight: '600'
+                }}>
+                  {submissionType === 'text' ? '📝 Text Answer' : 
+                   submissionType === 'file' ? '📎 File Upload' : '📝+📎 Both'}
+                </span>
+              </div>
+            </div>
+          </div>
+          
+          <div style={styles.headerRight}>
+            <div style={styles.timerContainer}>
+              <div style={styles.timer}>
+                <div style={styles.timerDisplay}>
+                  <div style={styles.timeUnit}>
+                    <div style={styles.timeNumber}>{timeRemaining.hours.toString().padStart(2, '0')}</div>
+                    <div style={styles.timeLabel}>HOURS</div>
+                  </div>
+                  <div style={styles.timeSeparator}>:</div>
+                  <div style={styles.timeUnit}>
+                    <div style={styles.timeNumber}>{timeRemaining.minutes.toString().padStart(2, '0')}</div>
+                    <div style={styles.timeLabel}>MINUTES</div>
+                  </div>
+                  <div style={styles.timeSeparator}>:</div>
+                  <div style={styles.timeUnit}>
+                    <div style={styles.timeNumber}>{timeRemaining.seconds.toString().padStart(2, '0')}</div>
+                    <div style={styles.timeLabel}>SECONDS</div>
+                  </div>
+                </div>
+                <div style={styles.timerProgress}>
+                  <div style={styles.progressBarContainer}>
+                    <div style={{
+                      ...styles.progressBarFill,
+                      width: `${((totalDurationMinutes - (timeRemaining.hours * 60 + timeRemaining.minutes)) / totalDurationMinutes) * 100}%`
+                    }} />
+                  </div>
+                  <div style={styles.progressText}>
+                    Elapsed: {timeElapsed.hours}h {timeElapsed.minutes}m / {totalDurationMinutes}m
+                  </div>
+                </div>
+                <div style={styles.currentTimeDisplay}>
+                  <i className="fas fa-clock"></i>
+                  EAT: {getCurrentEATTime().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                </div>
+              </div>
+            </div>
+            
+            {exam.examFiles && exam.examFiles.length > 0 && (
+              <div style={styles.downloadSection}>
+                <button
+                  onClick={() => setShowDownloadDropdown(!showDownloadDropdown)}
+                  style={styles.downloadToggle}
+                >
+                  <i className="fas fa-download"></i>
+                  Download Papers
+                  <i className={`fas fa-chevron-${showDownloadDropdown ? 'up' : 'down'}`} style={styles.dropdownArrow}></i>
+                </button>
+                
+                {showDownloadDropdown && (
+                  <div style={styles.downloadDropdown}>
+                    <div style={styles.dropdownHeader}>
+                      <i className="fas fa-file-pdf"></i>
+                      <span style={styles.dropdownTitle}>Exam Papers</span>
+                    </div>
+                    <div style={styles.dropdownFiles}>
+                      {exam.examFiles.map((filePath, index) => {
+                        const fileName = filePath.split('/').pop();
+                        const isDownloaded = downloadedPapers.includes(filePath);
+                        
+                        return (
+                          <div key={index} style={styles.dropdownFileItem}>
+                            <div style={styles.dropdownFileInfo}>
+                              <i className="fas fa-file" style={styles.dropdownFileIcon}></i>
+                              <div style={styles.dropdownFileName}>{fileName}</div>
+                            </div>
+                            <button
+                              onClick={() => downloadExamPaper(filePath)}
+                              style={{
+                                ...styles.dropdownDownloadButton,
+                                backgroundColor: isDownloaded ? '#6c757d' : '#007bff'
+                              }}
+                              disabled={isDownloaded}
+                            >
+                              {isDownloaded ? (
+                                <>
+                                  <i className="fas fa-check"></i>
+                                  Downloaded
+                                </>
+                              ) : (
+                                <>
+                                  <i className="fas fa-download"></i>
+                                  Download
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {timeRemaining.hours === 0 && timeRemaining.minutes < 10 && timeRemaining.minutes > 0 && (
+          <div style={styles.timeWarningAlert}>
+            <i className="fas fa-exclamation-triangle"></i>
+            <span>Time Alert: Less than {timeRemaining.minutes} minute{timeRemaining.minutes !== 1 ? 's' : ''} remaining!</span>
+          </div>
+        )}
+
+        <div style={styles.examContent}>
+          {exam.examType === 'online' && totalQuestions > 0 && (
+            <div style={styles.sidebar}>
+              <h4 style={styles.sidebarTitle}>
+                <i className="fas fa-list-ol"></i>
+                Questions ({totalQuestions})
+              </h4>
+              
+              <div style={styles.questionGrid}>
+                {examQuestions.map((question, index) => (
+                  <button
+                    key={question.id}
+                    onClick={() => setActiveQuestionIndex(index)}
+                    style={{
+                      ...styles.questionButton,
+                      backgroundColor: index === activeQuestionIndex ? '#3498db' : 
+                                     examAnswers[question.id] ? '#2ecc71' : '#ecf0f1',
+                      color: index === activeQuestionIndex ? 'white' : 
+                            examAnswers[question.id] ? 'white' : '#2c3e50',
+                      borderColor: index === activeQuestionIndex ? '#3498db' : 
+                                  examAnswers[question.id] ? '#2ecc71' : '#e0e0e0'
+                    }}
+                  >
+                    {index + 1}
+                  </button>
+                ))}
+              </div>
+              
+              <div style={styles.progressSection}>
+                <div style={styles.progressLabel}>Progress</div>
+                <div style={styles.progressBar}>
+                  <div style={{
+                    ...styles.progressFill,
+                    width: totalQuestions > 0 ? `${(Object.keys(examAnswers).length / totalQuestions) * 100}%` : '0%'
+                  }} />
+                </div>
+                <div style={styles.progressText}>
+                  {Object.keys(examAnswers).length} / {totalQuestions} answered
+                </div>
+              </div>
+              
+              <button 
+                onClick={() => saveProgress(true)}
+                style={styles.saveButton}
+                title="Save Progress"
+              >
+                <i className="fas fa-save"></i>
+                Save Progress
+              </button>
+            </div>
+          )}
+
+          <div style={styles.questionArea}>
+            {exam.examType === 'online' && totalQuestions > 0 ? (
+              <div>
+                <div style={styles.questionCard}>
+                  <div style={styles.questionHeader}>
+                    <h3 style={styles.questionTitle}>
+                      Question {activeQuestionIndex + 1} of {totalQuestions}
+                      {activeQuestion && activeQuestion.marks && (
+                        <span style={styles.marksBadge}>
+                          {activeQuestion.marks} marks
+                        </span>
+                      )}
+                    </h3>
+                    {activeQuestion && (
+                      <div style={styles.questionType}>
+                        {activeQuestion.question_type === 'multiple_choice' ? 'Multiple Choice' : 
+                         activeQuestion.question_type === 'essay' ? 'Essay' : 'Short Answer'}
+                      </div>
+                    )}
+                  </div>
+                  
+                  {activeQuestion && (
+                    <>
+                      <div style={styles.questionText}>
+                        {activeQuestion.question_text}
+                      </div>
+                      
+                      {activeQuestion.question_type === 'multiple_choice' && activeQuestion.options ? (
+                        <div style={styles.optionsContainer}>
+                          {(() => {
+                            try {
+                              const options = typeof activeQuestion.options === 'string' 
+                                ? JSON.parse(activeQuestion.options) 
+                                : activeQuestion.options;
+                              
+                              return options.map((option, index) => (
+                                <label key={index} style={{
+                                  ...styles.optionLabel,
+                                  backgroundColor: examAnswers[activeQuestion.id] === option ? '#d4edda' : '#f8f9fa',
+                                  borderColor: examAnswers[activeQuestion.id] === option ? '#28a745' : '#dee2e6',
+                                }}>
+                                  <input
+                                    type="radio"
+                                    name={`question-${activeQuestion.id}`}
+                                    value={option}
+                                    checked={examAnswers[activeQuestion.id] === option}
+                                    onChange={(e) => handleAnswerChange(activeQuestion.id, e.target.value)}
+                                    style={styles.radioInput}
+                                  />
+                                  <span style={styles.optionText}>{option}</span>
+                                </label>
+                              ));
+                            } catch (e) {
+                              return <div style={styles.errorText}>Error loading options</div>;
+                            }
+                          })()}
+                        </div>
+                      ) : (
+                        showTextArea ? (
+                          <textarea
+                            value={examAnswers[activeQuestion.id] || ''}
+                            onChange={(e) => handleAnswerChange(activeQuestion.id, e.target.value)}
+                            onPaste={(e) => { 
+                              e.preventDefault(); 
+                              e.stopPropagation();
+                              showAlertModal('Action Blocked', 'Pasting is not allowed during exams.', 'alert');
+                              return false;
+                            }}
+                            onCopy={(e) => e.stopPropagation()}
+                            onCut={(e) => { 
+                              e.preventDefault(); 
+                              e.stopPropagation();
+                              showAlertModal('Action Blocked', 'Cutting is not allowed during exams.', 'alert');
+                              return false;
+                            }}
+                            placeholder="Type your answer here..."
+                            style={styles.answerTextarea}
+                          />
+                        ) : (
+                          <div style={{
+                            padding: '20px',
+                            backgroundColor: '#fff3cd',
+                            borderRadius: '8px',
+                            textAlign: 'center',
+                            color: '#856404'
+                          }}>
+                            <i className="fas fa-info-circle" style={{ marginRight: '10px' }}></i>
+                            This exam only accepts file uploads. Please upload your answer files.
+                          </div>
+                        )
+                      )}
+                    </>
+                  )}
+                </div>
+
+                {totalQuestions > 1 && (
+                  <div style={styles.navigationButtons}>
+                    <button
+                      onClick={() => setActiveQuestionIndex(activeQuestionIndex - 1)}
+                      disabled={isFirstQuestion}
+                      style={{
+                        ...styles.navButton,
+                        ...styles.prevButton,
+                        opacity: isFirstQuestion ? 0.5 : 1,
+                        cursor: isFirstQuestion ? 'not-allowed' : 'pointer'
+                      }}
+                    >
+                      <i className="fas fa-arrow-left"></i>
+                      Previous
+                    </button>
+                    
+                    <button
+                      onClick={() => setActiveQuestionIndex(activeQuestionIndex + 1)}
+                      disabled={isLastQuestion}
+                      style={{
+                        ...styles.navButton,
+                        ...styles.nextButton,
+                        opacity: isLastQuestion ? 0.5 : 1,
+                        cursor: isLastQuestion ? 'not-allowed' : 'pointer'
+                      }}
+                    >
+                      Next
+                      <i className="fas fa-arrow-right"></i>
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              // WRITTEN EXAM VIEW
+              <div>
+                <div style={styles.writtenExamCard}>
+                  <h3 style={styles.writtenTitle}>
+                    <i className="fas fa-file-alt"></i>
+                    Written Exam Answer Sheet
+                    <span style={{
+                      fontSize: '14px',
+                      backgroundColor: submissionType === 'text' ? '#6f42c1' : 
+                                      submissionType === 'file' ? '#dc3545' : '#28a745',
+                      color: 'white',
+                      padding: '4px 12px',
+                      borderRadius: '20px',
+                      marginLeft: '15px',
+                      fontWeight: '500'
+                    }}>
+                      {submissionType === 'text' ? '📝 Text Only' : 
+                       submissionType === 'file' ? '📎 File Only' : '📝+📎 Both'}
+                    </span>
+                  </h3>
+                  
+                  <div style={styles.writtenInstructions}>
+                    {exam.instructions || 'Please write your answers below or upload files.'}
+                    <div style={styles.bucketNote}>
+                      <i className="fas fa-info-circle"></i>
+                      Your submitted files will be stored as full public URLs
+                    </div>
+                    <div style={{
+                      marginTop: '12px',
+                      padding: '12px 16px',
+                      backgroundColor: '#e8f4fd',
+                      borderRadius: '8px',
+                      fontSize: '14px',
+                      borderLeft: '4px solid #007bff'
+                    }}>
+                      <strong>Submission Requirements:</strong>
+                      {submissionType === 'text' && ' You must provide a text answer (minimum 10 characters).'}
+                      {submissionType === 'file' && ' You must upload at least one file (PDF, DOC, DOCX, JPG, PNG).'}
+                      {submissionType === 'both' && ' You must provide either a text answer OR upload files (or both).'}
+                    </div>
+                  </div>
+                  
+                  {showTextArea && (
+                    <textarea
+                      value={answerText}
+                      onChange={(e) => setAnswerText(e.target.value)}
+                      onPaste={(e) => { 
+                        e.preventDefault(); 
+                        e.stopPropagation();
+                        showAlertModal('Action Blocked', 'Pasting is not allowed during exams.', 'alert');
+                        return false;
+                      }}
+                      onCopy={(e) => e.stopPropagation()}
+                      onCut={(e) => { 
+                        e.preventDefault(); 
+                        e.stopPropagation();
+                        showAlertModal('Action Blocked', 'Cutting is not allowed during exams.', 'alert');
+                        return false;
+                      }}
+                      placeholder={submissionType === 'file' ? 'Text answer is not required for this exam.' : "Write your exam answers here..."}
+                      style={{
+                        ...styles.writtenTextarea,
+                        opacity: submissionType === 'file' ? 0.5 : 1,
+                        cursor: submissionType === 'file' ? 'not-allowed' : 'text'
+                      }}
+                      disabled={submissionType === 'file'}
+                    />
+                  )}
+
+                  {!showTextArea && (
+                    <div style={{
+                      padding: '20px',
+                      backgroundColor: '#fff3cd',
+                      borderRadius: '8px',
+                      textAlign: 'center',
+                      marginBottom: '20px',
+                      color: '#856404'
+                    }}>
+                      <i className="fas fa-info-circle" style={{ marginRight: '10px' }}></i>
+                      This exam only accepts file uploads. Please upload your answer files below.
+                    </div>
+                  )}
+                  
+                  {showFileUpload && (
+                    <div>
+                      <h4 style={styles.uploadTitle}>
+                        <i className="fas fa-paperclip"></i>
+                        {submissionType === 'file' ? 'Upload Your Answer Files (Required)' : 'Upload Supporting Files (Optional)'}
+                      </h4>
+                      
+                      <div 
+                        style={{
+                          ...styles.uploadZone,
+                          borderColor: submissionType === 'file' && examFiles.length === 0 ? '#dc3545' : '#007bff',
+                          backgroundColor: submissionType === 'file' && examFiles.length === 0 ? '#fff5f5' : '#f8faff'
+                        }}
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        <i className="fas fa-cloud-upload-alt" style={styles.uploadIcon}></i>
+                        <div style={styles.uploadText}>
+                          {submissionType === 'file' ? '📎 Click to upload your answer files (Required)' : 'Click to upload files'}
+                        </div>
+                        <div style={styles.uploadSubtext}>
+                          PDF, DOC, DOCX, JPG, PNG (Max 10MB each, up to 5 files)
+                        </div>
+                        <div style={styles.bucketSubtext}>
+                          Files stored as full public URLs
+                        </div>
+                        {submissionType === 'file' && examFiles.length === 0 && (
+                          <div style={{
+                            marginTop: '10px',
+                            color: '#dc3545',
+                            fontWeight: 'bold',
+                            fontSize: '14px'
+                          }}>
+                            ⚠️ Please upload at least one file before submitting
+                          </div>
+                        )}
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          multiple
+                          onChange={handleFileSelect}
+                          accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                          style={styles.fileInput}
+                          required={submissionType === 'file'}
+                        />
+                      </div>
+                      
+                      {examFiles.length > 0 && (
+                        <div style={styles.uploadedFiles}>
+                          <h5 style={styles.uploadedTitle}>
+                            Uploaded Files ({examFiles.length}/5)
+                          </h5>
+                          {examFiles.map((file, index) => (
+                            <div key={index} style={styles.fileItem}>
+                              <div style={styles.fileInfo}>
+                                <i className="fas fa-file" style={styles.fileIcon}></i>
+                                <div>
+                                  <div style={styles.fileName}>{file.name}</div>
+                                  <div style={styles.fileSize}>
+                                    {(file.size / 1024 / 1024).toFixed(2)} MB
+                                  </div>
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => handleRemoveFile(index)}
+                                style={styles.removeButton}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {!showFileUpload && (
+                    <div style={{
+                      padding: '15px',
+                      backgroundColor: '#e8f4fd',
+                      borderRadius: '8px',
+                      textAlign: 'center',
+                      color: '#004085',
+                      marginTop: '20px'
+                    }}>
+                      <i className="fas fa-info-circle" style={{ marginRight: '8px' }}></i>
+                      This exam only accepts text answers. Please use the text area above.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div style={styles.examFooter}>
+          <div style={styles.footerLeft}>
+            <div style={styles.autoSaveIndicator}>
+              <i className="fas fa-sync-alt" style={styles.autoSaveIcon}></i>
+              <span style={styles.autoSaveText}>Auto-save enabled</span>
+            </div>
+            {uploadProgress > 0 && (
+              <div style={styles.uploadProgress}>
+                <div style={styles.progressBarContainer}>
+                  <div style={{
+                    ...styles.progressBarFill,
+                    width: `${uploadProgress}%`
+                  }} />
+                </div>
+                <span style={styles.progressText}>Uploading: {uploadProgress}%</span>
+              </div>
+            )}
+          </div>
+          
+          <div style={styles.footerRight}>
+            <button
+              onClick={handleCancelExam}
+              style={styles.exitButton}
+            >
+              <i className="fas fa-sign-out-alt"></i>
+              Exit Exam
+            </button>
+            
+            <button
+              onClick={handleSubmitExam}
+              disabled={submittingExam}
+              style={{
+                ...styles.submitButton,
+                backgroundColor: submittingExam ? '#6c757d' : '#28a745',
+                cursor: submittingExam ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {submittingExam ? (
+                <>
+                  <i className="fas fa-spinner fa-spin"></i>
+                  Submitting...
+                </>
+              ) : (
+                <>
+                  <i className="fas fa-paper-plane"></i>
+                  Submit Exam
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Render START CONFIRMATION SCREEN
   if (showStartConfirmation) {
     return (
       <div style={styles.container}>
+        <Modal />
         <div style={styles.startContainer}>
           <div style={styles.startHeader}>
             <h1 style={styles.startTitle}>{exam.title}</h1>
@@ -951,7 +2012,21 @@ const TakeExam = () => {
               <ul style={styles.instructionsList}>
                 <li>Exam ends at: {formatEndTime(exam.endTime)}</li>
                 <li>Once started, you can exit and resume later</li>
-                <li>You can either use the online answer sheet or upload files</li>
+                <li>
+                  <strong>Submission Type:</strong> 
+                  {submissionType === 'text' && ' 📝 Text Answer Only'}
+                  {submissionType === 'file' && ' 📎 File Upload Only'}
+                  {submissionType === 'both' && ' 📝 Text + 📎 File Upload'}
+                </li>
+                {submissionType === 'text' && (
+                  <li>You must provide a text answer (minimum 10 characters)</li>
+                )}
+                {submissionType === 'file' && (
+                  <li>You must upload at least one file (PDF, DOC, DOCX, JPG, PNG)</li>
+                )}
+                {submissionType === 'both' && (
+                  <li>You can provide text answer AND/OR upload files</li>
+                )}
                 <li>Your progress is auto-saved every 30 seconds</li>
                 <li>Make sure you have a stable internet connection</li>
                 {isExamEnded && (
@@ -981,6 +2056,22 @@ const TakeExam = () => {
                 <i className="fas fa-question-circle"></i>
                 <span>Type: {exam.examType === 'written_online' ? 'Written' : 'Online'} Exam</span>
               </div>
+              <div style={{
+                ...styles.infoRow,
+                backgroundColor: submissionType === 'text' ? '#f3e8ff' : 
+                                submissionType === 'file' ? '#ffe8e8' : '#e8f5e9',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                borderLeft: `4px solid ${submissionType === 'text' ? '#6f42c1' : 
+                                          submissionType === 'file' ? '#dc3545' : '#28a745'}`
+              }}>
+                <i className="fas fa-pen"></i>
+                <span>
+                  <strong>Submission:</strong> 
+                  {submissionType === 'text' ? ' 📝 Text Answer Only' : 
+                   submissionType === 'file' ? ' 📎 File Upload Only' : ' 📝 Text + 📎 File Upload'}
+                </span>
+              </div>
               <div style={styles.infoRow}>
                 <i className="fas fa-user"></i>
                 <span>Student: {studentInfo?.name || 'Unknown'}</span>
@@ -989,16 +2080,25 @@ const TakeExam = () => {
 
             <div style={styles.buttonGroup}>
               <button 
-                onClick={handleStartConfirmation}
+                onClick={handleStartExam}
                 style={{
                   ...styles.startButton,
-                  backgroundColor: !isExamStarted || isExamEnded ? '#6c757d' : '#28a745',
-                  cursor: !isExamStarted || isExamEnded ? 'not-allowed' : 'pointer'
+                  backgroundColor: !isExamStarted || isExamEnded || isStartingExam ? '#6c757d' : '#28a745',
+                  cursor: !isExamStarted || isExamEnded || isStartingExam ? 'not-allowed' : 'pointer'
                 }}
-                disabled={!isExamStarted || isExamEnded}
+                disabled={!isExamStarted || isExamEnded || isStartingExam}
               >
-                <i className="fas fa-play"></i>
-                Start Exam
+                {isStartingExam ? (
+                  <>
+                    <i className="fas fa-spinner fa-spin"></i>
+                    Starting...
+                  </>
+                ) : (
+                  <>
+                    <i className="fas fa-play"></i>
+                    Start Exam
+                  </>
+                )}
               </button>
               <button onClick={handleCancelStart} style={styles.cancelButton}>
                 <i className="fas fa-times"></i>
@@ -1011,611 +2111,167 @@ const TakeExam = () => {
     );
   }
 
-  // Render start/resume screen (exam not active, no start confirmation shown)
-  if (!isExamActive) {
-    return (
-      <div style={styles.container}>
-        <div style={styles.startContainer}>
-          <div style={styles.startHeader}>
-            <h1 style={styles.startTitle}>{exam.title}</h1>
-            <p style={styles.startSubtitle}>
-              <i className="fas fa-book"></i> {exam.courseCode}: {exam.courseName}
-            </p>
-            {studentInfo && (
-              <div style={styles.studentBadge}>
-                <i className="fas fa-user"></i> {studentInfo.name} ({studentInfo.student_id.slice(0, 8)}...)
-              </div>
-            )}
-          </div>
-
-          <div style={styles.startContent}>
-            {/* Exam Schedule Info */}
-            <div style={styles.scheduleInfo}>
-              <h3><i className="fas fa-calendar-alt"></i> Exam Schedule</h3>
-              <div style={styles.scheduleGrid}>
-                <div style={styles.scheduleItem}>
-                  <i className="fas fa-play-circle" style={styles.scheduleIcon}></i>
-                  <div>
-                    <div style={styles.scheduleLabel}>Start Time</div>
-                    <div style={styles.scheduleValue}>{formatEATDate(exam.startTime)}</div>
-                  </div>
-                </div>
-                <div style={styles.scheduleItem}>
-                  <i className="fas fa-stop-circle" style={styles.scheduleIcon}></i>
-                  <div>
-                    <div style={styles.scheduleLabel}>End Time</div>
-                    <div style={styles.scheduleValue}>{formatEATDate(exam.endTime)}</div>
-                  </div>
-                </div>
-                <div style={styles.scheduleItem}>
-                  <i className="fas fa-clock" style={styles.scheduleIcon}></i>
-                  <div>
-                    <div style={styles.scheduleLabel}>Duration</div>
-                    <div style={styles.scheduleValue}>{exam.duration} minutes</div>
-                  </div>
-                </div>
-                <div style={styles.scheduleItem}>
-                  <i className="fas fa-globe-africa" style={styles.scheduleIcon}></i>
-                  <div>
-                    <div style={styles.scheduleLabel}>Time Zone</div>
-                    <div style={styles.scheduleValue}>East Africa Time (EAT)</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Timer Display - Shows either countdown to start or exam ended */}
-            {!isExamStarted && !isExamEnded && (
-              <div style={styles.timeUntilStartContainer}>
-                <div style={styles.timeUntilStartHeader}>
-                  <i className="fas fa-hourglass-start"></i>
-                  <span>Exam Starts In</span>
-                </div>
-                <div style={styles.timeUntilStartDisplay}>
-                  <div style={styles.timeUnit}>
-                    <div style={styles.timeNumber}>{timeUntilStart.hours.toString().padStart(2, '0')}</div>
-                    <div style={styles.timeLabel}>HOURS</div>
-                  </div>
-                  <div style={styles.timeSeparator}>:</div>
-                  <div style={styles.timeUnit}>
-                    <div style={styles.timeNumber}>{timeUntilStart.minutes.toString().padStart(2, '0')}</div>
-                    <div style={styles.timeLabel}>MINUTES</div>
-                  </div>
-                  <div style={styles.timeSeparator}>:</div>
-                  <div style={styles.timeUnit}>
-                    <div style={styles.timeNumber}>{timeUntilStart.seconds.toString().padStart(2, '0')}</div>
-                    <div style={styles.timeLabel}>SECONDS</div>
-                  </div>
-                </div>
-                <div style={styles.currentTime}>
-                  <i className="fas fa-clock"></i>
-                  Current Time (EAT): {getCurrentEATTime().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}
-                </div>
-              </div>
-            )}
-
-            {isExamEnded && (
-              <div style={styles.examEndedAlert}>
-                <i className="fas fa-exclamation-triangle" style={styles.examEndedIcon}></i>
-                <h3>Exam Period Has Ended</h3>
-                <p>The scheduled exam time has passed. Please contact your lecturer for further instructions.</p>
-                <div style={styles.examEndedInfo}>
-                  <div>Exam ended at: {formatEATDate(exam.endTime)}</div>
-                  <div>Current time (EAT): {getCurrentEATTime().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}</div>
-                </div>
-              </div>
-            )}
-
-            {/* Resume section */}
-            {isResuming ? (
-              <div style={styles.resumeAlert}>
-                <i className="fas fa-history" style={styles.resumeIcon}></i>
-                <h3>Resume Exam</h3>
-                <p>You have an incomplete exam session. You can resume where you left off.</p>
-                
-                {isExamEnded ? (
-                  <div style={styles.timeUpWarning}>
-                    <i className="fas fa-exclamation-triangle"></i>
-                    <span>Exam time has ended. Please contact your lecturer.</span>
-                  </div>
-                ) : !isExamStarted ? (
-                  <div style={styles.timeInfo}>
-                    <i className="fas fa-clock"></i>
-                    <span>Exam starts at: {formatEATDate(exam.startTime)}</span>
-                  </div>
-                ) : (
-                  <div style={styles.timeInfo}>
-                  
-                  </div>
-                )}
-                
-                <div style={styles.buttonGroup}>
-                  {!isExamEnded && isExamStarted && (
-                    <button onClick={handleResumeExam} style={styles.resumeButton}>
-                      <i className="fas fa-play-circle"></i>
-                      Resume Exam
-                    </button>
-                  )}
-                  {!isExamEnded && isExamStarted && (
-                    <button onClick={handleCancelExam} style={styles.cancelButton}>
-                      <i className="fas fa-times"></i>
-                      Cancel
-                    </button>
-                  )}
-                  <button onClick={handleSubmitExam} style={styles.submitButton}>
-                    <i className="fas fa-paper-plane"></i>
-                    Submit Now
-                  </button>
-                </div>
-              </div>
-            ) : (
-                
-                
-              /* Start new exam section - Shows button to go to confirmation screen */
-              <div>
-                <div style={styles.buttonGroup}>
-                  <button 
-                    onClick={handleStartExam}
-                    style={{
-                      ...styles.startButton,
-                      backgroundColor: !isExamStarted || isExamEnded ? '#6c757d' : '#28a745',
-                      cursor: !isExamStarted || isExamEnded ? 'not-allowed' : 'pointer'
-                    }}
-                    disabled={!isExamStarted || isExamEnded}
-                  >
-                    <i className="fas fa-play"></i>
-                    {!isExamStarted ? 'Waiting for Start Time' : isExamEnded ? 'Exam Ended' : 'Proceed to Exam'}
-                  </button>
-                  <button onClick={() => navigate('/examinations')} style={styles.cancelButton}>
-                    <i className="fas fa-times"></i>
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Render active exam interface
-  const activeQuestion = examQuestions[activeQuestionIndex];
-  const totalQuestions = examQuestions.length;
-  const isLastQuestion = activeQuestionIndex === totalQuestions - 1;
-  const isFirstQuestion = activeQuestionIndex === 0;
-
+  // Render start/resume screen
   return (
     <div style={styles.container}>
-      {/* Exam Header with Timer */}
-      <div style={styles.examHeader}>
-        <div style={styles.headerLeft}>
-          <div style={styles.courseInfo}>
-            <h1 style={styles.courseCode}>{exam.courseCode}</h1>
-            <div style={styles.examMeta}>
-              <span style={styles.metaItem}>
-                <i className="fas fa-clock"></i> Ends: {formatEndTime(exam.endTime)}
-              </span>
-              <span style={styles.metaItem}>
-                <i className="fas fa-chart-bar"></i> {exam.totalMarks} marks
-              </span>
-              <span style={styles.metaItem}>
-                <i className="fas fa-user"></i> {studentInfo?.name || 'Student'}
-              </span>
+      <Modal />
+      <div style={styles.startContainer}>
+        <div style={styles.startHeader}>
+          <h1 style={styles.startTitle}>{exam.title}</h1>
+          <p style={styles.startSubtitle}>
+            <i className="fas fa-book"></i> {exam.courseCode}: {exam.courseName}
+          </p>
+          {studentInfo && (
+            <div style={styles.studentBadge}>
+              <i className="fas fa-user"></i> {studentInfo.name} ({studentInfo.student_id.slice(0, 8)}...)
+            </div>
+          )}
+        </div>
+
+        <div style={styles.startContent}>
+          <div style={styles.scheduleInfo}>
+            <h3><i className="fas fa-calendar-alt"></i> Exam Schedule</h3>
+            <div style={styles.scheduleGrid}>
+              <div style={styles.scheduleItem}>
+                <i className="fas fa-play-circle" style={styles.scheduleIcon}></i>
+                <div>
+                  <div style={styles.scheduleLabel}>Start Time</div>
+                  <div style={styles.scheduleValue}>{formatEATDate(exam.startTime)}</div>
+                </div>
+              </div>
+              <div style={styles.scheduleItem}>
+                <i className="fas fa-stop-circle" style={styles.scheduleIcon}></i>
+                <div>
+                  <div style={styles.scheduleLabel}>End Time</div>
+                  <div style={styles.scheduleValue}>{formatEATDate(exam.endTime)}</div>
+                </div>
+              </div>
+              <div style={styles.scheduleItem}>
+                <i className="fas fa-clock" style={styles.scheduleIcon}></i>
+                <div>
+                  <div style={styles.scheduleLabel}>Duration</div>
+                  <div style={styles.scheduleValue}>{exam.duration} minutes</div>
+                </div>
+              </div>
+              <div style={styles.scheduleItem}>
+                <i className="fas fa-globe-africa" style={styles.scheduleIcon}></i>
+                <div>
+                  <div style={styles.scheduleLabel}>Time Zone</div>
+                  <div style={styles.scheduleValue}>East Africa Time (EAT)</div>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-        
-        <div style={styles.headerRight}>
-          {/* Timer Display */}
-          <div style={styles.timerContainer}>
-            <div style={styles.timer}>
-              <div style={styles.timerDisplay}>
+
+          {!isExamStarted && !isExamEnded && (
+            <div style={styles.timeUntilStartContainer}>
+              <div style={styles.timeUntilStartHeader}>
+                <i className="fas fa-hourglass-start"></i>
+                <span>Exam Starts In</span>
+              </div>
+              <div style={styles.timeUntilStartDisplay}>
                 <div style={styles.timeUnit}>
-                  <div style={styles.timeNumber}>{timeRemaining.hours.toString().padStart(2, '0')}</div>
+                  <div style={styles.timeNumber}>{timeUntilStart.hours.toString().padStart(2, '0')}</div>
                   <div style={styles.timeLabel}>HOURS</div>
                 </div>
                 <div style={styles.timeSeparator}>:</div>
                 <div style={styles.timeUnit}>
-                  <div style={styles.timeNumber}>{timeRemaining.minutes.toString().padStart(2, '0')}</div>
+                  <div style={styles.timeNumber}>{timeUntilStart.minutes.toString().padStart(2, '0')}</div>
                   <div style={styles.timeLabel}>MINUTES</div>
                 </div>
                 <div style={styles.timeSeparator}>:</div>
                 <div style={styles.timeUnit}>
-                  <div style={styles.timeNumber}>{timeRemaining.seconds.toString().padStart(2, '0')}</div>
+                  <div style={styles.timeNumber}>{timeUntilStart.seconds.toString().padStart(2, '0')}</div>
                   <div style={styles.timeLabel}>SECONDS</div>
                 </div>
               </div>
-              <div style={styles.timerProgress}>
-                <div style={styles.progressBarContainer}>
-                  <div style={{
-                    ...styles.progressBarFill,
-                    width: `${((totalDurationMinutes - (timeRemaining.hours * 60 + timeRemaining.minutes)) / totalDurationMinutes) * 100}%`
-                  }} />
-                </div>
-                <div style={styles.progressText}>
-                  Elapsed: {timeElapsed.hours}h {timeElapsed.minutes}m / {totalDurationMinutes}m
-                </div>
-              </div>
-              <div style={styles.currentTimeDisplay}>
+              <div style={styles.currentTime}>
                 <i className="fas fa-clock"></i>
-                EAT: {getCurrentEATTime().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                Current Time (EAT): {getCurrentEATTime().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}
               </div>
-            </div>
-          </div>
-          
-          {/* Download Button */}
-          {exam.examFiles && exam.examFiles.length > 0 && (
-            <div style={styles.downloadSection}>
-              <button
-                onClick={() => setShowDownloadDropdown(!showDownloadDropdown)}
-                style={styles.downloadToggle}
-              >
-                <i className="fas fa-download"></i>
-                Download Papers
-                <i className={`fas fa-chevron-${showDownloadDropdown ? 'up' : 'down'}`} style={styles.dropdownArrow}></i>
-              </button>
-              
-              {showDownloadDropdown && (
-                <div style={styles.downloadDropdown}>
-                  <div style={styles.dropdownHeader}>
-                    <i className="fas fa-file-pdf"></i>
-                    <span style={styles.dropdownTitle}>Exam Papers</span>
-                  </div>
-                  <div style={styles.dropdownFiles}>
-                    {exam.examFiles.map((filePath, index) => {
-                      const fileName = filePath.split('/').pop();
-                      const isDownloaded = downloadedPapers.includes(filePath);
-                      
-                      return (
-                        <div key={index} style={styles.dropdownFileItem}>
-                          <div style={styles.dropdownFileInfo}>
-                            <i className="fas fa-file" style={styles.dropdownFileIcon}></i>
-                            <div style={styles.dropdownFileName}>{fileName}</div>
-                          </div>
-                          <button
-                            onClick={() => downloadExamPaper(filePath)}
-                            style={{
-                              ...styles.dropdownDownloadButton,
-                              backgroundColor: isDownloaded ? '#6c757d' : '#007bff'
-                            }}
-                            disabled={isDownloaded}
-                          >
-                            {isDownloaded ? (
-                              <>
-                                <i className="fas fa-check"></i>
-                                Downloaded
-                              </>
-                            ) : (
-                              <>
-                                <i className="fas fa-download"></i>
-                                Download
-                              </>
-                            )}
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
             </div>
           )}
-        </div>
-      </div>
 
-      {/* Time Warning Alert */}
-      {timeRemaining.hours === 0 && timeRemaining.minutes < 10 && timeRemaining.minutes > 0 && (
-        <div style={styles.timeWarningAlert}>
-          <i className="fas fa-exclamation-triangle"></i>
-          <span>Time Alert: Less than {timeRemaining.minutes} minute{timeRemaining.minutes !== 1 ? 's' : ''} remaining!</span>
-        </div>
-      )}
-
-      {/* Main Exam Content */}
-      <div style={styles.examContent}>
-        {/* Questions Navigation - Only show for online exams with questions */}
-        {exam.examType === 'online' && totalQuestions > 0 && (
-          <div style={styles.sidebar}>
-            <h4 style={styles.sidebarTitle}>
-              <i className="fas fa-list-ol"></i>
-              Questions ({totalQuestions})
-            </h4>
-            
-            <div style={styles.questionGrid}>
-              {examQuestions.map((question, index) => (
-                <button
-                  key={question.id}
-                  onClick={() => setActiveQuestionIndex(index)}
-                  style={{
-                    ...styles.questionButton,
-                    backgroundColor: index === activeQuestionIndex ? '#3498db' : 
-                                   examAnswers[question.id] ? '#2ecc71' : '#ecf0f1',
-                    color: index === activeQuestionIndex ? 'white' : 
-                          examAnswers[question.id] ? 'white' : '#2c3e50',
-                    borderColor: index === activeQuestionIndex ? '#3498db' : 
-                                examAnswers[question.id] ? '#2ecc71' : '#e0e0e0'
-                  }}
-                >
-                  {index + 1}
-                </button>
-              ))}
-            </div>
-            
-            <div style={styles.progressSection}>
-              <div style={styles.progressLabel}>Progress</div>
-              <div style={styles.progressBar}>
-                <div style={{
-                  ...styles.progressFill,
-                  width: totalQuestions > 0 ? `${(Object.keys(examAnswers).length / totalQuestions) * 100}%` : '0%'
-                }} />
-              </div>
-              <div style={styles.progressText}>
-                {Object.keys(examAnswers).length} / {totalQuestions} answered
+          {isExamEnded && (
+            <div style={styles.examEndedAlert}>
+              <i className="fas fa-exclamation-triangle" style={styles.examEndedIcon}></i>
+              <h3>Exam Period Has Ended</h3>
+              <p>The scheduled exam time has passed. Please contact your lecturer for further instructions.</p>
+              <div style={styles.examEndedInfo}>
+                <div>Exam ended at: {formatEATDate(exam.endTime)}</div>
+                <div>Current time (EAT): {getCurrentEATTime().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}</div>
               </div>
             </div>
-            
-            <button 
-              onClick={() => saveProgress(true)}
-              style={styles.saveButton}
-              title="Save Progress"
-            >
-              <i className="fas fa-save"></i>
-              Save Progress
-            </button>
-          </div>
-        )}
+          )}
 
-        {/* Question Area */}
-        <div style={styles.questionArea}>
-          {exam.examType === 'online' && totalQuestions > 0 ? (
-            <div>
-              <div style={styles.questionCard}>
-                <div style={styles.questionHeader}>
-                  <h3 style={styles.questionTitle}>
-                    Question {activeQuestionIndex + 1} of {totalQuestions}
-                    {activeQuestion && activeQuestion.marks && (
-                      <span style={styles.marksBadge}>
-                        {activeQuestion.marks} marks
-                      </span>
-                    )}
-                  </h3>
-                  {activeQuestion && (
-                    <div style={styles.questionType}>
-                      {activeQuestion.question_type === 'multiple_choice' ? 'Multiple Choice' : 
-                       activeQuestion.question_type === 'essay' ? 'Essay' : 'Short Answer'}
-                    </div>
-                  )}
+          {isResuming ? (
+            <div style={styles.resumeAlert}>
+              <i className="fas fa-history" style={styles.resumeIcon}></i>
+              <h3>Resume Exam</h3>
+              <p>You have an incomplete exam session. You can resume where you left off.</p>
+              
+              {isExamEnded ? (
+                <div style={styles.timeUpWarning}>
+                  <i className="fas fa-exclamation-triangle"></i>
+                  <span>Exam time has ended. Please contact your lecturer.</span>
                 </div>
-                
-                {activeQuestion && (
-                  <>
-                    <div style={styles.questionText}>
-                      {activeQuestion.question_text}
-                    </div>
-                    
-                    {/* Answer Area */}
-                    {activeQuestion.question_type === 'multiple_choice' && activeQuestion.options ? (
-                      <div style={styles.optionsContainer}>
-                        {(() => {
-                          try {
-                            const options = typeof activeQuestion.options === 'string' 
-                              ? JSON.parse(activeQuestion.options) 
-                              : activeQuestion.options;
-                            
-                            return options.map((option, index) => (
-                              <label key={index} style={{
-                                ...styles.optionLabel,
-                                backgroundColor: examAnswers[activeQuestion.id] === option ? '#d4edda' : '#f8f9fa',
-                                borderColor: examAnswers[activeQuestion.id] === option ? '#28a745' : '#dee2e6',
-                              }}>
-                                <input
-                                  type="radio"
-                                  name={`question-${activeQuestion.id}`}
-                                  value={option}
-                                  checked={examAnswers[activeQuestion.id] === option}
-                                  onChange={(e) => handleAnswerChange(activeQuestion.id, e.target.value)}
-                                  style={styles.radioInput}
-                                />
-                                <span style={styles.optionText}>{option}</span>
-                              </label>
-                            ));
-                          } catch (e) {
-                            return <div style={styles.errorText}>Error loading options</div>;
-                          }
-                        })()}
-                      </div>
-                    ) : (
-                      <textarea
-                        value={examAnswers[activeQuestion.id] || ''}
-                        onChange={(e) => handleAnswerChange(activeQuestion.id, e.target.value)}
-                        placeholder="Type your answer here...\n\nYou can write essays, short answers, or calculations.\n\nUse the full space available for your response."
-                        style={styles.answerTextarea}
-                      />
-                    )}
-                  </>
-                )}
-              </div>
-
-              {/* Navigation Buttons */}
-              {totalQuestions > 1 && (
-                <div style={styles.navigationButtons}>
-                  <button
-                    onClick={() => setActiveQuestionIndex(activeQuestionIndex - 1)}
-                    disabled={isFirstQuestion}
-                    style={{
-                      ...styles.navButton,
-                      ...styles.prevButton,
-                      opacity: isFirstQuestion ? 0.5 : 1,
-                      cursor: isFirstQuestion ? 'not-allowed' : 'pointer'
-                    }}
-                  >
-                    <i className="fas fa-arrow-left"></i>
-                    Previous
-                  </button>
-                  
-                  <button
-                    onClick={() => setActiveQuestionIndex(activeQuestionIndex + 1)}
-                    disabled={isLastQuestion}
-                    style={{
-                      ...styles.navButton,
-                      ...styles.nextButton,
-                      opacity: isLastQuestion ? 0.5 : 1,
-                      cursor: isLastQuestion ? 'not-allowed' : 'pointer'
-                    }}
-                  >
-                    Next
-                    <i className="fas fa-arrow-right"></i>
-                  </button>
+              ) : !isExamStarted ? (
+                <div style={styles.timeInfo}>
+                  <i className="fas fa-clock"></i>
+                  <span>Exam starts at: {formatEATDate(exam.startTime)}</span>
                 </div>
+              ) : (
+                <div style={styles.timeInfo}></div>
               )}
+              
+              <div style={styles.buttonGroup}>
+                {!isExamEnded && isExamStarted && (
+                  <button onClick={handleResumeExam} style={styles.resumeButton}>
+                    <i className="fas fa-play-circle"></i>
+                    Resume Exam
+                  </button>
+                )}
+                {!isExamEnded && isExamStarted && (
+                  <button onClick={handleCancelExam} style={styles.cancelButton}>
+                    <i className="fas fa-times"></i>
+                    Cancel
+                  </button>
+                )}
+                <button onClick={handleSubmitExam} style={styles.submitButton}>
+                  <i className="fas fa-paper-plane"></i>
+                  Submit Now
+                </button>
+              </div>
             </div>
           ) : (
-            /* Written Exam Interface */
             <div>
-              <div style={styles.writtenExamCard}>
-                <h3 style={styles.writtenTitle}>
-                  <i className="fas fa-file-alt"></i>
-                  Written Exam Answer Sheet
-                </h3>
-                
-                <div style={styles.writtenInstructions}>
-                  {exam.instructions || 'Please write your answers below or upload files.'}
-                  <div style={styles.bucketNote}>
-                    <i className="fas fa-info-circle"></i>
-                    Your submitted files will be stored as full public URLs
-                  </div>
-                </div>
-                
-                <textarea
-                  value={answerText}
-                  onChange={(e) => setAnswerText(e.target.value)}
-                  placeholder="Write your exam answers here...\n\nYou can type your responses, essays, calculations, etc.\n\nMake sure to save your work periodically.\n\nThis text area is large to give you plenty of space for writing comprehensive answers."
-                  style={styles.writtenTextarea}
-                />
-                
-                {/* File Upload Section */}
-                <div>
-                  <h4 style={styles.uploadTitle}>
-                    <i className="fas fa-paperclip"></i>
-                    Upload Supporting Files
-                  </h4>
-                  
-                  <div 
-                    style={styles.uploadZone}
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <i className="fas fa-cloud-upload-alt" style={styles.uploadIcon}></i>
-                    <div style={styles.uploadText}>
-                      Click to upload files
-                    </div>
-                    <div style={styles.uploadSubtext}>
-                      PDF, DOC, DOCX, JPG, PNG (Max 10MB each)
-                    </div>
-                    <div style={styles.bucketSubtext}>
-                      Files stored as full public URLs
-                    </div>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      multiple
-                      onChange={handleFileSelect}
-                      accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-                      style={styles.fileInput}
-                    />
-                  </div>
-                  
-                  {/* Uploaded Files List */}
-                  {examFiles.length > 0 && (
-                    <div style={styles.uploadedFiles}>
-                      <h5 style={styles.uploadedTitle}>
-                        Uploaded Files ({examFiles.length}/5)
-                      </h5>
-                      {examFiles.map((file, index) => (
-                        <div key={index} style={styles.fileItem}>
-                          <div style={styles.fileInfo}>
-                            <i className="fas fa-file" style={styles.fileIcon}></i>
-                            <div>
-                              <div style={styles.fileName}>{file.name}</div>
-                              <div style={styles.fileSize}>
-                                {(file.size / 1024 / 1024).toFixed(2)} MB
-                              </div>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => handleRemoveFile(index)}
-                            style={styles.removeButton}
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+              <div style={styles.buttonGroup}>
+                <button 
+                  onClick={() => setShowStartConfirmation(true)}
+                  style={{
+                    ...styles.startButton,
+                    backgroundColor: !isExamStarted || isExamEnded ? '#6c757d' : '#28a745',
+                    cursor: !isExamStarted || isExamEnded ? 'not-allowed' : 'pointer'
+                  }}
+                  disabled={!isExamStarted || isExamEnded}
+                >
+                  <i className="fas fa-play"></i>
+                  {!isExamStarted ? 'Waiting for Start Time' : isExamEnded ? 'Exam Ended' : 'Proceed to Exam'}
+                </button>
+                <button onClick={() => navigate('/examinations')} style={styles.cancelButton}>
+                  <i className="fas fa-times"></i>
+                  Cancel
+                </button>
               </div>
             </div>
           )}
-        </div>
-      </div>
-
-      {/* Exam Footer */}
-      <div style={styles.examFooter}>
-        <div style={styles.footerLeft}>
-          <div style={styles.autoSaveIndicator}>
-            <i className="fas fa-sync-alt" style={styles.autoSaveIcon}></i>
-            <span style={styles.autoSaveText}>Auto-save enabled</span>
-          </div>
-          {uploadProgress > 0 && (
-            <div style={styles.uploadProgress}>
-              <div style={styles.progressBarContainer}>
-                <div style={{
-                  ...styles.progressBarFill,
-                  width: `${uploadProgress}%`
-                }} />
-              </div>
-              <span style={styles.progressText}>Uploading: {uploadProgress}%</span>
-            </div>
-          )}
-        </div>
-        
-        <div style={styles.footerRight}>
-          <button
-            onClick={handleCancelExam}
-            style={styles.exitButton}
-          >
-            <i className="fas fa-sign-out-alt"></i>
-            Exit Exam
-          </button>
-          
-          <button
-            onClick={handleSubmitExam}
-            disabled={submittingExam}
-            style={{
-              ...styles.submitButton,
-              backgroundColor: submittingExam ? '#6c757d' : '#28a745',
-              cursor: submittingExam ? 'not-allowed' : 'pointer'
-            }}
-          >
-            {submittingExam ? (
-              <>
-                <i className="fas fa-spinner fa-spin"></i>
-                Submitting...
-              </>
-            ) : (
-              <>
-                <i className="fas fa-paper-plane"></i>
-                Submit Exam
-              </>
-            )}
-          </button>
         </div>
       </div>
     </div>
   );
 };
 
-// Styles
+// Styles (keeping the same styles as before)
 const styles = {
   container: {
     minHeight: '100vh',
@@ -1625,7 +2281,77 @@ const styles = {
     fontFamily: "'Inter', sans-serif"
   },
   
-  // Loading styles
+  modalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 99999
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderRadius: '16px',
+    maxWidth: '480px',
+    width: '95%',
+    boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+    overflow: 'hidden'
+  },
+  modalHeader: {
+    padding: '24px 24px 16px 24px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '14px',
+    borderBottom: '1px solid #e9ecef'
+  },
+  modalIcon: {
+    fontSize: '32px'
+  },
+  modalTitle: {
+    margin: 0,
+    fontSize: '20px',
+    fontWeight: '600',
+    color: '#2c3e50'
+  },
+  modalBody: {
+    padding: '24px'
+  },
+  modalMessage: {
+    margin: 0,
+    fontSize: '16px',
+    lineHeight: '1.6',
+    color: '#4a5568',
+    whiteSpace: 'pre-wrap'
+  },
+  modalFooter: {
+    padding: '16px 24px',
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: '12px',
+    borderTop: '1px solid #e9ecef',
+    backgroundColor: '#f8f9fa'
+  },
+  modalButton: {
+    padding: '10px 24px',
+    border: 'none',
+    borderRadius: '8px',
+    fontSize: '15px',
+    fontWeight: '500',
+    cursor: 'pointer'
+  },
+  modalConfirmButton: {
+    backgroundColor: '#007bff',
+    color: 'white'
+  },
+  modalCancelButton: {
+    backgroundColor: '#e9ecef',
+    color: '#495057'
+  },
+  
   loadingContainer: {
     flex: 1,
     display: 'flex',
@@ -1644,7 +2370,6 @@ const styles = {
     animation: 'spin 1s linear infinite'
   },
   
-  // Error styles
   errorContainer: {
     flex: 1,
     display: 'flex',
@@ -1691,7 +2416,6 @@ const styles = {
     gap: '8px'
   },
   
-  // Start/Resume screen styles
   startContainer: {
     flex: 1,
     display: 'flex',
@@ -1739,7 +2463,6 @@ const styles = {
     boxShadow: '0 4px 20px rgba(0,0,0,0.1)'
   },
   
-  // Schedule Info
   scheduleInfo: {
     backgroundColor: '#f8f9fa',
     border: '1px solid #e9ecef',
@@ -1777,7 +2500,6 @@ const styles = {
     color: '#2c3e50'
   },
   
-  // Time until start display
   timeUntilStartContainer: {
     backgroundColor: '#fff3cd',
     border: '1px solid #ffc107',
@@ -1838,7 +2560,6 @@ const styles = {
     gap: '8px'
   },
   
-  // Exam ended alert
   examEndedAlert: {
     backgroundColor: '#f8d7da',
     border: '1px solid #f5c6cb',
@@ -1858,7 +2579,6 @@ const styles = {
     color: '#721c24'
   },
   
-  // Start Confirmation Screen Styles
   instructions: {
     backgroundColor: '#f8f9fa',
     border: '1px solid #e9ecef',
@@ -1988,7 +2708,6 @@ const styles = {
     borderRadius: '6px'
   },
   
-  // Active exam header styles with Timer
   examHeader: {
     backgroundColor: 'white',
     padding: '15px 30px',
@@ -2034,7 +2753,6 @@ const styles = {
     gap: '20px'
   },
   
-  // Timer styles
   timerContainer: {
     backgroundColor: '#f8f9fa',
     border: '1px solid #dee2e6',
@@ -2088,7 +2806,6 @@ const styles = {
     gap: '5px'
   },
   
-  // Time warning alert
   timeWarningAlert: {
     backgroundColor: '#dc3545',
     color: 'white',
@@ -2101,7 +2818,6 @@ const styles = {
     gap: '10px'
   },
   
-  // Download section in header
   downloadSection: {
     position: 'relative'
   },
@@ -2200,7 +2916,6 @@ const styles = {
     flexShrink: 0
   },
   
-  // Exam content styles
   examContent: {
     flex: 1,
     display: 'flex',
@@ -2286,7 +3001,6 @@ const styles = {
     gap: '8px'
   },
   
-  // Question area styles
   questionArea: {
     flex: 1,
     overflowY: 'auto',
@@ -2347,7 +3061,6 @@ const styles = {
     marginTop: '10px'
   },
   
-  // Multiple choice options
   optionsContainer: {
     display: 'flex',
     flexDirection: 'column',
@@ -2374,15 +3087,14 @@ const styles = {
     fontSize: '15px'
   },
   
-  // Text answer area - ENHANCED SIZE
   answerTextarea: {
     width: '100%',
-    minHeight: '300px', // Increased from 150px
-    maxHeight: '600px', // Added max height
-    padding: '20px', // Increased padding
+    minHeight: '300px',
+    maxHeight: '600px',
+    padding: '20px',
     border: '2px solid #e0e0e0',
     borderRadius: '8px',
-    fontSize: '16px', // Slightly larger font
+    fontSize: '16px',
     lineHeight: '1.6',
     resize: 'vertical',
     fontFamily: "'Inter', sans-serif",
@@ -2391,7 +3103,6 @@ const styles = {
     transition: 'border-color 0.2s ease'
   },
   
-  // Navigation buttons
   navigationButtons: {
     display: 'flex',
     justifyContent: 'space-between',
@@ -2417,7 +3128,6 @@ const styles = {
     color: 'white'
   },
   
-  // Written exam styles - ENHANCED TEXTAREA
   writtenExamCard: {
     backgroundColor: 'white',
     borderRadius: '12px',
@@ -2451,13 +3161,13 @@ const styles = {
   },
   writtenTextarea: {
     width: '100%',
-    minHeight: '500px', // Increased from 300px
-    maxHeight: '800px', // Added max height
-    padding: '25px', // Increased padding
+    minHeight: '500px',
+    maxHeight: '800px',
+    padding: '25px',
     border: '2px solid #e0e0e0',
     borderRadius: '8px',
-    fontSize: '16px', // Slightly larger font
-    lineHeight: '1.7', // Increased line height
+    fontSize: '16px',
+    lineHeight: '1.7',
     resize: 'vertical',
     fontFamily: "'Inter', sans-serif",
     marginBottom: '25px',
@@ -2466,7 +3176,6 @@ const styles = {
     transition: 'border-color 0.2s ease'
   },
   
-  // File upload styles
   uploadTitle: {
     color: '#2c3e50',
     marginBottom: '15px',
@@ -2554,7 +3263,6 @@ const styles = {
     cursor: 'pointer'
   },
   
-  // Exam footer styles
   examFooter: {
     backgroundColor: 'white',
     padding: '20px 30px',
@@ -2646,17 +3354,6 @@ styleSheet.textContent = `
     100% { transform: rotate(360deg); }
   }
   
-  @keyframes pulse {
-    0% { opacity: 1; }
-    50% { opacity: 0.5; }
-    100% { opacity: 1; }
-  }
-  
-  .time-warning {
-    animation: pulse 1s infinite;
-  }
-  
-  /* Enhanced textarea focus effect */
   textarea:focus {
     outline: none;
     border-color: #3498db;

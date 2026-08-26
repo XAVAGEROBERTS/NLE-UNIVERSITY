@@ -1,6 +1,6 @@
 // components/Examinations.jsx
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
 import { useStudentAuth } from '../../context/StudentAuthContext';
 import { checkExamClearance } from '../../utils/clearanceUtils';
@@ -11,26 +11,46 @@ import './Examinations.css';
 
 const Examinations = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { user } = useStudentAuth();
+  
+  // ========== STATE DECLARATIONS ==========
   const [exams, setExams] = useState([]);
   const [studentInfo, setStudentInfo] = useState(null);
   const [clearanceStatus, setClearanceStatus] = useState(null);
-  const { user } = useStudentAuth();
   const [isMobile, setIsMobile] = useState(false);
   const [showClearanceModal, setShowClearanceModal] = useState(false);
   const [checkingClearance, setCheckingClearance] = useState(false);
-  const [activeTab, setActiveTab] = useState('all'); // 'all', 'upcoming', 'graded', 'submitted'
-  
-  // New state for checking if any exam is scheduled
+  const [activeTab, setActiveTab] = useState('all');
   const [hasScheduledExams, setHasScheduledExams] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Compute bypass status once
-  const isBypassed = 
-    studentInfo?.fees_clearance_bypassed || 
-    studentInfo?.attendance_clearance_bypassed || 
-    studentInfo?.exam_clearance_bypassed;
+  // ========== CHECK FOR RETURN FROM EXAM ==========
+  useEffect(() => {
+    // Check if we're returning from an exam submission
+    const searchParams = new URLSearchParams(location.search);
+    const fromExam = searchParams.get('fromExam');
+    const examStatus = searchParams.get('status');
+    
+    if (fromExam === 'true') {
+      // Force refresh data when returning from exam
+      console.log('🔄 Returning from exam with status:', examStatus);
+      
+      // Show refreshing state
+      setIsRefreshing(true);
+      
+      // Force refresh after a short delay
+      setTimeout(() => {
+        refreshExams();
+        setIsRefreshing(false);
+      }, 300);
+      
+      // Clean URL params
+      navigate('/examinations', { replace: true });
+    }
+  }, [location.search]);
 
-  const effectiveCleared = (clearanceStatus?.cleared || isBypassed) && !loading;
-  
+  // ========== MOBILE DETECTION EFFECT ==========
   useEffect(() => {
     const checkMobile = () => {
       setIsMobile(window.innerWidth < 768);
@@ -42,11 +62,13 @@ const Examinations = () => {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Main data fetching function
+  // ========== DATA FETCHING FUNCTION ==========
   const fetchExaminationsData = useCallback(async () => {
     if (!user?.email) {
       throw new Error('No user logged in');
     }
+
+    console.log('📊 Fetching examination data...');
 
     const { data: student, error: studentError } = await supabase
       .from('students')
@@ -128,11 +150,17 @@ const Examinations = () => {
     
     if (examsError) throw new Error(`Exams error: ${examsError.message}`);
 
-    // Fetch submissions
-    const { data: submissionsData } = await supabase
+    // Fetch submissions with no cache
+    const { data: submissionsData, error: submissionsError } = await supabase
       .from('exam_submissions')
       .select('*')
       .eq('student_id', student.id);
+
+    if (submissionsError) {
+      console.warn('Submissions fetch error:', submissionsError);
+    }
+
+    console.log(`📝 Found ${submissionsData?.length || 0} submissions`);
 
     // Process exams
     const processedExams = examsData ? examsData.map(exam => {
@@ -157,8 +185,13 @@ const Examinations = () => {
         isGraded = status === 'graded' || studentSubmission.graded_at !== null;
       }
       
-      const isStartedButNotSubmitted = studentSubmission && studentSubmission.status === 'started' && !isSubmitted;
-      const canResume = isStartedButNotSubmitted && (isActiveByTime || !isEndedByTime);
+      // ⭐ CRITICAL: Check for incomplete submission
+      const isStartedButNotSubmitted = studentSubmission && 
+        studentSubmission.status === 'started' && 
+        !isSubmitted && 
+        !isGraded;
+      
+      const canResume = isStartedButNotSubmitted && !isEndedByTime;
       const canStart = !hasSubmission && isActiveByTime && isOnlineExam;
       
       let finalStatus = 'upcoming';
@@ -167,11 +200,15 @@ const Examinations = () => {
         finalStatus = 'graded';
       } else if (isSubmitted) {
         finalStatus = 'submitted';
-      } else if (canResume || isActiveByTime) {
+      } else if (canResume) {
+        finalStatus = 'resume';
+      } else if (isActiveByTime) {
         finalStatus = 'active';
       } else if (isEndedByTime) {
         finalStatus = 'ended';
       }
+
+      console.log(`📋 Exam ${exam.id.slice(0, 8)}: status=${finalStatus}, canResume=${canResume}`);
 
       return {
         id: exam.id,
@@ -194,7 +231,7 @@ const Examinations = () => {
         submitted: isSubmitted,
         graded: isGraded,
         submission: studentSubmission || null,
-        isActive: finalStatus === 'active',
+        isActive: finalStatus === 'active' || finalStatus === 'resume',
         isUpcoming: isUpcoming,
         isEnded: isEndedByTime,
         canStart: canStart,
@@ -211,7 +248,7 @@ const Examinations = () => {
     }) : [];
 
     const hasScheduled = processedExams.some(exam => 
-      !exam.isEnded && (exam.status === 'upcoming' || exam.status === 'active')
+      !exam.isEnded && (exam.status === 'upcoming' || exam.status === 'active' || exam.status === 'resume')
     );
 
     let clearance = null;
@@ -223,6 +260,8 @@ const Examinations = () => {
       );
     }
 
+    console.log(`✅ Processed ${processedExams.length} exams, ${processedExams.filter(e => e.status === 'resume').length} with resume status`);
+
     return {
       student,
       exams: processedExams,
@@ -231,7 +270,7 @@ const Examinations = () => {
     };
   }, [user?.email]);
 
-  // Use cached data hook
+  // ========== CACHED DATA HOOK ==========
   const { 
     data: cachedExamData, 
     loading, 
@@ -241,19 +280,35 @@ const Examinations = () => {
     `examinations-${user?.id || user?.email}`,
     fetchExaminationsData,
     {
-      ttl: 5 * 60 * 1000,
+      ttl: 30 * 1000, // ⭐ Reduced TTL to 30 seconds for more frequent updates
       enabled: !!user?.email,
       dependencies: [user?.email]
     }
   );
 
-  // Update state when cached data changes
+  // ========== COMPUTED VALUES ==========
+  const isBypassed = 
+    cachedExamData?.student?.fees_clearance_bypassed || 
+    cachedExamData?.student?.attendance_clearance_bypassed || 
+    cachedExamData?.student?.exam_clearance_bypassed;
+
+  const effectiveCleared = (clearanceStatus?.cleared || isBypassed) && !loading;
+
+  // ========== UPDATE STATE FROM CACHED DATA ==========
   useEffect(() => {
     if (cachedExamData) {
       setStudentInfo(cachedExamData.student);
       setExams(cachedExamData.exams || []);
       setHasScheduledExams(cachedExamData.hasScheduledExams);
       setClearanceStatus(cachedExamData.clearanceStatus);
+      
+      // Log resume exams for debugging
+      const resumeExams = (cachedExamData.exams || []).filter(e => e.status === 'resume');
+      if (resumeExams.length > 0) {
+        console.log(`🔄 Found ${resumeExams.length} exams with resume status:`, 
+          resumeExams.map(e => ({ id: e.id.slice(0, 8), title: e.title }))
+        );
+      }
       
       if (cachedExamData.clearanceStatus && 
           !cachedExamData.clearanceStatus.cleared && 
@@ -268,10 +323,9 @@ const Examinations = () => {
     }
   }, [cachedExamData]);
 
- 
-  
+  // ========== HANDLER FUNCTIONS ==========
 
-
+  // ⭐ FIXED: Handle exam start/resume based on current status
   const handleStartExam = (exam) => {
     // Check clearance only if there are scheduled exams
     if (hasScheduledExams && !effectiveCleared) {
@@ -286,7 +340,30 @@ const Examinations = () => {
       return;
     }
 
-    navigate(`/examinations/take/${exam.id}`);
+    // ⭐ Check if exam is ended
+    if (exam.isEnded) {
+      alert('This exam has already ended.');
+      return;
+    }
+
+    // ⭐ Check if exam is upcoming
+    if (exam.isUpcoming) {
+      alert(`This exam starts at ${formatDate(exam.startTime)}. Please wait until the start time.`);
+      return;
+    }
+
+    // ⭐ Resume or Start based on status
+    if (exam.canResume || exam.status === 'resume') {
+      // Resume exam - pass resume flag
+      navigate(`/examinations/take/${exam.id}`, { 
+        state: { resume: true } 
+      });
+    } else if (exam.canStart || exam.status === 'active') {
+      // Start new exam
+      navigate(`/examinations/take/${exam.id}`);
+    } else {
+      alert('This exam is not available to start or resume.');
+    }
   };
 
   const formatDate = (dateString) => {
@@ -304,8 +381,10 @@ const Examinations = () => {
   const getExamStatus = (exam) => {
     if (exam.graded) return 'graded';
     if (exam.submitted) return 'submitted';
+    if (exam.status === 'resume') return 'resume';
+    if (exam.canResume && !exam.isEnded) return 'resume';
     if (exam.status) return exam.status;
-    if (exam.hasIncompleteSubmission) return 'active';
+    if (exam.hasIncompleteSubmission) return 'resume';
     if (exam.isActive) return 'active';
     if (exam.isUpcoming) return 'upcoming';
     if (exam.isEnded) return 'ended';
@@ -316,6 +395,7 @@ const Examinations = () => {
     switch(status) {
       case 'graded': return '#6f42c1';
       case 'submitted': return '#28a745';
+      case 'resume': return '#ffc107';
       case 'incomplete': return '#ffc107';
       case 'active': return '#dc3545';
       case 'upcoming': return '#007bff';
@@ -353,6 +433,12 @@ const Examinations = () => {
   };
 
   const refreshExams = () => {
+    console.log('🔄 Refreshing examinations...');
+    // Clear the cache to force fresh data
+    if (user?.id) {
+      localStorage.removeItem(`examinations-${user.id}`);
+      localStorage.removeItem(`examinations-${user.email}`);
+    }
     refetchExams();
   };
 
@@ -397,7 +483,7 @@ const Examinations = () => {
       const permitExams = exams.filter(exam => 
         !exam.submitted && 
         !exam.graded && 
-        (exam.status === 'upcoming' || exam.status === 'active')
+        (exam.status === 'upcoming' || exam.status === 'active' || exam.status === 'resume')
       );
 
       const permitElement = document.createElement('div');
@@ -570,23 +656,25 @@ const Examinations = () => {
     }
   };
 
-  // Filter exams based on active tab
+  // ========== FILTER EXAMS ==========
   const filteredExams = exams.filter(exam => {
     switch(activeTab) {
       case 'upcoming':
         return exam.status === 'upcoming' || exam.isUpcoming;
       case 'active':
-        return exam.status === 'active' || exam.canStart || exam.canResume;
+        return exam.status === 'active' || exam.status === 'resume' || exam.canStart || exam.canResume;
       case 'submitted':
         return exam.submitted && !exam.graded;
       case 'graded':
         return exam.graded;
       default:
-        return true; // 'all'
+        return true;
     }
   });
 
-  // Render Clearance Modal - Only show if there are scheduled exams
+  // ========== RENDER FUNCTIONS ==========
+
+  // Render Clearance Modal
   const renderClearanceModal = () => {
     if (!showClearanceModal || !clearanceStatus || !hasScheduledExams) return null;
 
@@ -758,11 +846,10 @@ const Examinations = () => {
     );
   };
 
-  // Render Clearance Status Banner - Only show if there are scheduled exams
+  // Render Clearance Status Banner
   const renderClearanceBanner = () => {
     if (!hasScheduledExams) return null;
     
-    // If no clearance status but we have scheduled exams, show a loading or default state
     if (!clearanceStatus) {
       return (
         <div className="clearance-banner not-cleared">
@@ -830,10 +917,47 @@ const Examinations = () => {
     const timeUntilStart = getTimeUntilStart(exam);
     const isOnlineExam = exam.isOnline;
     
-    // Check if user needs clearance for this exam
     const needsClearanceForThisExam = hasScheduledExams && !effectiveCleared && 
-      (exam.canStart || exam.canResume || exam.status === 'active' || exam.status === 'upcoming');
+      (exam.canStart || exam.canResume || exam.status === 'active' || exam.status === 'resume' || exam.status === 'upcoming');
     
+    // Determine button text and action
+    let buttonText = '';
+    let buttonClass = '';
+    let isDisabled = false;
+    let onClick = null;
+
+    if (exam.graded) {
+      buttonText = 'View Results';
+      buttonClass = 'mobile-view-results-btn';
+      onClick = () => navigateToResults(exam);
+    } else if (exam.submitted) {
+      buttonText = 'Awaiting Grading';
+      buttonClass = 'mobile-disabled-btn';
+      isDisabled = true;
+    } else if (exam.canResume || exam.status === 'resume') {
+      buttonText = needsClearanceForThisExam ? 'CLEARANCE REQUIRED' : 'RESUME EXAM';
+      buttonClass = 'mobile-resume-exam-btn';
+      isDisabled = needsClearanceForThisExam;
+      onClick = () => handleStartExam(exam);
+    } else if (exam.canStart && isOnlineExam) {
+      buttonText = needsClearanceForThisExam ? 'CLEARANCE REQUIRED' : 'START ONLINE EXAM';
+      buttonClass = 'mobile-start-exam-btn';
+      isDisabled = needsClearanceForThisExam;
+      onClick = () => handleStartExam(exam);
+    } else if (status === 'upcoming') {
+      buttonText = `Starts in ${timeUntilStart}`;
+      buttonClass = 'mobile-disabled-btn';
+      isDisabled = true;
+    } else if (exam.isEnded) {
+      buttonText = isOnlineExam ? 'Exam Closed' : 'Physical Exam';
+      buttonClass = 'mobile-disabled-btn';
+      isDisabled = true;
+    } else {
+      buttonText = isOnlineExam ? 'Not Available' : 'Physical Exam';
+      buttonClass = 'mobile-disabled-btn';
+      isDisabled = true;
+    }
+
     return (
       <div className="mobile-exam-card" key={exam.id}>
         <div className="mobile-exam-header">
@@ -898,57 +1022,13 @@ const Examinations = () => {
           </div>
 
           <div className="mobile-exam-button-group">
-            {exam.graded ? (
-              <button 
-                onClick={() => navigateToResults(exam)}
-                className="mobile-view-results-btn"
-              >
-                <i className="fas fa-chart-line"></i>
-                View Results
-              </button>
-            ) : exam.submitted ? (
-              <button 
-                disabled
-                className="mobile-disabled-btn"
-              >
-                <i className="fas fa-check-circle"></i>
-                Awaiting Grading
-              </button>
-            ) : exam.canResume ? (
-              <button 
-                onClick={() => handleStartExam(exam)}
-                className="mobile-resume-exam-btn"
-                disabled={needsClearanceForThisExam}
-              >
-                <i className="fas fa-history"></i>
-                {needsClearanceForThisExam ? 'CLEARANCE REQUIRED' : 'RESUME EXAM'}
-              </button>
-            ) : exam.canStart && isOnlineExam ? (
-              <button 
-                onClick={() => handleStartExam(exam)}
-                className="mobile-start-exam-btn"
-                disabled={needsClearanceForThisExam}
-              >
-                <i className="fas fa-play"></i>
-                {needsClearanceForThisExam ? 'CLEARANCE REQUIRED' : 'START ONLINE EXAM'}
-              </button>
-            ) : status === 'upcoming' ? (
-              <button 
-                disabled
-                className="mobile-disabled-btn"
-              >
-                <i className="fas fa-clock"></i>
-                Starts in {timeUntilStart}
-              </button>
-            ) : (
-              <button 
-                disabled
-                className="mobile-disabled-btn"
-              >
-                <i className="fas fa-times-circle"></i>
-                Exam {isOnlineExam ? 'Closed' : 'Physical'}
-              </button>
-            )}
+            <button 
+              onClick={onClick}
+              className={buttonClass}
+              disabled={isDisabled}
+            >
+              {buttonText}
+            </button>
           </div>
         </div>
       </div>
@@ -962,10 +1042,139 @@ const Examinations = () => {
     const timeUntilStart = getTimeUntilStart(exam);
     const isOnlineExam = exam.isOnline;
     
-    // Check if user needs clearance for this exam
     const needsClearanceForThisExam = hasScheduledExams && !effectiveCleared && 
-      (exam.canStart || exam.canResume || exam.status === 'active' || exam.status === 'upcoming');
+      (exam.canStart || exam.canResume || exam.status === 'active' || exam.status === 'resume' || exam.status === 'upcoming');
     
+    // Determine action button
+    let actionButton = null;
+
+    if (exam.graded) {
+      actionButton = (
+        <>
+          <div className="desktop-graded-info">
+            <i className="fas fa-check-double"></i>
+            <div>
+              <div className="graded-status">
+                Graded {exam.submission?.graded_at ? 
+                  `on ${new Date(exam.submission.graded_at).toLocaleDateString()}` : 
+                  'and ready to view'}
+              </div>
+              <div className="graded-score">
+                Score: {exam.submission?.total_marks_obtained || 'N/A'} / {exam.totalMarks}
+              </div>
+            </div>
+          </div>
+          <button 
+            onClick={() => navigateToResults(exam)}
+            className="desktop-view-results-btn"
+          >
+            <i className="fas fa-chart-line"></i>
+            View Results
+          </button>
+        </>
+      );
+    } else if (exam.submitted) {
+      actionButton = (
+        <>
+          <div className="desktop-submitted-info">
+            <i className="fas fa-check-circle"></i>
+            <div>
+              <div className="submitted-status">
+                Submitted {exam.submission?.submitted_at ? 
+                  `on ${new Date(exam.submission.submitted_at).toLocaleDateString()}` : 
+                  'successfully'}
+              </div>
+              <div className="submitted-waiting">
+                Awaiting grading
+              </div>
+            </div>
+          </div>
+          <button disabled className="desktop-disabled-btn">
+            <i className="fas fa-hourglass-half"></i>
+            Awaiting Grading
+          </button>
+        </>
+      );
+    } else if (exam.canResume || exam.status === 'resume') {
+      actionButton = (
+        <>
+          <div className="desktop-resume-info">
+            <i className="fas fa-history"></i>
+            <div>
+              <div className="resume-status">Exam Incomplete</div>
+              <div className="resume-detail">Resume Available</div>
+            </div>
+          </div>
+          <button 
+            onClick={() => handleStartExam(exam)}
+            className="desktop-resume-exam-btn"
+            disabled={needsClearanceForThisExam}
+          >
+            <i className="fas fa-history"></i>
+            {needsClearanceForThisExam ? 'CLEARANCE REQUIRED' : 'RESUME EXAM'}
+          </button>
+        </>
+      );
+    } else if (exam.canStart && isOnlineExam) {
+      actionButton = (
+        <>
+          <div className="desktop-active-info">
+            <i className="fas fa-exclamation-triangle"></i>
+            <div>
+              <div className="active-status">Exam is ACTIVE</div>
+              <div className="active-detail">Click to start</div>
+            </div>
+          </div>
+          <button 
+            onClick={() => handleStartExam(exam)}
+            className="desktop-start-exam-btn"
+            disabled={needsClearanceForThisExam}
+          >
+            <i className="fas fa-play"></i>
+            {needsClearanceForThisExam ? 'CLEARANCE REQUIRED' : 'START ONLINE EXAM'}
+          </button>
+        </>
+      );
+    } else if (status === 'upcoming') {
+      actionButton = (
+        <>
+          <div className="desktop-upcoming-info">
+            <i className="fas fa-clock"></i>
+            <div>
+              <div className="upcoming-status">Starts in {timeUntilStart}</div>
+              <div className="upcoming-detail">
+                {isOnlineExam ? 'Online Exam' : 'Physical Exam'}
+              </div>
+            </div>
+          </div>
+          <button disabled className="desktop-disabled-btn">
+            <i className="fas fa-lock"></i>
+            {isOnlineExam ? 'Not Available Yet' : 'Physical Exam'}
+          </button>
+        </>
+      );
+    } else {
+      actionButton = (
+        <>
+          <div className="desktop-ended-info">
+            <i className="fas fa-ban"></i>
+            <div>
+              <div className="ended-status">
+                {isOnlineExam ? 'Exam period has ended' : 'Physical Exam'}
+              </div>
+              <div className="ended-detail">
+                {isOnlineExam ? 'Closed' : 'Attend at Venue'}
+              </div>
+            </div>
+          </div>
+          <button disabled className="desktop-disabled-btn">
+            <i className="fas fa-times-circle"></i>
+            {isOnlineExam ? 'Closed' : 'Physical'}
+          </button>
+        </>
+      );
+    }
+
     return (
       <div 
         className="desktop-exam-card"
@@ -1062,129 +1271,7 @@ const Examinations = () => {
 
           <div className="desktop-exam-action-area">
             <div className="desktop-exam-right-actions">
-              {exam.graded ? (
-                <>
-                  <div className="desktop-graded-info">
-                    <i className="fas fa-check-double"></i>
-                    <div>
-                      <div className="graded-status">
-                        Graded {exam.submission?.graded_at ? 
-                          `on ${new Date(exam.submission.graded_at).toLocaleDateString()}` : 
-                          'and ready to view'}
-                      </div>
-                      <div className="graded-score">
-                        Score: {exam.submission?.total_marks_obtained || 'N/A'} / {exam.totalMarks}
-                      </div>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => navigateToResults(exam)}
-                    className="desktop-view-results-btn"
-                  >
-                    <i className="fas fa-chart-line"></i>
-                    View Results
-                  </button>
-                </>
-              ) : exam.submitted ? (
-                <>
-                  <div className="desktop-submitted-info">
-                    <i className="fas fa-check-circle"></i>
-                    <div>
-                      <div className="submitted-status">
-                        Submitted {exam.submission?.submitted_at ? 
-                          `on ${new Date(exam.submission.submitted_at).toLocaleDateString()}` : 
-                          'successfully'}
-                      </div>
-                      <div className="submitted-waiting">
-                        Awaiting grading
-                      </div>
-                    </div>
-                  </div>
-                  <button 
-                    disabled
-                    className="desktop-disabled-btn"
-                  >
-                    <i className="fas fa-hourglass-half"></i>
-                    Awaiting Grading
-                  </button>
-                </>
-              ) : exam.canResume ? (
-                <>
-                  <div className="desktop-resume-info">
-                    <i className="fas fa-history"></i>
-                    <div>
-                      <div className="resume-status">Exam Incomplete</div>
-                      <div className="resume-detail">Resume Available</div>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => handleStartExam(exam)}
-                    className="desktop-resume-exam-btn"
-                    disabled={needsClearanceForThisExam}
-                  >
-                    <i className="fas fa-history"></i>
-                    {needsClearanceForThisExam ? 'CLEARANCE REQUIRED' : 'RESUME EXAM'}
-                  </button>
-                </>
-              ) : exam.canStart && isOnlineExam ? (
-                <>
-                  <div className="desktop-active-info">
-                    <i className="fas fa-exclamation-triangle"></i>
-                    <div>
-                      <div className="active-status">Exam is ACTIVE</div>
-                      <div className="active-detail">Click to start</div>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => handleStartExam(exam)}
-                    className="desktop-start-exam-btn"
-                    disabled={needsClearanceForThisExam}
-                  >
-                    <i className="fas fa-play"></i>
-                    {needsClearanceForThisExam ? 'CLEARANCE REQUIRED' : 'START ONLINE EXAM'}
-                  </button>
-                </>
-              ) : status === 'upcoming' ? (
-                <>
-                  <div className="desktop-upcoming-info">
-                    <i className="fas fa-clock"></i>
-                    <div>
-                      <div className="upcoming-status">Starts in {timeUntilStart}</div>
-                      <div className="upcoming-detail">
-                        {isOnlineExam ? 'Online Exam' : 'Physical Exam'}
-                      </div>
-                    </div>
-                  </div>
-                  <button 
-                    disabled={needsClearanceForThisExam}
-                    className={needsClearanceForThisExam ? "desktop-resume-exam-btn" : "desktop-disabled-btn"}
-                  >
-                    <i className={needsClearanceForThisExam ? "fas fa-ban" : "fas fa-lock"}></i>
-                    {needsClearanceForThisExam ? 'CLEARANCE REQUIRED' : (isOnlineExam ? 'Not Available Yet' : 'Physical Exam')}
-                  </button>
-                </>
-              ) : (
-                <>
-                  <div className="desktop-ended-info">
-                    <i className="fas fa-ban"></i>
-                    <div>
-                      <div className="ended-status">
-                        {isOnlineExam ? 'Exam period has ended' : 'Physical Exam'}
-                      </div>
-                      <div className="ended-detail">
-                        {isOnlineExam ? 'Closed' : 'Attend at Venue'}
-                      </div>
-                    </div>
-                  </div>
-                  <button 
-                    disabled
-                    className="desktop-disabled-btn"
-                  >
-                    <i className="fas fa-times-circle"></i>
-                    {isOnlineExam ? 'Closed' : 'Physical'}
-                  </button>
-                </>
-              )}
+              {actionButton}
             </div>
           </div>
         </div>
@@ -1192,8 +1279,8 @@ const Examinations = () => {
     );
   };
 
-  // Loading State
-  if (loading) {
+  // ========== LOADING STATE ==========
+  if (loading || isRefreshing) {
     return (
       <div className="examinations-container">
         <div className="examinations-header">
@@ -1202,18 +1289,18 @@ const Examinations = () => {
             Examinations
           </h2>
           <div className="examinations-loading">
-            Loading examinations...
+            {isRefreshing ? 'Refreshing...' : 'Loading examinations...'}
           </div>
         </div>
         <div className="examinations-loading-spinner">
           <div className="loading-spinner"></div>
-          <p>Fetching your exams</p>
+          <p>{isRefreshing ? 'Updating exam status...' : 'Fetching your exams'}</p>
         </div>
       </div>
     );
   }
 
-  // Error State
+  // ========== ERROR STATE ==========
   if (error) {
     return (
       <div className="examinations-container">
@@ -1239,6 +1326,7 @@ const Examinations = () => {
     );
   }
 
+  // ========== MAIN RENDER ==========
   return (
     <div className="examinations-container">
       {/* Header */}
@@ -1277,7 +1365,6 @@ const Examinations = () => {
                   </>
                 )}
               </button>
-              {/* Only show download permit button if there are scheduled exams */}
               {hasScheduledExams && (
                 <button 
                   onClick={downloadExamPermit}
@@ -1293,7 +1380,7 @@ const Examinations = () => {
         </div>
       </div>
 
-      {/* Clearance Status Banner - Only show if there are scheduled exams */}
+      {/* Clearance Status Banner */}
       {renderClearanceBanner()}
 
       {/* Stats Overview */}
@@ -1313,7 +1400,7 @@ const Examinations = () => {
           },
           { 
             label: 'Active Now', 
-            value: exams.filter(e => e.status === 'active' || e.canStart || e.canResume).length,
+            value: exams.filter(e => e.status === 'active' || e.status === 'resume' || e.canStart || e.canResume).length,
             icon: 'fas fa-play-circle',
             color: '#dc3545'
           },
@@ -1328,14 +1415,7 @@ const Examinations = () => {
             value: exams.filter(e => e.submitted === true && !e.graded).length,
             icon: 'fas fa-check-circle',
             color: '#28a745'
-          },
-          // Clearance stat - Only show if there are scheduled exams
-          // ...(hasScheduledExams ? [{
-          //   label: 'Clearance', 
-          //   value: effectiveCleared ? '✓ Cleared' : '✗ Required',
-          //   icon: effectiveCleared ? 'fas fa-check' : 'fas fa-ban',
-          //   color: effectiveCleared ? '#28a745' : '#dc3545'
-          // }] : [])
+          }
         ].map((stat, index) => (
           <div 
             key={index}
@@ -1373,7 +1453,7 @@ const Examinations = () => {
           onClick={() => setActiveTab('active')}
         >
           <i className="fas fa-play-circle"></i>
-          Active ({exams.filter(e => e.status === 'active' || e.canStart || e.canResume).length})
+          Active ({exams.filter(e => e.status === 'active' || e.status === 'resume' || e.canStart || e.canResume).length})
         </button>
         <button 
           className={`exam-tab ${activeTab === 'submitted' ? 'active' : ''}`}
@@ -1403,7 +1483,6 @@ const Examinations = () => {
             {activeTab === 'graded' && 'Graded Examinations'}
           </h3>
           <div className="examinations-count">
-            {/* Only show clearance warning if there are scheduled exams */}
             {hasScheduledExams && clearanceStatus && !effectiveCleared ? (
               <span className="clearance-warning">
                 <i className="fas fa-exclamation-triangle"></i>
@@ -1435,7 +1514,6 @@ const Examinations = () => {
                 : `No ${activeTab} examinations found.`
               }
             </p>
-            {/* Only show clearance button if there are scheduled exams */}
             {hasScheduledExams && clearanceStatus && !effectiveCleared && (
               <button 
                 onClick={() => setShowClearanceModal(true)}
@@ -1464,7 +1542,7 @@ const Examinations = () => {
         )}
       </div>
 
-      {/* Clearance Modal - Only show if there are scheduled exams */}
+      {/* Clearance Modal */}
       {renderClearanceModal()}
     </div>
   );
