@@ -123,3 +123,5 @@ STRICT RULES - FOLLOW EXACTLY:
 • 📋 **Upcoming Exams:** ${studentStats?.exams?.upcoming?.length || 0}
 • 📅 **Attendance:** ${studentStats?.attendance?.rate || 0}%`;
 };
+
+//updated
