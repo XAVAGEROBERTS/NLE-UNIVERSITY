@@ -1,3 +1,4 @@
+// src/components/Chatbot.jsx
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useStudentAuth } from '../../context/StudentAuthContext';
 import { supabase } from '../../services/supabase';
@@ -14,6 +15,7 @@ const Chatbot = () => {
   const [studentStats, setStudentStats] = useState(null);
   const [isMobile, setIsMobile] = useState(false);
   const [showQuickQuestions, setShowQuickQuestions] = useState(true);
+  const [profilePictureUrl, setProfilePictureUrl] = useState(null);
 
   // Save chat history to localStorage
   const saveChatHistory = (chatMessages) => {
@@ -51,7 +53,7 @@ const Chatbot = () => {
       const mobile = window.innerWidth < 768;
       setIsMobile(mobile);
       if (mobile) {
-        setShowQuickQuestions(false); // Hide quick questions by default on mobile
+        setShowQuickQuestions(false);
       }
     };
     
@@ -63,7 +65,6 @@ const Chatbot = () => {
 
   // Enhanced AI knowledge base with more responses
   const knowledgeBase = {
-    // Greeting responses
     greetings: [
       "Great to see you! How can I assist with your studies today? 📚",
       "Hello! Ready to help you with your academic journey! 🎓",
@@ -76,8 +77,6 @@ const Chatbot = () => {
       "Good to see you! What academic goals can we work on today? 🎯",
       "Welcome! I'm excited to help you succeed in your studies! ✨"
     ],
-    
-    // Thank you responses
     thanks: [
       "You're welcome! Always happy to help with your studies! 😊",
       "No problem at all! Let me know if you need anything else! 👍",
@@ -90,8 +89,6 @@ const Chatbot = () => {
       "Always here for you! Don't hesitate to ask more questions! 🤝",
       "The pleasure is mine! Watching you succeed makes my day! 🌟"
     ],
-    
-    // Encouragement responses
     encouragement: [
       "You're doing amazing! Keep pushing forward! 🚀",
       "Stay focused and you'll achieve all your academic goals! 🎯",
@@ -104,8 +101,6 @@ const Chatbot = () => {
       "Learning is a journey! Enjoy every step of the way! 🛣️",
       "You're growing every day! That's something to celebrate! 🎉"
     ],
-    
-    // Study tips
     studyTips: [
       "**Pomodoro Technique**: Study for 25 minutes, break for 5 minutes ⏰",
       "**Active Recall**: Test yourself instead of just rereading notes 🧠",
@@ -123,8 +118,6 @@ const Chatbot = () => {
       "**Regular Review**: Revisit material weekly to retain information 🔄",
       "**Ask Questions**: Don't hesitate to seek clarification ❓"
     ],
-
-    // Motivational quotes
     motivational: [
       "Education is the most powerful weapon which you can use to change the world. - Nelson Mandela",
       "The beautiful thing about learning is that no one can take it away from you. - B.B. King",
@@ -137,8 +130,6 @@ const Chatbot = () => {
       "Learning never exhausts the mind. - Leonardo da Vinci",
       "Education is not preparation for life; education is life itself. - John Dewey"
     ],
-
-    // Exam preparation tips
     examTips: [
       "**Start Early**: Begin studying at least 2 weeks before exams 📅",
       "**Past Papers**: Practice with previous exam questions 📋",
@@ -151,8 +142,6 @@ const Chatbot = () => {
       "**Breaks**: Take regular breaks to maintain concentration 🧠",
       "**Positive Mindset**: Stay calm and confident during exams 🧘"
     ],
-
-    // Assignment help
     assignmentHelp: [
       "**Understand Requirements**: Read the assignment brief carefully 📖",
       "**Plan Ahead**: Break the assignment into manageable tasks 📋",
@@ -165,8 +154,6 @@ const Chatbot = () => {
       "**Time Management**: Set deadlines for each section ⏰",
       "**Quality Over Quantity**: Focus on depth rather than length 🎯"
     ],
-
-    // General advice
     advice: [
       "**Stay Organized**: Use planners or digital calendars 📅",
       "**Ask for Help**: Don't struggle alone - seek assistance when needed 🤝",
@@ -194,7 +181,7 @@ const Chatbot = () => {
     if (numericMarks >= 60) return 'C';
     if (numericMarks >= 55) return 'D+';
     if (numericMarks >= 50) return 'D';
-    return 'F';  // Below 50%
+    return 'F';
   };
 
   const getGradePoints = (grade) => {
@@ -213,12 +200,40 @@ const Chatbot = () => {
     return gradeMap[grade.toUpperCase()] || 0.0;
   };
 
+  // Fetch profile picture URL
+  const fetchProfilePicture = async (studentId) => {
+    try {
+      console.log('🖼️ Fetching profile picture for student:', studentId);
+      
+      const { data: student, error } = await supabase
+        .from('students')
+        .select('profile_picture_url')
+        .eq('id', studentId)
+        .single();
+
+      if (error) {
+        console.log('⚠️ Could not fetch profile picture:', error.message);
+        return null;
+      }
+
+      if (student?.profile_picture_url) {
+        console.log('✅ Profile picture found');
+        return student.profile_picture_url;
+      }
+
+      console.log('📭 No profile picture set');
+      return null;
+    } catch (error) {
+      console.error('Error fetching profile picture:', error);
+      return null;
+    }
+  };
+
   // NEW FUNCTION: Fetch GPA and CGPA from exam results
   const fetchExamBasedGPA = async (studentId, studentData) => {
     try {
       console.log('📊 Fetching exam submissions for student_id:', studentId);
       
-      // Fetch all graded exam submissions (same as Results.jsx)
       const { data: examSubmissions, error: subError } = await supabase
         .from('exam_submissions')
         .select('*')
@@ -238,12 +253,10 @@ const Chatbot = () => {
         return { gpa: 0.0, cgpa: 0.0, semesterResults: {}, totalExams: 0, totalCredits: 0 };
       }
 
-      // Organize by semester/year for GPA calculation
       const semesterResults = {};
       let totalCredits = 0;
       let totalPoints = 0;
 
-      // Fetch course details for each exam
       const examIds = examSubmissions.map(sub => sub.exam_id);
       const { data: exams, error: examError } = await supabase
         .from('examinations')
@@ -260,13 +273,11 @@ const Chatbot = () => {
 
       if (examError) throw examError;
 
-      // Create exam map for quick access
       const examMap = {};
       exams.forEach(exam => {
         examMap[exam.id] = exam;
       });
 
-      // Process each graded exam
       examSubmissions.forEach(submission => {
         const exam = examMap[submission.exam_id];
         if (!exam || !exam.courses) {
@@ -276,7 +287,6 @@ const Chatbot = () => {
 
         const course = exam.courses;
         const credits = course.credits || 3;
-        // Use database grade_points if available, otherwise calculate
         const gradePoints = submission.grade_points || 
                            getGradePoints(submission.grade) || 
                            getGradePoints(getGradeFromMarks(submission.total_marks_obtained));
@@ -284,7 +294,6 @@ const Chatbot = () => {
         
         console.log(`📚 Processing: ${course.course_code}, Grade: ${grade}, Points: ${gradePoints}, Credits: ${credits}`);
         
-        // Calculate semester key
         const semesterKey = `year${course.year}_sem${course.semester}`;
         if (!semesterResults[semesterKey]) {
           semesterResults[semesterKey] = {
@@ -296,7 +305,6 @@ const Chatbot = () => {
           };
         }
 
-        // Add to semester results
         semesterResults[semesterKey].courses.push({
           examId: exam.id,
           courseId: course.id,
@@ -311,12 +319,10 @@ const Chatbot = () => {
         semesterResults[semesterKey].totalCredits += credits;
         semesterResults[semesterKey].totalPoints += gradePoints * credits;
 
-        // Add to overall totals
         totalCredits += credits;
         totalPoints += gradePoints * credits;
       });
 
-      // Calculate semester GPAs
       Object.keys(semesterResults).forEach(key => {
         const semester = semesterResults[key];
         if (semester.totalCredits > 0) {
@@ -324,10 +330,8 @@ const Chatbot = () => {
         }
       });
 
-      // Calculate CGPA (overall average)
       const cgpa = totalCredits > 0 ? parseFloat((totalPoints / totalCredits).toFixed(2)) : 0.0;
 
-      // Get current semester GPA
       let currentGPA = 0.0;
       const currentYear = studentData?.year_of_study;
       const currentSemester = studentData?.semester;
@@ -353,7 +357,7 @@ const Chatbot = () => {
     }
   };
 
-  // Updated fetchAllStudentData to include exam-based GPA
+  // Updated fetchAllStudentData to include profile picture
   const fetchAllStudentData = useCallback(async () => {
     if (!user?.email) return;
 
@@ -365,8 +369,8 @@ const Chatbot = () => {
       console.log('✅ Chatbot: CACHE HIT');
       setStudentData(cachedData.studentData);
       setStudentStats(cachedData.studentStats);
+      setProfilePictureUrl(cachedData.profilePictureUrl || null);
       
-      // Load saved chat history
       const savedHistory = loadChatHistory();
       if (savedHistory) {
         console.log('✅ Restored chat history:', savedHistory.length, 'messages');
@@ -399,7 +403,11 @@ const Chatbot = () => {
 
       setStudentData(student);
 
-      // 2. Fetch student's courses with credits for course-based GPA calculation
+      // 2. Fetch profile picture
+      const profilePic = await fetchProfilePicture(student.id);
+      setProfilePictureUrl(profilePic);
+
+      // 3. Fetch student's courses with credits
       const { data: studentCourses, error: coursesError } = await supabase
         .from('student_courses')
         .select(`
@@ -417,7 +425,6 @@ const Chatbot = () => {
 
       if (coursesError) throw coursesError;
 
-      // Process courses with credits for course-based GPA
       const coursesWithGrades = (studentCourses || []).map(sc => {
         const grade = sc.grade || getGradeFromMarks(sc.marks);
         return {
@@ -431,13 +438,12 @@ const Chatbot = () => {
         };
       });
 
-      // 3. Fetch exam-based GPA and CGPA
-      // IMPORTANT: exam_submissions uses auth user.id, not database student.id
+      // 4. Fetch exam-based GPA and CGPA
       const authUserId = user?.id || student.id;
       console.log('🔑 Fetching exam GPA using student_id:', authUserId);
       const examGpaData = await fetchExamBasedGPA(authUserId, student);
       
-      // 4. Calculate course-based GPA (for comparison)
+      // 5. Calculate course-based GPA
       const calculateCourseBasedGPA = (courses) => {
         if (!courses || courses.length === 0) return 0.0;
         
@@ -466,18 +472,16 @@ const Chatbot = () => {
 
       const courseBasedGPA = calculateCourseBasedGPA(coursesWithGrades);
 
-
-
-      // 5. Get active courses (not completed)
+      // 6. Get active courses
       const activeCourses = coursesWithGrades.filter(c => c.status !== 'completed') || [];
       const activeCourseIds = activeCourses.map(sc => sc.course_id).filter(Boolean);
 
-      // 6. Fetch other student data (lectures, assignments, etc.)
+      // 7. Fetch other student data
       const lectures = await fetchUpcomingLectures(activeCourseIds);
       const assignments = await fetchAssignments(activeCourseIds, student.id);
       const exams = await fetchExams(activeCourseIds, student.id);
 
-      // 7. Fetch other student stats (finance, attendance, etc.)
+      // 8. Fetch other student stats
       const { data: finance } = await supabase
         .from('financial_records')
         .select('*')
@@ -534,8 +538,6 @@ const Chatbot = () => {
           intake: student.intake,
           academicYear: student.academic_year
         },
-
-        // GPA data
         gpa: {
           currentGPA: examGpaData.gpa || courseBasedGPA,
           currentCGPA: examGpaData.cgpa || courseBasedGPA,
@@ -547,7 +549,6 @@ const Chatbot = () => {
           totalGradedExams: examGpaData.totalExams || 0,
           totalCredits: examGpaData.totalCredits || 0
         },
-
         courses: {
           total: coursesWithGrades.length || 0,
           completed: coursesWithGrades.filter(c => c.status === 'completed').length || 0,
@@ -565,11 +566,7 @@ const Chatbot = () => {
             department: c.department
           })) || []
         },
-
-        // Lectures for active courses only
         lectures: lectures,
-
-        // Assignment statistics for active courses only
         assignments: {
           total: assignments?.length || 0,
           submitted: assignments?.filter(a => 
@@ -596,8 +593,6 @@ const Chatbot = () => {
             return submission?.status === 'graded';
           }).sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)).slice(0, 3)
         },
-
-        // Exam statistics for active courses only
         exams: {
           total: exams?.length || 0,
           completed: exams?.filter(e => {
@@ -612,8 +607,6 @@ const Chatbot = () => {
             e.submissions?.some(s => s.student_id === student.id && s.status === 'graded')
           ) || [])
         },
-
-        // Financial statistics - COMPLETE breakdown
         finance: {
           totalPaid: finance?.filter(f => f.status === 'paid').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
           totalPending: finance?.filter(f => f.status === 'pending').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
@@ -665,8 +658,6 @@ const Chatbot = () => {
           scholarships: finance?.filter(f => f.type === 'scholarship' || f.category === 'scholarship').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
           fines: finance?.filter(f => f.type === 'fine' || f.category === 'fine').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0
         },
-
-        // Attendance statistics
         attendance: {
           total: attendance?.length || 0,
           present: attendance?.filter(a => a.status === 'present').length || 0,
@@ -678,8 +669,6 @@ const Chatbot = () => {
           byCourse: groupAttendanceByCourse(attendance || []),
           trend: calculateAttendanceTrend(attendance || [])
         },
-
-        // Timetable statistics for active courses
         timetable: {
           total: timetable?.length || 0,
           today: timetable?.filter(slot => {
@@ -693,8 +682,6 @@ const Chatbot = () => {
           byDay: groupTimetableByDay(timetable || []),
           currentClass: getCurrentClass(timetable || [])
         },
-
-        // Additional data
         library: {
           available: libraryBooks?.length || 0,
           books: libraryBooks || [],
@@ -703,7 +690,6 @@ const Chatbot = () => {
             b.category?.toLowerCase().includes('technology')
           ).slice(0, 3) || []
         },
-
         events: {
           upcoming: events || [],
           today: events?.filter(e => 
@@ -714,19 +700,18 @@ const Chatbot = () => {
 
       setStudentStats(processedStats);
 
-      // Save to cache for 10 minutes
+      // Save to cache
       dataCache.set(`chatbot-data-${user.email}`, {
         studentData: student,
-        studentStats: processedStats
+        studentStats: processedStats,
+        profilePictureUrl: profilePic
       }, 10 * 60 * 1000);
 
-      // Check if there's saved chat history
       const savedHistory = loadChatHistory();
       if (savedHistory) {
         console.log('✅ Restored chat history:', savedHistory.length, 'messages');
         setMessages(savedHistory);
       } else {
-        // Initialize welcome message
         const welcomeMessage = {
           id: 1,
           text: generateWelcomeMessage(student, processedStats),
@@ -750,7 +735,7 @@ const Chatbot = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.email]);
 
-  // Helper functions (keep existing ones, add missing ones)
+  // Helper functions
   const fetchUpcomingLectures = async (activeCourseIds) => {
     try {
       const today = new Date();
@@ -975,7 +960,6 @@ const Chatbot = () => {
     return 'Good Evening';
   };
 
-  // Enhanced welcome message generator with GPA/CGPA
   const generateWelcomeMessage = (student, stats) => {
     const currentClass = stats.timetable.currentClass;
     const nextAssignment = stats.assignments.upcoming[0];
@@ -1047,21 +1031,17 @@ Or just chat with me about anything academic! I'm here to help! 🤖`;
     });
   };
 
-  // Enhanced query detection with GPA/CGPA patterns
   const detectQueryType = (query) => {
     const q = query.toLowerCase();
     
-    // Enhanced greetings detection
     if (/(hi|hello|hey|greetings|good\s*(morning|afternoon|evening|day)|what'?s\s*up|howdy|yo|sup|hi\s*there|hello\s*there|morning|afternoon|evening|hola|bonjour|namaste|aloha|ciao|salam|shalom|how\s*are\s*you|how'?s\s*it\s*going|how'?s\s*(everything|life|your\s*day)|what'?s\s*(happening|new|good|poppin)|long\s*time\s*no\s*see|nice\s*to\s*see\s*you|pleased\s*to\s*meet\s*you|how\s*have\s*you\s*been|good\s*to\s*see\s*you|hiya|hey\s*there|salutations|welcome\s*back|lovely\s*to\s*see\s*you|great\s*to\s*see\s*you)/.test(q)) {
       return 'greeting';
     }
     
-    // Thanks detection
     if (/(thank|thanks|thankyou|appreciate|grateful|obliged|cheers|ta|much\s*obliged)/.test(q)) {
       return 'thanks';
     }
     
-    // GPA & CGPA queries - ENHANCED
     if (/(cgpa|cumulative\s*grade|cumulative\s*gpa|overall\s*gpa|total\s*gpa|exam\s*based|from\s*exam|exam\s*results)/.test(q)) {
       return 'cgpa';
     }
@@ -1074,12 +1054,10 @@ Or just chat with me about anything academic! I'm here to help! 🤖`;
       return 'grades';
     }
     
-    // Courses query
     if (/(course|subject|unit|module|class)/.test(q)) {
       return 'courses';
     }
     
-    // Assignments
     if (/(assignment|homework|project|coursework|essay|report|paper|dissertation|thesis|portfolio)/.test(q)) {
       return 'assignments';
     }
@@ -1088,12 +1066,10 @@ Or just chat with me about anything academic! I'm here to help! 🤖`;
       return 'deadlines';
     }
     
-    // Exams
     if (/(exam|test|midterm|final|quiz|assessment|evaluation|paper|examination)/.test(q)) {
       return 'exams';
     }
     
-    // Schedule & Lectures
     if (/(lecture|class|schedule|timetable|routine|when\s*do\s*i|what\s*time)/.test(q)) {
       return 'schedule';
     }
@@ -1110,62 +1086,50 @@ Or just chat with me about anything academic! I'm here to help! 🤖`;
       return 'week';
     }
     
-    // Finance
     if (/(fee|payment|finance|balance|money|tuition|fees|bill|invoice|payment|scholarship|loan)/.test(q)) {
       return 'finance';
     }
     
-    // Attendance
     if (/(attendance|present|absent|late|attended|punctual|late|missing)/.test(q)) {
       return 'attendance';
     }
     
-    // Library
     if (/(library|book|resource|study\s*material|reading|textbook|journal|publication)/.test(q)) {
       return 'library';
     }
     
-    // Events
     if (/(event|activity|campus|extra\s*curricular|club|society|workshop|seminar|conference)/.test(q)) {
       return 'events';
     }
     
-    // Study help
     if (/(study|learn|prepar|improve|tip|advice|suggestion|how\s*to|method|technique|strategy)/.test(q)) {
       return 'study';
     }
     
-    // Progress & Performance
     if (/(progress|performance|how\s*am\s*i|summary|overview|report|status|update)/.test(q)) {
       return 'progress';
     }
     
-    // Help
     if (/(help|what\s*can|capabilities|assist|how\s*to\s*use|guide|manual|tutorial)/.test(q)) {
       return 'help';
     }
     
-    // University info
     if (/(university|campus|faculty|department|program|college|school|institution)/.test(q)) {
       return 'university';
     }
     
-    // Personal info
     if (/(my\s*info|profile|details|who\s*am\s*i|student\s*info|information\s*about\s*me)/.test(q)) {
       return 'profile';
     }
     
-    // Motivational/Encouragement
     if (/(motivat|inspire|encourage|cheer\s*up|feeling\s*(down|sad|stressed|overwhelmed))/i.test(q)) {
       return 'motivation';
     }
     
-    // Goodbye
     if (/(bye|goodbye|see\s*you|farewell|take\s*care|later|ciao|adios)/i.test(q)) {
       return 'goodbye';
     }
     
-    // How are you
     if (/(how\s*are\s*you|how\s*do\s*you\s*do|how'?s\s*it\s*going)/i.test(q)) {
       return 'howareyou';
     }
@@ -1173,7 +1137,7 @@ Or just chat with me about anything academic! I'm here to help! 🤖`;
     return 'unknown';
   };
 
-  // ENHANCED AI Response Generator with real-time GPA/CGPA from exams
+  // Enhanced AI Response Generator with real-time GPA/CGPA from exams
   const generateAIResponse = (userQuery) => {
     if (!studentStats || !studentData) {
       return "I'm still loading your data. Please wait a moment...";
@@ -1182,7 +1146,6 @@ Or just chat with me about anything academic! I'm here to help! 🤖`;
     const query = userQuery.toLowerCase();
     const queryType = detectQueryType(query);
     
-    // Handle greetings
     if (queryType === 'greeting') {
       const randomGreeting = knowledgeBase.greetings[
         Math.floor(Math.random() * knowledgeBase.greetings.length)
@@ -1198,7 +1161,6 @@ Or just chat with me about anything academic! I'm here to help! 🤖`;
 What would you like to know about your academic progress today?`;
     }
     
-    // Handle thanks
     if (queryType === 'thanks') {
       const randomThanks = knowledgeBase.thanks[
         Math.floor(Math.random() * knowledgeBase.thanks.length)
@@ -1212,14 +1174,12 @@ What would you like to know about your academic progress today?`;
 ${randomEncouragement}`;
     }
     
-    // Handle "how are you"
     if (queryType === 'howareyou') {
       return `I'm doing great, thank you for asking! 😊 As an AI assistant, I don't have feelings, but I'm always ready and excited to help you with your academic journey!
 
 How about you? How's your day going? Is there anything academic I can assist you with today?`;
     }
     
-    // Handle motivation requests
     if (queryType === 'motivation') {
       const randomQuote = knowledgeBase.motivational[
         Math.floor(Math.random() * knowledgeBase.motivational.length)
@@ -1237,7 +1197,6 @@ ${randomEncouragement}
 **Remember:** Every expert was once a beginner. Keep going! 💪`;
     }
     
-    // Handle goodbye
     if (queryType === 'goodbye') {
       return `👋 Goodbye, ${studentData.full_name.split(' ')[0]}! 
 
@@ -1249,7 +1208,6 @@ It was great chatting with you! Remember:
 Wishing you all the best in your studies! Come back anytime! 📚✨`;
     }
     
-    // ENHANCED CGPA query - From Exam Results
     if (queryType === 'cgpa') {
       const cgpaData = studentStats.gpa;
       const examBasedCGPA = cgpaData.examBasedCGPA || cgpaData.currentCGPA;
@@ -1306,14 +1264,12 @@ CGPA (Cumulative Grade Point Average) is calculated from **all your graded exam 
 **Note:** CGPA = (Σ grade_points × credits) / (Σ credits) from all graded exams`;
     }
     
-    // ENHANCED GPA query - From Exam Results
     if (queryType === 'gpa') {
       const gpaData = studentStats.gpa;
       const currentGPA = gpaData.examBasedGPA || gpaData.currentGPA;
       const currentYear = studentData.year_of_study;
       const currentSemester = studentData.semester;
       
-      // Get current semester results
       let currentSemesterResults = null;
       if (gpaData.semesterResults) {
         const currentSemesterKey = `year${currentYear}_sem${currentSemester}`;
@@ -1373,7 +1329,6 @@ ${currentSemesterResults.courses.length > 5 ? `\n...and ${currentSemesterResults
 **Next Step:** Work on improving weak areas and maintain strong performance in current courses!`;
     }
     
-    // Handle grades query (general)
     if (queryType === 'grades') {
       const gpaData = studentStats.gpa;
       
@@ -1403,8 +1358,6 @@ ${gpaData.semesterResults && Object.keys(gpaData.semesterResults).length > 0 ?
 **Need specific grade advice?** Tell me which subject you're concerned about!`;
     }
     
-    // Rest of the response handlers remain the same...
-    // Courses query
     if (queryType === 'courses') {
       const currentCourses = studentStats.courses.list
         .filter(c => c.status === 'in_progress');
@@ -1427,7 +1380,6 @@ ${completedCourses.length > 0 ?
 **Total Credits This Semester:** ${currentCourses.reduce((sum, c) => sum + c.credits, 0)}`;
     }
     
-    // Assignments query
     if (queryType === 'assignments') {
       const upcomingAssignments = studentStats.assignments.upcoming;
       const overdueAssignments = studentStats.assignments.overdue;
@@ -1479,7 +1431,6 @@ ${recentGrades.map(a => {
 }).join('\n')}` : ''}`;
     }
     
-    // Exams query
     if (queryType === 'exams') {
       const upcomingExams = studentStats.exams.upcoming;
       const performance = studentStats.exams.performance;
@@ -1592,7 +1543,6 @@ ${randomEncouragement}
     setIsLoading(true);
 
     try {
-      // Build conversation history from last 6 messages (3 exchanges)
       const conversationHistory = messages
         .filter(msg => msg.text && msg.text.length > 0)
         .slice(-6)
@@ -1603,7 +1553,6 @@ ${randomEncouragement}
 
       console.log('📝 Sending conversation history:', conversationHistory.length, 'messages');
 
-      // Use Groq AI with conversation history
       const aiResponse = await generateAIResponseWithContext(
         inputText, 
         studentStats, 
@@ -1669,14 +1618,12 @@ ${randomEncouragement}
     setInputText(question);
     if (isMobile) {
       setShowQuickQuestions(false);
-      // Focus on input after a delay
       setTimeout(() => {
         inputRef.current?.focus();
       }, 100);
     }
   };
 
-  // Enhanced quick questions with GPA/CGPA options
   const quickQuestions = [
     "What's my CGPA?",
     "Current GPA?",
@@ -1699,7 +1646,7 @@ ${randomEncouragement}
     }
   }, [messages, isLoading]);
 
-  // Fetch data on mount - use cache if available
+  // Fetch data on mount
   useEffect(() => {
     fetchAllStudentData();
   }, [fetchAllStudentData, user?.email]);
@@ -1981,7 +1928,8 @@ ${randomEncouragement}
                   display: 'flex',
                   alignItems: 'flex-start',
                   gap: isMobile ? '0.5rem' : '0.75rem',
-                  maxWidth: '95%'
+                  maxWidth: '95%',
+                  flexDirection: message.sender === 'user' ? 'row-reverse' : 'row'
                 }}>
                   {message.sender === 'ai' && (
                     <div style={{
@@ -2001,6 +1949,43 @@ ${randomEncouragement}
                       }}>🤖</span>
                     </div>
                   )}
+                  
+                  {message.sender === 'user' && (
+                    <div style={{
+                      width: isMobile ? '28px' : '32px',
+                      height: isMobile ? '28px' : '32px',
+                      borderRadius: '50%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                      marginTop: '0.25rem',
+                      overflow: 'hidden',
+                      border: '2px solid #4361ee',
+                      background: '#e9ecef'
+                    }}>
+                      {profilePictureUrl ? (
+                        <img 
+                          src={profilePictureUrl} 
+                          alt={studentData?.full_name || 'User'}
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover'
+                          }}
+                        />
+                      ) : (
+                        <span style={{ 
+                          fontSize: isMobile ? '0.8rem' : '0.9rem',
+                          color: '#4361ee',
+                          fontWeight: 'bold'
+                        }}>
+                          {studentData?.full_name?.charAt(0) || 'U'}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  
                   <div style={{
                     background: message.sender === 'user' ? '#4361ee' : 'white',
                     color: message.sender === 'user' ? 'white' : '#2c3e50',
@@ -2031,24 +2016,6 @@ ${randomEncouragement}
                       })}
                     </div>
                   </div>
-                  {message.sender === 'user' && (
-                    <div style={{
-                      width: isMobile ? '28px' : '32px',
-                      height: isMobile ? '28px' : '32px',
-                      borderRadius: '50%',
-                      background: '#f72585',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flexShrink: 0,
-                      marginTop: '0.25rem'
-                    }}>
-                      <span style={{ 
-                        color: 'white',
-                        fontSize: isMobile ? '0.8rem' : '0.9rem'
-                      }}>👤</span>
-                    </div>
-                  )}
                 </div>
               </div>
             ))}
@@ -2107,7 +2074,7 @@ ${randomEncouragement}
           </div>
         </div>
 
-        {/* Quick Questions - Mobile optimized */}
+        {/* Quick Questions */}
         {showQuickQuestions && (
           <div 
             ref={quickQuestionsRef}
@@ -2369,215 +2336,11 @@ ${randomEncouragement}
           100% { transform: rotate(360deg); }
         }
         
-        /* Custom scrollbar for chat */
-        .chat-container::-webkit-scrollbar {
-          width: 6px;
-        }
-        
-        .chat-container::-webkit-scrollbar-track {
-          background: #f1f1f1;
-          border-radius: 3px;
-        }
-        
-        .chat-container::-webkit-scrollbar-thumb {
-          background: #c1c1c1;
-          border-radius: 3px;
-        }
-        
-        .chat-container::-webkit-scrollbar-thumb:hover {
-          background: #a1a1a1;
-        }
-        
-        /* Mobile-specific optimizations */
-        @media (max-width: 480px) {
-          .quick-questions {
-            padding: 0.75rem !important;
-          }
-          
-          .message-input textarea {
-            font-size: 16px !important;
-          }
-          
-          .quick-question-button {
-            padding: 0.4rem 0.8rem !important;
-            font-size: 0.7rem !important;
-          }
-        }
-        
-        /* Tablet optimizations */
-        @media (max-width: 768px) and (min-width: 481px) {
-          .chat-container {
-            height: 65vh !important;
-          }
-          
-          .quick-questions {
-            padding: 1rem !important;
-          }
-        }
-        
-        /* Large screen optimizations */
-        @media (min-width: 1200px) {
-          .chat-container {
-            height: 75vh !important;
-          }
-        }
-        
-        /* Print styles */
-        @media print {
-          .chat-container {
-            height: auto !important;
-            overflow: visible !important;
-          }
-          
-          .quick-questions,
-          .message-input,
-          .chat-header {
-            display: none !important;
-          }
-        }
-        
-        /* Touch device optimizations */
-        @media (hover: none) and (pointer: coarse) {
-          .quick-question-button {
-            padding: 0.8rem 1.2rem !important;
-            min-height: 44px !important;
-          }
-          
-          .send-button {
-            min-height: 44px !important;
-            padding-top: 0.8rem !important;
-            padding-bottom: 0.8rem !important;
-          }
-          
-          .clear-button {
-            padding: 0.6rem 1rem !important;
-          }
-        }
-        
-        /* Focus styles for accessibility */
-        .message-input textarea:focus,
-        .quick-question-button:focus,
-        .send-button:focus,
-        .clear-button:focus {
-          outline: 2px solid #4361ee !important;
-          outline-offset: 2px !important;
-          box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.2) !important;
-        }
-        
-        /* Loading state animations */
-        .typing-indicator span {
-          display: inline-block;
-          animation: typing 1.4s infinite ease-in-out;
-        }
-        
-        .typing-indicator span:nth-child(2) {
-          animation-delay: 0.1s;
-        }
-        
-        .typing-indicator span:nth-child(3) {
-          animation-delay: 0.2s;
-        }
-        
-        @keyframes typing {
-          0%, 60%, 100% {
-            transform: translateY(0);
-          }
-          30% {
-            transform: translateY(-8px);
-          }
-        }
-        
-        /* Smooth transitions */
-        .chat-message,
-        .quick-question-button,
-        .send-button,
-        .clear-button {
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        
-        /* Pulse animation for notifications */
-        @keyframes pulse {
-          0%, 100% {
-            opacity: 1;
-            transform: scale(1);
-          }
-          50% {
-            opacity: 0.7;
-            transform: scale(1.05);
-          }
-        }
-        
-        .pulse {
-          animation: pulse 2s infinite;
-        }
-        
-        /* Slide-in animation for new messages */
-        @keyframes slideIn {
-          from {
-            opacity: 0;
-            transform: translateY(20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-        
-        .slide-in {
-          animation: slideIn 0.3s ease-out;
-        }
-        
-        /* Ripple effect for buttons */
-        .ripple {
-          position: relative;
-          overflow: hidden;
-        }
-        
-        .ripple:after {
-          content: '';
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          width: 5px;
-          height: 5px;
-          background: rgba(255, 255, 255, 0.5);
-          opacity: 0;
-          border-radius: 100%;
-          transform: scale(1, 1) translate(-50%);
-          transform-origin: 50% 50%;
-        }
-        
-        .ripple:focus:not(:active)::after {
-          animation: ripple 1s ease-out;
-        }
-        
-        @keyframes ripple {
-          0% {
-            transform: scale(0, 0);
-            opacity: 0.5;
-          }
-          20% {
-            transform: scale(25, 25);
-            opacity: 0.3;
-          }
-          100% {
-            opacity: 0;
-            transform: scale(40, 40);
-          }
-        }
-        
-        /* Smooth scrolling */
-        .smooth-scroll {
-          scroll-behavior: smooth;
-        }
-        
-        /* Custom selection color */
         ::selection {
           background-color: rgba(67, 97, 238, 0.3);
           color: inherit;
         }
         
-        /* Scroll snap for mobile */
         @media (max-width: 768px) {
           .chat-container {
             scroll-snap-type: y proximity;
