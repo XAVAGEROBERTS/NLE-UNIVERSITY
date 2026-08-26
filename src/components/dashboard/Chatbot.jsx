@@ -1,9 +1,10 @@
-// src/components/Chatbot.jsx
+// src/components/dashboard/Chatbot.jsx
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useStudentAuth } from '../../context/StudentAuthContext';
 import { supabase } from '../../services/supabase';
 import { dataCache } from '../../utils/dataCache';
 import { generateAIResponseWithContext } from '../../services/aiService';
+import { chatHistoryService } from '../../services/chatHistoryService';
 
 const Chatbot = () => {
   const { user } = useStudentAuth();
@@ -16,36 +17,16 @@ const Chatbot = () => {
   const [isMobile, setIsMobile] = useState(false);
   const [showQuickQuestions, setShowQuickQuestions] = useState(true);
   const [profilePictureUrl, setProfilePictureUrl] = useState(null);
+  const [sessionId, setSessionId] = useState(null);
 
-  // Save chat history to localStorage
-  const saveChatHistory = (chatMessages) => {
-    try {
-      localStorage.setItem(`chat-history-${user?.email}`, JSON.stringify(chatMessages));
-    } catch (error) {
-      console.error('Error saving chat history:', error);
-    }
-  };
-
-  // Load chat history from localStorage
-  const loadChatHistory = () => {
-    try {
-      const saved = localStorage.getItem(`chat-history-${user?.email}`);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
-        }
-      }
-    } catch (error) {
-      console.error('Error loading chat history:', error);
-    }
-    return null;
-  };
-
+  // Refs to prevent duplicate loading
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
   const quickQuestionsRef = useRef(null);
   const inputRef = useRef(null);
+  const isFetchingRef = useRef(false);
+  const loadedHistoryRef = useRef(false);
+  const mountedRef = useRef(true);
 
   // Check screen size
   useEffect(() => {
@@ -63,7 +44,16 @@ const Chatbot = () => {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Enhanced AI knowledge base with more responses
+  // Cleanup on unmount
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      isFetchingRef.current = false;
+    };
+  }, []);
+
+  // Knowledge base
   const knowledgeBase = {
     greetings: [
       "Great to see you! How can I assist with your studies today? 📚",
@@ -203,8 +193,6 @@ const Chatbot = () => {
   // Fetch profile picture URL
   const fetchProfilePicture = async (studentId) => {
     try {
-      console.log('🖼️ Fetching profile picture for student:', studentId);
-      
       const { data: student, error } = await supabase
         .from('students')
         .select('profile_picture_url')
@@ -221,7 +209,6 @@ const Chatbot = () => {
         return student.profile_picture_url;
       }
 
-      console.log('📭 No profile picture set');
       return null;
     } catch (error) {
       console.error('Error fetching profile picture:', error);
@@ -229,8 +216,8 @@ const Chatbot = () => {
     }
   };
 
-  // NEW FUNCTION: Fetch GPA and CGPA from exam results
-  const fetchExamBasedGPA = async (studentId, studentData) => {
+  // Fetch GPA from exam results
+  const fetchExamBasedGPA = async (studentId) => {
     try {
       console.log('📊 Fetching exam submissions for student_id:', studentId);
       
@@ -249,7 +236,6 @@ const Chatbot = () => {
       console.log(`📊 Found ${examSubmissions?.length || 0} graded exam submissions`);
       
       if (!examSubmissions || examSubmissions.length === 0) {
-        console.log('📭 No graded submissions found');
         return { gpa: 0.0, cgpa: 0.0, semesterResults: {}, totalExams: 0, totalCredits: 0 };
       }
 
@@ -280,10 +266,7 @@ const Chatbot = () => {
 
       examSubmissions.forEach(submission => {
         const exam = examMap[submission.exam_id];
-        if (!exam || !exam.courses) {
-          console.log('⚠️ No exam found for submission:', submission.exam_id);
-          return;
-        }
+        if (!exam || !exam.courses) return;
 
         const course = exam.courses;
         const credits = course.credits || 3;
@@ -291,8 +274,6 @@ const Chatbot = () => {
                            getGradePoints(submission.grade) || 
                            getGradePoints(getGradeFromMarks(submission.total_marks_obtained));
         const grade = submission.grade || getGradeFromMarks(submission.total_marks_obtained);
-        
-        console.log(`📚 Processing: ${course.course_code}, Grade: ${grade}, Points: ${gradePoints}, Credits: ${credits}`);
         
         const semesterKey = `year${course.year}_sem${course.semester}`;
         if (!semesterResults[semesterKey]) {
@@ -357,385 +338,82 @@ const Chatbot = () => {
     }
   };
 
-  // Updated fetchAllStudentData to include profile picture
-  const fetchAllStudentData = useCallback(async () => {
-    if (!user?.email) return;
-
-    // Check cache first
-    const cacheKey = `chatbot-data-${user.email}`;
-    const cachedData = dataCache.get(cacheKey);
-    
-    if (cachedData) {
-      console.log('✅ Chatbot: CACHE HIT');
-      setStudentData(cachedData.studentData);
-      setStudentStats(cachedData.studentStats);
-      setProfilePictureUrl(cachedData.profilePictureUrl || null);
-      
-      const savedHistory = loadChatHistory();
-      if (savedHistory) {
-        console.log('✅ Restored chat history:', savedHistory.length, 'messages');
-        setMessages(savedHistory);
-      } else {
-        const welcomeMessage = {
-          id: 1,
-          text: generateWelcomeMessage(cachedData.studentData, cachedData.studentStats),
-          sender: 'ai',
-          timestamp: new Date()
-        };
-        setMessages([welcomeMessage]);
-      }
-      setIsLoadingInitial(false);
-      return;
-    }
-
+  // Save message to database - UPDATED
+  const saveMessageToDB = useCallback(async (studentId, message, sender) => {
     try {
-      setIsLoadingInitial(true);
+      console.log('🔍 saveMessageToDB called:', { studentId, sender, sessionId });
       
-      // 1. Fetch student basic information
-      const { data: student, error: studentError } = await supabase
-        .from('students')
-        .select('*')
-        .eq('email', user.email)
-        .single();
-
-      if (studentError) throw studentError;
-      if (!student) throw new Error('Student not found');
-
-      setStudentData(student);
-
-      // 2. Fetch profile picture
-      const profilePic = await fetchProfilePicture(student.id);
-      setProfilePictureUrl(profilePic);
-
-      // 3. Fetch student's courses with credits
-      const { data: studentCourses, error: coursesError } = await supabase
-        .from('student_courses')
-        .select(`
-          *,
-          courses (
-            id,
-            course_code,
-            course_name,
-            credits,
-            year,
-            semester
-          )
-        `)
-        .eq('student_id', student.id);
-
-      if (coursesError) throw coursesError;
-
-      const coursesWithGrades = (studentCourses || []).map(sc => {
-        const grade = sc.grade || getGradeFromMarks(sc.marks);
-        return {
-          ...sc,
-          grade: grade,
-          grade_points: sc.grade_points || getGradePoints(grade),
-          credits: sc.courses?.credits || 3,
-          course_code: sc.courses?.course_code || 'N/A',
-          course_name: sc.courses?.course_name || 'Unknown Course',
-          status: sc.status || 'in_progress'
-        };
-      });
-
-      // 4. Fetch exam-based GPA and CGPA
-      const authUserId = user?.id || student.id;
-      console.log('🔑 Fetching exam GPA using student_id:', authUserId);
-      const examGpaData = await fetchExamBasedGPA(authUserId, student);
+      // Get auth user ID
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const authUserId = authUser?.id || studentId;
       
-      // 5. Calculate course-based GPA
-      const calculateCourseBasedGPA = (courses) => {
-        if (!courses || courses.length === 0) return 0.0;
-        
-        const completedCourses = courses.filter(
-          course => course.status === 'completed' && (course.grade || course.marks)
-        );
-        
-        if (completedCourses.length === 0) return 0.0;
-        
-        let totalPoints = 0;
-        let totalCredits = 0;
-        
-        completedCourses.forEach(course => {
-          const grade = course.grade || getGradeFromMarks(course.marks);
-          const gradePoints = course.grade_points || getGradePoints(grade);
-          const credits = course.credits || 3;
-          
-          if (gradePoints && credits) {
-            totalPoints += gradePoints * credits;
-            totalCredits += credits;
-          }
-        });
-        
-        return totalCredits > 0 ? parseFloat((totalPoints / totalCredits).toFixed(2)) : 0.0;
-      };
-
-      const courseBasedGPA = calculateCourseBasedGPA(coursesWithGrades);
-
-      // 6. Get active courses
-      const activeCourses = coursesWithGrades.filter(c => c.status !== 'completed') || [];
-      const activeCourseIds = activeCourses.map(sc => sc.course_id).filter(Boolean);
-
-      // 7. Fetch other student data
-      const lectures = await fetchUpcomingLectures(activeCourseIds);
-      const assignments = await fetchAssignments(activeCourseIds, student.id);
-      const exams = await fetchExams(activeCourseIds, student.id);
-
-      // 8. Fetch other student stats
-      const { data: finance } = await supabase
-        .from('financial_records')
-        .select('*')
-        .eq('student_id', student.id)
-        .eq('academic_year', student.academic_year)
-        .order('semester', { ascending: true })
-        .order('created_at', { ascending: true });
-
-      console.log('💰 ALL FINANCE RECORDS:', finance);
-
-      const { data: attendance } = await supabase
-        .from('attendance_records')
-        .select(`
-          *,
-          courses (*)
-        `)
-        .eq('student_id', student.id)
-        .gte('date', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0])
-        .order('date', { ascending: false });
-
-      const { data: timetable } = activeCourseIds.length > 0 ? await supabase
-        .from('timetable_slots')
-        .select(`
-          *,
-          courses (*),
-          lecturers (*)
-        `)
-        .in('course_id', activeCourseIds)
-        .eq('is_active', true) : { data: [] };
-
-      const { data: libraryBooks } = await supabase
-        .from('library_books')
-        .select('*')
-        .eq('status', 'available')
-        .limit(5);
-
-      const { data: events } = await supabase
-        .from('campus_events')
-        .select('*')
-        .gte('date', new Date().toISOString().split('T')[0])
-        .order('date', { ascending: true })
-        .limit(5);
-
-      // Calculate statistics
-      const processedStats = {
-        studentInfo: {
-          name: student.full_name,
-          id: student.student_id,
-          program: student.program,
-          year: student.year_of_study,
-          semester: student.semester,
-          email: student.email,
-          phone: student.phone,
-          intake: student.intake,
-          academicYear: student.academic_year
-        },
-        gpa: {
-          currentGPA: examGpaData.gpa || courseBasedGPA,
-          currentCGPA: examGpaData.cgpa || courseBasedGPA,
-          examBasedGPA: examGpaData.gpa,
-          examBasedCGPA: examGpaData.cgpa,
-          courseBasedGPA: courseBasedGPA,
-          courseBasedCGPA: courseBasedGPA,
-          semesterResults: examGpaData.semesterResults,
-          totalGradedExams: examGpaData.totalExams || 0,
-          totalCredits: examGpaData.totalCredits || 0
-        },
-        courses: {
-          total: coursesWithGrades.length || 0,
-          completed: coursesWithGrades.filter(c => c.status === 'completed').length || 0,
-          inProgress: activeCourses.length || 0,
-          list: coursesWithGrades.map(c => ({
-            id: c.course_id,
-            code: c.course_code,
-            name: c.course_name,
-            status: c.status,
-            grade: c.grade,
-            marks: c.marks,
-            gradePoints: c.grade_points,
-            credits: c.credits,
-            lecturer: c.lecturer_name,
-            department: c.department
-          })) || []
-        },
-        lectures: lectures,
-        assignments: {
-          total: assignments?.length || 0,
-          submitted: assignments?.filter(a => 
-            a.submissions?.some(s => s.student_id === student.id)
-          ).length || 0,
-          pending: assignments?.filter(a => {
-            const submission = a.submissions?.find(s => s.student_id === student.id);
-            return !submission && new Date(a.due_date) > new Date();
-          }).length || 0,
-          graded: assignments?.filter(a => {
-            const submission = a.submissions?.find(s => s.student_id === student.id);
-            return submission?.status === 'graded';
-          }).length || 0,
-          overdue: assignments?.filter(a => {
-            const submission = a.submissions?.find(s => s.student_id === student.id);
-            return !submission && new Date(a.due_date) < new Date();
-          }).length || 0,
-          upcoming: assignments?.filter(a => {
-            const submission = a.submissions?.find(s => s.student_id === student.id);
-            return !submission && new Date(a.due_date) > new Date();
-          }).sort((a, b) => new Date(a.due_date) - new Date(b.due_date)).slice(0, 5),
-          recentGrades: assignments?.filter(a => {
-            const submission = a.submissions?.find(s => s.student_id === student.id);
-            return submission?.status === 'graded';
-          }).sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)).slice(0, 3)
-        },
-        exams: {
-          total: exams?.length || 0,
-          completed: exams?.filter(e => {
-            const submission = e.submissions?.find(s => s.student_id === student.id);
-            return submission && submission.status === 'graded';
-          }).length || 0,
-          upcoming: exams?.filter(e => {
-            const submission = e.submissions?.find(s => s.student_id === student.id);
-            return !submission && new Date(e.start_time) > new Date();
-          }).sort((a, b) => new Date(a.start_time) - new Date(b.start_time)).slice(0, 5),
-          performance: calculateExamPerformance(exams?.filter(e => 
-            e.submissions?.some(s => s.student_id === student.id && s.status === 'graded')
-          ) || [])
-        },
-        finance: {
-          totalPaid: finance?.filter(f => f.status === 'paid').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
-          totalPending: finance?.filter(f => f.status === 'pending').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
-          totalPartial: finance?.filter(f => f.status === 'partial').reduce((sum, f) => sum + (parseFloat(f.balance_due) || parseFloat(f.amount) || 0), 0) || 0,
-          overdue: finance?.filter(f => 
-            f.due_date && 
-            new Date(f.due_date) < new Date() && 
-            f.status !== 'paid'
-          ).length || 0,
-          allFees: finance?.map(f => ({
-            id: f.id,
-            description: f.description || f.category || f.fee_type || 'Fee',
-            feeType: f.category || f.fee_type || 'tuition',
-            amount: parseFloat(f.amount) || 0,
-            balanceDue: parseFloat(f.balance_due) || 0,
-            status: f.status,
-            semester: f.semester || 1,
-            paymentDate: f.payment_date,
-            dueDate: f.due_date,
-            receiptNumber: f.receipt_number,
-            paymentMethod: f.payment_method
-          })) || [],
-          tuition: {
-            amount: finance?.filter(f => (f.category === 'tuition' || f.fee_type === 'tuition')).reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
-            paid: finance?.filter(f => (f.category === 'tuition' || f.fee_type === 'tuition') && f.status === 'paid').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
-            pending: finance?.filter(f => (f.category === 'tuition' || f.fee_type === 'tuition') && f.status !== 'paid').reduce((sum, f) => sum + (parseFloat(f.balance_due) || parseFloat(f.amount) || 0), 0) || 0,
-            semester1: finance?.filter(f => (f.category === 'tuition' || f.fee_type === 'tuition') && f.semester === 1).map(f => ({ amount: parseFloat(f.amount) || 0, status: f.status, paidDate: f.payment_date })) || [],
-            semester2: finance?.filter(f => (f.category === 'tuition' || f.fee_type === 'tuition') && f.semester === 2).map(f => ({ amount: parseFloat(f.amount) || 0, status: f.status, paidDate: f.payment_date })) || []
-          },
-          functional: {
-            amount: finance?.filter(f => f.category === 'functional').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
-            paid: finance?.filter(f => f.category === 'functional' && f.status === 'paid').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
-            pending: finance?.filter(f => f.category === 'functional' && f.status !== 'paid').reduce((sum, f) => sum + (parseFloat(f.balance_due) || parseFloat(f.amount) || 0), 0) || 0
-          },
-          guild: {
-            amount: finance?.filter(f => f.category === 'guild').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
-            paid: finance?.filter(f => f.category === 'guild' && f.status === 'paid').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
-            pending: finance?.filter(f => f.category === 'guild' && f.status !== 'paid').reduce((sum, f) => sum + (parseFloat(f.balance_due) || parseFloat(f.amount) || 0), 0) || 0
-          },
-          nche: {
-            amount: finance?.filter(f => f.category === 'nche').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
-            paid: finance?.filter(f => f.category === 'nche' && f.status === 'paid').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0
-          },
-          registration: {
-            amount: finance?.filter(f => f.category === 'registration').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
-            paid: finance?.filter(f => f.category === 'registration' && f.status === 'paid').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0
-          },
-          recent: finance?.slice(0, 10) || [],
-          scholarships: finance?.filter(f => f.type === 'scholarship' || f.category === 'scholarship').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
-          fines: finance?.filter(f => f.type === 'fine' || f.category === 'fine').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0
-        },
-        attendance: {
-          total: attendance?.length || 0,
-          present: attendance?.filter(a => a.status === 'present').length || 0,
-          absent: attendance?.filter(a => a.status === 'absent').length || 0,
-          late: attendance?.filter(a => a.status === 'late').length || 0,
-          rate: attendance?.length > 0 ? 
-            (attendance.filter(a => a.status === 'present').length / attendance.length * 100).toFixed(1) : 0,
-          recent: attendance?.slice(0, 10) || [],
-          byCourse: groupAttendanceByCourse(attendance || []),
-          trend: calculateAttendanceTrend(attendance || [])
-        },
-        timetable: {
-          total: timetable?.length || 0,
-          today: timetable?.filter(slot => {
-            const today = new Date().getDay();
-            return slot.day_of_week === (today === 0 ? 6 : today - 1);
-          }).sort((a, b) => {
-            const timeA = a.start_time?.split(':').map(Number) || [0, 0];
-            const timeB = b.start_time?.split(':').map(Number) || [0, 0];
-            return (timeA[0] * 60 + timeA[1]) - (timeB[0] * 60 + timeB[1]);
-          }) || [],
-          byDay: groupTimetableByDay(timetable || []),
-          currentClass: getCurrentClass(timetable || [])
-        },
-        library: {
-          available: libraryBooks?.length || 0,
-          books: libraryBooks || [],
-          recommended: libraryBooks?.filter(b => 
-            b.category?.toLowerCase().includes('computer') || 
-            b.category?.toLowerCase().includes('technology')
-          ).slice(0, 3) || []
-        },
-        events: {
-          upcoming: events || [],
-          today: events?.filter(e => 
-            new Date(e.date).toDateString() === new Date().toDateString()
-          ) || []
-        }
-      };
-
-      setStudentStats(processedStats);
-
-      // Save to cache
-      dataCache.set(`chatbot-data-${user.email}`, {
-        studentData: student,
-        studentStats: processedStats,
-        profilePictureUrl: profilePic
-      }, 10 * 60 * 1000);
-
-      const savedHistory = loadChatHistory();
-      if (savedHistory) {
-        console.log('✅ Restored chat history:', savedHistory.length, 'messages');
-        setMessages(savedHistory);
-      } else {
-        const welcomeMessage = {
-          id: 1,
-          text: generateWelcomeMessage(student, processedStats),
-          sender: 'ai',
-          timestamp: new Date()
-        };
-        setMessages([welcomeMessage]);
+      console.log('💾 Saving message with authUserId:', authUserId);
+      
+      // Ensure we have a session ID
+      let currentSessionId = sessionId;
+      if (!currentSessionId) {
+        currentSessionId = await chatHistoryService.getOrCreateSession(authUserId);
+        setSessionId(currentSessionId);
       }
       
+      const result = await chatHistoryService.saveMessage(
+        authUserId,
+        message,
+        sender,
+        currentSessionId
+      );
+      
+      if (result) {
+        console.log('✅ Message saved successfully to DB');
+        // Clear cache and reload history
+        const cacheKey = `history_${authUserId}`;
+        chatHistoryService._messageCache?.delete(cacheKey);
+        
+        // Reload chat history
+        const updatedHistory = await chatHistoryService.loadChatHistory(authUserId);
+        if (updatedHistory && updatedHistory.length > 0) {
+          setMessages(updatedHistory);
+        }
+      } else {
+        console.warn('⚠️ Message was not saved to DB');
+      }
+      
+      return result;
     } catch (error) {
-      console.error('Error in fetchAllStudentData:', error);
-      setMessages([{
-        id: 1,
-        text: `⚠️ Error loading your data: ${error.message}. Please try refreshing the page or contact support.`,
-        sender: 'ai',
-        timestamp: new Date()
-      }]);
-    } finally {
-      setIsLoadingInitial(false);
+      console.error('❌ Error saving message to database:', error);
+      return null;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.email]);
+  }, [sessionId]);
 
-  // Helper functions
+  // Generate brief welcome message
+  const generateWelcomeMessage = (student, stats) => {
+    const firstName = student?.full_name?.split(' ')[0] || 'Student';
+    
+    // Check if user has ever sent a message
+    const hasUserMessaged = messages.some(m => m.sender === 'user');
+    
+    // If user has interacted before, just say hi
+    if (hasUserMessaged || messages.length > 1) {
+      const quickGreetings = [
+        `👋 Hey ${firstName}! How can I help?`,
+        `👋 Welcome back, ${firstName}!`,
+        `👋 Ready to continue, ${firstName}?`,
+        `👋 ${firstName}! Ask me anything.`
+      ];
+      return quickGreetings[Math.floor(Math.random() * quickGreetings.length)];
+    }
+    
+    // New user - brief intro with just the essentials
+    const gpa = stats?.gpa?.examBasedCGPA?.toFixed(2) || 'N/A';
+    const courses = stats?.courses?.inProgress || 0;
+    
+    let briefInfo = `📊 CGPA ${gpa}`;
+    if (courses > 0) briefInfo += ` · ${courses} courses`;
+    
+    return `👋 Hi ${firstName}! I'm your personal AI assistant. Feel free to ask me anything! 💬`;
+  };
+
+  // Helper functions for data fetching
   const fetchUpcomingLectures = async (activeCourseIds) => {
     try {
       const today = new Date();
@@ -796,21 +474,37 @@ const Chatbot = () => {
         .from('assignments')
         .select(`
           *,
-          courses (*),
-          assignment_submissions (
-            *
-          ).filter(student_id.eq.${studentId})
+          courses (*)
         `)
         .in('course_id', activeCourseIds)
         .eq('status', 'published')
         .order('due_date', { ascending: true });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error fetching assignments:', error);
+        return [];
+      }
 
-      return assignments?.map(assignment => ({
-        ...assignment,
-        submissions: assignment.assignment_submissions || []
-      })) || [];
+      if (assignments && assignments.length > 0) {
+        const assignmentIds = assignments.map(a => a.id);
+        const { data: submissions, error: subError } = await supabase
+          .from('assignment_submissions')
+          .select('*')
+          .in('assignment_id', assignmentIds)
+          .eq('student_id', studentId);
+
+        if (subError) {
+          console.error('Error fetching submissions:', subError);
+          return assignments.map(a => ({ ...a, submissions: [] }));
+        }
+
+        return assignments.map(a => ({
+          ...a,
+          submissions: submissions?.filter(s => s.assignment_id === a.id) || []
+        }));
+      }
+
+      return assignments || [];
 
     } catch (error) {
       console.error('Error fetching assignments:', error);
@@ -827,21 +521,37 @@ const Chatbot = () => {
         .from('examinations')
         .select(`
           *,
-          courses (*),
-          exam_submissions (
-            *
-          ).filter(student_id.eq.${studentId})
+          courses (*)
         `)
         .in('course_id', activeCourseIds)
         .eq('status', 'published')
         .order('start_time', { ascending: true });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error fetching exams:', error);
+        return [];
+      }
 
-      return exams?.map(exam => ({
-        ...exam,
-        submissions: exam.exam_submissions || []
-      })) || [];
+      if (exams && exams.length > 0) {
+        const examIds = exams.map(e => e.id);
+        const { data: submissions, error: subError } = await supabase
+          .from('exam_submissions')
+          .select('*')
+          .in('exam_id', examIds)
+          .eq('student_id', studentId);
+
+        if (subError) {
+          console.error('Error fetching exam submissions:', subError);
+          return exams.map(e => ({ ...e, submissions: [] }));
+        }
+
+        return exams.map(e => ({
+          ...e,
+          submissions: submissions?.filter(s => s.exam_id === e.id) || []
+        }));
+      }
+
+      return exams || [];
 
     } catch (error) {
       console.error('Error fetching exams:', error);
@@ -953,66 +663,6 @@ const Chatbot = () => {
     return null;
   };
 
-  const getGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour >= 0 && hour < 12) return 'Good Morning';
-    if (hour >= 12 && hour < 17) return 'Good Afternoon';
-    return 'Good Evening';
-  };
-
-  const generateWelcomeMessage = (student, stats) => {
-    const currentClass = stats.timetable.currentClass;
-    const nextAssignment = stats.assignments.upcoming[0];
-    const nextExam = stats.exams.upcoming[0];
-    const today = new Date();
-    const dayOfWeek = today.toLocaleDateString('en-US', { weekday: 'long' });
-    
-    const randomQuote = knowledgeBase.motivational[
-      Math.floor(Math.random() * knowledgeBase.motivational.length)
-    ];
-
-    return `👋 **${getGreeting()} ${student.full_name.split(' ')[0]}!** 
-
-I'm your AI Student Assistant, connected to your personal academic database. Happy ${dayOfWeek}! 😊
-
-**📚 Academic Summary:**
-• **Exam-Based CGPA:** ${stats.gpa.examBasedCGPA?.toFixed(2) || '0.00'} (from ${stats.gpa.totalGradedExams || 0} graded exams)
-• **Current Semester GPA:** ${stats.gpa.examBasedGPA?.toFixed(2) || '0.00'}
-• **Courses:** ${stats.courses.completed} completed, ${stats.courses.inProgress} in progress
-• **Year:** ${student.year_of_study || 'N/A'}.${student.semester || 'N/A'}
-• **Total Credits:** ${stats.gpa.totalCredits || 0}
-
-${currentClass ? `**📅 Current Class:**\n• **${currentClass.courses?.course_name || 'Class'}** until ${formatTime(currentClass.end_time)} in ${currentClass.room_number}\n` : ''}
-
-${nextAssignment ? `**📝 Next Assignment:**\n• **${nextAssignment.title}** due ${formatDate(nextAssignment.due_date)}\n` : ''}
-
-${nextExam ? `**📋 Next Exam:**\n• **${nextExam.title}** on ${formatDate(nextExam.start_time)}\n` : ''}
-
-**🎯 Quick Stats:**
-• **Attendance Rate:** ${stats.attendance.rate}%
-• **Pending Assignments:** ${stats.assignments.pending}
-• **Upcoming Exams:** ${stats.exams.upcoming.length}
-• **Financial Balance:** $${(stats.finance.totalPending + stats.finance.totalPartial).toFixed(2)}
-
-**💭 Motivational Quote:**
-"${randomQuote}"
-
-**How can I help you today?** Here are some things you can ask:
-1. "How's my GPA looking?"
-2. "What's my CGPA from exam results?"
-3. "What assignments are due this week?"
-4. "Show me today's schedule"
-5. "What's my attendance status?"
-6. "Any upcoming exams?"
-7. "Check my financial balance"
-8. "Recommend study tips"
-9. "What library books are available?"
-10. "Any campus events this week?"
-11. "How can I improve my grades?"
-
-Or just chat with me about anything academic! I'm here to help! 🤖`;
-  };
-
   const formatTime = (timeString) => {
     if (!timeString) return 'TBD';
     const [hours, minutes] = timeString.split(':');
@@ -1031,6 +681,7 @@ Or just chat with me about anything academic! I'm here to help! 🤖`;
     });
   };
 
+  // Detect query type for AI responses
   const detectQueryType = (query) => {
     const q = query.toLowerCase();
     
@@ -1137,7 +788,7 @@ Or just chat with me about anything academic! I'm here to help! 🤖`;
     return 'unknown';
   };
 
-  // Enhanced AI Response Generator with real-time GPA/CGPA from exams
+  // AI Response Generator
   const generateAIResponse = (userQuery) => {
     if (!studentStats || !studentData) {
       return "I'm still loading your data. Please wait a moment...";
@@ -1154,11 +805,7 @@ Or just chat with me about anything academic! I'm here to help! 🤖`;
         Math.floor(Math.random() * knowledgeBase.studyTips.length)
       ];
       
-      return `${randomGreeting}
-
-**Quick Tip:** ${randomTip}
-
-What would you like to know about your academic progress today?`;
+      return `${randomGreeting}\n\n**Quick Tip:** ${randomTip}\n\nWhat would you like to know about your academic progress today?`;
     }
     
     if (queryType === 'thanks') {
@@ -1169,15 +816,11 @@ What would you like to know about your academic progress today?`;
         Math.floor(Math.random() * knowledgeBase.encouragement.length)
       ];
       
-      return `${randomThanks}
-
-${randomEncouragement}`;
+      return `${randomThanks}\n\n${randomEncouragement}`;
     }
     
     if (queryType === 'howareyou') {
-      return `I'm doing great, thank you for asking! 😊 As an AI assistant, I don't have feelings, but I'm always ready and excited to help you with your academic journey!
-
-How about you? How's your day going? Is there anything academic I can assist you with today?`;
+      return `I'm doing great, thank you for asking! 😊 As an AI assistant, I don't have feelings, but I'm always ready and excited to help you with your academic journey!\n\nHow about you? How's your day going? Is there anything academic I can assist you with today?`;
     }
     
     if (queryType === 'motivation') {
@@ -1188,31 +831,17 @@ How about you? How's your day going? Is there anything academic I can assist you
         Math.floor(Math.random() * knowledgeBase.encouragement.length)
       ];
       
-      return `🌟 **Here's some motivation for you:**
-
-"${randomQuote}"
-
-${randomEncouragement}
-
-**Remember:** Every expert was once a beginner. Keep going! 💪`;
+      return `🌟 **Here's some motivation for you:**\n\n"${randomQuote}"\n\n${randomEncouragement}\n\n**Remember:** Every expert was once a beginner. Keep going! 💪`;
     }
     
     if (queryType === 'goodbye') {
-      return `👋 Goodbye, ${studentData.full_name.split(' ')[0]}! 
-
-It was great chatting with you! Remember:
-• Take regular breaks during study sessions
-• Stay hydrated and get enough sleep
-• Don't hesitate to reach out if you need help
-
-Wishing you all the best in your studies! Come back anytime! 📚✨`;
+      return `👋 Goodbye, ${studentData.full_name.split(' ')[0]}! \n\nIt was great chatting with you! Remember:\n• Take regular breaks during study sessions\n• Stay hydrated and get enough sleep\n• Don't hesitate to reach out if you need help\n\nWishing you all the best in your studies! Come back anytime! 📚✨`;
     }
     
     if (queryType === 'cgpa') {
       const cgpaData = studentStats.gpa;
       const examBasedCGPA = cgpaData.examBasedCGPA || cgpaData.currentCGPA;
-   
-      
+     
       let sourceInfo = '';
       if (cgpaData.totalGradedExams > 0) {
         sourceInfo = `📊 **Calculated from ${cgpaData.totalGradedExams} graded exam results**`;
@@ -1238,30 +867,15 @@ Wishing you all the best in your studies! Come back anytime! 📚✨`;
         advice = "🏆 **Outstanding achievement!** You're at the top of your class!";
       }
       
-      return `📊 **Your Cumulative GPA (CGPA) Analysis**
-
-**Exam-Based CGPA:** ${examBasedCGPA.toFixed(2)}
-**Academic Classification:** ${classification}
-${sourceInfo}
-
-**Key Statistics:**
-• **Total Graded Exams:** ${cgpaData.totalGradedExams || 0}
-• **Total Credits Earned:** ${cgpaData.totalCredits || 0}
-• **Current Semester GPA:** ${(cgpaData.examBasedGPA || cgpaData.currentGPA).toFixed(2)}
-
-${cgpaData.semesterResults && Object.keys(cgpaData.semesterResults).length > 0 ? `
-**Semester-wise Performance:**
-${Object.keys(cgpaData.semesterResults).map(key => {
-  const semester = cgpaData.semesterResults[key];
-  return `• **Year ${semester.year}, Semester ${semester.semester}:** GPA ${semester.gpa?.toFixed(2) || '0.00'} (${semester.courses.length} exams)`;
-}).join('\n')}\n` : ''}
-
-**💡 What is CGPA?**
-CGPA (Cumulative Grade Point Average) is calculated from **all your graded exam results** across all semesters. It represents your overall academic performance.
-
-**Advice:** ${advice}
-
-**Note:** CGPA = (Σ grade_points × credits) / (Σ credits) from all graded exams`;
+      let semesterResultsText = '';
+      if (cgpaData.semesterResults && Object.keys(cgpaData.semesterResults).length > 0) {
+        semesterResultsText = `**Semester-wise Performance:**\n${Object.keys(cgpaData.semesterResults).map(key => {
+          const semester = cgpaData.semesterResults[key];
+          return `• **Year ${semester.year}, Semester ${semester.semester}:** GPA ${semester.gpa?.toFixed(2) || '0.00'} (${semester.courses.length} exams)`;
+        }).join('\n')}\n`;
+      }
+      
+      return `📊 **Your Cumulative GPA (CGPA) Analysis**\n\n**Exam-Based CGPA:** ${examBasedCGPA.toFixed(2)}\n**Academic Classification:** ${classification}\n${sourceInfo}\n\n**Key Statistics:**\n• **Total Graded Exams:** ${cgpaData.totalGradedExams || 0}\n• **Total Credits Earned:** ${cgpaData.totalCredits || 0}\n• **Current Semester GPA:** ${(cgpaData.examBasedGPA || cgpaData.currentGPA).toFixed(2)}\n\n${semesterResultsText}**💡 What is CGPA?**\nCGPA (Cumulative Grade Point Average) is calculated from **all your graded exam results** across all semesters. It represents your overall academic performance.\n\n**Advice:** ${advice}\n\n**Note:** CGPA = (Σ grade_points × credits) / (Σ credits) from all graded exams`;
     }
     
     if (queryType === 'gpa') {
@@ -1296,66 +910,33 @@ CGPA (Cumulative Grade Point Average) is calculated from **all your graded exam 
         icon = "🏆";
       }
       
-      return `${icon} **Your Current Semester GPA Analysis**
-
-**Current Semester GPA:** ${currentGPA.toFixed(2)}
-**Semester:** Year ${currentYear}, Semester ${currentSemester}
-**Based on:** ${currentSemesterResults?.courses?.length || 0} graded exams this semester
-
-${currentSemesterResults ? `
-**Current Semester Details:**
-• **Total Credits:** ${currentSemesterResults.totalCredits || 0}
-• **Total Points:** ${currentSemesterResults.totalPoints?.toFixed(2) || '0.00'}
-• **Number of Courses:** ${currentSemesterResults.courses.length}
-
-**Current Semester Courses:**
-${currentSemesterResults.courses.slice(0, 5).map(course => {
-  const gradeEmoji = course.grade.startsWith('A') ? '🎯' : 
-                     course.grade.startsWith('B') ? '👍' : 
-                     course.grade.startsWith('C') ? '📊' : '📈';
-  return `• ${gradeEmoji} **${course.grade}** - ${course.marks}/${course.totalMarks} (${course.percentage || '0'}%) - ${course.credits} credits`;
-}).join('\n')}
-${currentSemesterResults.courses.length > 5 ? `\n...and ${currentSemesterResults.courses.length - 5} more courses` : ''}\n` : ''}
-
-**📈 GPA Improvement Tips:**
-1. **Focus on current assignments** - They affect your final grades
-2. **Attend all lectures** - Better understanding leads to better grades
-3. **Seek help early** - Don't wait until you're struggling
-4. **Review past exams** - Identify patterns and weak areas
-5. **Form study groups** - Collaborative learning improves retention
-
-**Advice:** ${advice}
-
-**Next Step:** Work on improving weak areas and maintain strong performance in current courses!`;
+      let semesterDetailsText = '';
+      if (currentSemesterResults) {
+        semesterDetailsText = `**Current Semester Details:**\n• **Total Credits:** ${currentSemesterResults.totalCredits || 0}\n• **Total Points:** ${currentSemesterResults.totalPoints?.toFixed(2) || '0.00'}\n• **Number of Courses:** ${currentSemesterResults.courses.length}\n\n**Current Semester Courses:**\n${currentSemesterResults.courses.slice(0, 5).map(course => {
+          const gradeEmoji = course.grade.startsWith('A') ? '🎯' : 
+                             course.grade.startsWith('B') ? '👍' : 
+                             course.grade.startsWith('C') ? '📊' : '📈';
+          return `• ${gradeEmoji} **${course.grade}** - ${course.marks}/${course.totalMarks} (${course.percentage || '0'}%) - ${course.credits} credits`;
+        }).join('\n')}\n${currentSemesterResults.courses.length > 5 ? `\n...and ${currentSemesterResults.courses.length - 5} more courses` : ''}\n`;
+      }
+      
+      return `${icon} **Your Current Semester GPA Analysis**\n\n**Current Semester GPA:** ${currentGPA.toFixed(2)}\n**Semester:** Year ${currentYear}, Semester ${currentSemester}\n**Based on:** ${currentSemesterResults?.courses?.length || 0} graded exams this semester\n\n${semesterDetailsText}**📈 GPA Improvement Tips:**\n1. **Focus on current assignments** - They affect your final grades\n2. **Attend all lectures** - Better understanding leads to better grades\n3. **Seek help early** - Don't wait until you're struggling\n4. **Review past exams** - Identify patterns and weak areas\n5. **Form study groups** - Collaborative learning improves retention\n\n**Advice:** ${advice}\n\n**Next Step:** Work on improving weak areas and maintain strong performance in current courses!`;
     }
     
     if (queryType === 'grades') {
       const gpaData = studentStats.gpa;
       
-      return `📊 **Your Academic Grades Overview**
-
-**Overall Performance:**
-• **Exam-Based CGPA:** ${(gpaData.examBasedCGPA || gpaData.currentCGPA).toFixed(2)}
-• **Current Semester GPA:** ${(gpaData.examBasedGPA || gpaData.currentGPA).toFixed(2)}
-• **Total Graded Exams:** ${gpaData.totalGradedExams || 0}
-• **Total Credits:** ${gpaData.totalCredits || 0}
-
-**Grade Distribution:**
-${gpaData.semesterResults && Object.keys(gpaData.semesterResults).length > 0 ? 
-  Object.keys(gpaData.semesterResults).map(key => {
-    const semester = gpaData.semesterResults[key];
-    return `• **Year ${semester.year}, Sem ${semester.semester}:** GPA ${semester.gpa?.toFixed(2) || '0.00'} (${semester.courses.length} exams)`;
-  }).join('\n') : 
-  'No detailed grade data available yet.'}
-
-**💡 Grade Interpretation:**
-• **A (90-100%)**: Excellent - Keep up the outstanding work!
-• **B (70-89%)**: Good - Solid understanding, room for improvement
-• **C (50-69%)**: Satisfactory - Focus on weaker areas
-• **D (40-49%)**: Passing - Significant improvement needed
-• **F (Below 40%)**: Failing - Immediate action required
-
-**Need specific grade advice?** Tell me which subject you're concerned about!`;
+      let gradeDistributionText = '';
+      if (gpaData.semesterResults && Object.keys(gpaData.semesterResults).length > 0) {
+        gradeDistributionText = Object.keys(gpaData.semesterResults).map(key => {
+          const semester = gpaData.semesterResults[key];
+          return `• **Year ${semester.year}, Sem ${semester.semester}:** GPA ${semester.gpa?.toFixed(2) || '0.00'} (${semester.courses.length} exams)`;
+        }).join('\n');
+      } else {
+        gradeDistributionText = 'No detailed grade data available yet.';
+      }
+      
+      return `📊 **Your Academic Grades Overview**\n\n**Overall Performance:**\n• **Exam-Based CGPA:** ${(gpaData.examBasedCGPA || gpaData.currentCGPA).toFixed(2)}\n• **Current Semester GPA:** ${(gpaData.examBasedGPA || gpaData.currentGPA).toFixed(2)}\n• **Total Graded Exams:** ${gpaData.totalGradedExams || 0}\n• **Total Credits:** ${gpaData.totalCredits || 0}\n\n**Grade Distribution:**\n${gradeDistributionText}\n\n**💡 Grade Interpretation:**\n• **A (90-100%)**: Excellent - Keep up the outstanding work!\n• **B (70-89%)**: Good - Solid understanding, room for improvement\n• **C (50-69%)**: Satisfactory - Focus on weaker areas\n• **D (40-49%)**: Passing - Significant improvement needed\n• **F (Below 40%)**: Failing - Immediate action required\n\n**Need specific grade advice?** Tell me which subject you're concerned about!`;
     }
     
     if (queryType === 'courses') {
@@ -1365,19 +946,25 @@ ${gpaData.semesterResults && Object.keys(gpaData.semesterResults).length > 0 ?
       const completedCourses = studentStats.courses.list
         .filter(c => c.status === 'completed');
       
-      return `📚 **Your Course Information:**
-
-**Current Semester Courses (${currentCourses.length}):**
-${currentCourses.length > 0 ? 
-  currentCourses.map(c => `• **${c.code}** - ${c.name}\n  Credits: ${c.credits} | Status: ${c.status.replace('_', ' ')}`).join('\n\n') : 
-  'No courses currently in progress'}
-
-**Completed Courses (${completedCourses.length}):**
-${completedCourses.length > 0 ? 
-  completedCourses.slice(0, 5).map(c => `• **${c.code}** - ${c.name}\n  Grade: ${c.grade || 'N/A'} | Credits: ${c.credits}`).join('\n\n') : 
-  'No courses completed yet'}
-
-**Total Credits This Semester:** ${currentCourses.reduce((sum, c) => sum + c.credits, 0)}`;
+      let currentCoursesText = '';
+      if (currentCourses.length > 0) {
+        currentCoursesText = currentCourses.map(c => 
+          `• **${c.code}** - ${c.name}\n  Credits: ${c.credits} | Status: ${c.status.replace('_', ' ')}`
+        ).join('\n\n');
+      } else {
+        currentCoursesText = 'No courses currently in progress';
+      }
+      
+      let completedCoursesText = '';
+      if (completedCourses.length > 0) {
+        completedCoursesText = completedCourses.slice(0, 5).map(c => 
+          `• **${c.code}** - ${c.name}\n  Grade: ${c.grade || 'N/A'} | Credits: ${c.credits}`
+        ).join('\n\n');
+      } else {
+        completedCoursesText = 'No courses completed yet';
+      }
+      
+      return `📚 **Your Course Information:**\n\n**Current Semester Courses (${currentCourses.length}):**\n${currentCoursesText}\n\n**Completed Courses (${completedCourses.length}):**\n${completedCoursesText}\n\n**Total Credits This Semester:** ${currentCourses.reduce((sum, c) => sum + c.credits, 0)}`;
     }
     
     if (queryType === 'assignments') {
@@ -1394,41 +981,36 @@ ${completedCourses.length > 0 ?
         urgencyMessage = `**📝 REMINDER:** You have ${studentStats.assignments.pending} pending assignment${studentStats.assignments.pending !== 1 ? 's' : ''}.`;
       }
       
-      return `📝 **Your Assignments:**
-
-**Summary:**
-• **Total:** ${studentStats.assignments.total}
-• **Submitted:** ${studentStats.assignments.submitted}
-• **Pending:** ${studentStats.assignments.pending}
-• **Overdue:** ${overdueAssignments}
-• **Graded:** ${studentStats.assignments.graded}
-
-${urgencyMessage ? urgencyMessage + '\n' : ''}
-
-**Upcoming Deadlines:**
-${upcomingAssignments.length > 0 ? 
-  upcomingAssignments.map(a => {
-    const dueDate = new Date(a.due_date);
-    const daysLeft = Math.ceil((dueDate - new Date()) / (1000 * 60 * 60 * 24));
-    let urgency = '';
-    if (daysLeft <= 1) urgency = ' 🚨';
-    else if (daysLeft <= 3) urgency = ' ⚠️';
-    else if (daysLeft <= 7) urgency = ' 📅';
-    
-    return `• **${a.title}**${urgency}\n  Course: ${a.courses?.course_name || 'Unknown'}\n  Due: ${dueDate.toLocaleDateString()} (${daysLeft} day${daysLeft !== 1 ? 's' : ''} left)\n  Total Marks: ${a.total_marks}`;
-  }).join('\n\n') : 
-  'No upcoming assignments! Great job keeping up!'}
-
-${recentGrades.length > 0 ? `**Recent Grades:**
-${recentGrades.map(a => {
-  const submission = a.submissions?.find(s => s.student_id === studentData.id);
-  const percentage = submission?.percentage || 0;
-  let emoji = '📊';
-  if (percentage >= 70) emoji = '🎯';
-  else if (percentage >= 50) emoji = '👍';
-  
-  return `• **${a.title}**: ${submission?.marks_obtained || 0}/${a.total_marks} (${percentage}%) ${emoji}`;
-}).join('\n')}` : ''}`;
+      let upcomingText = '';
+      if (upcomingAssignments.length > 0) {
+        upcomingText = upcomingAssignments.map(a => {
+          const dueDate = new Date(a.due_date);
+          const daysLeft = Math.ceil((dueDate - new Date()) / (1000 * 60 * 60 * 24));
+          let urgency = '';
+          if (daysLeft <= 1) urgency = ' 🚨';
+          else if (daysLeft <= 3) urgency = ' ⚠️';
+          else if (daysLeft <= 7) urgency = ' 📅';
+          
+          return `• **${a.title}**${urgency}\n  Course: ${a.courses?.course_name || 'Unknown'}\n  Due: ${dueDate.toLocaleDateString()} (${daysLeft} day${daysLeft !== 1 ? 's' : ''} left)\n  Total Marks: ${a.total_marks}`;
+        }).join('\n\n');
+      } else {
+        upcomingText = 'No upcoming assignments! Great job keeping up!';
+      }
+      
+      let recentGradesText = '';
+      if (recentGrades.length > 0) {
+        recentGradesText = `**Recent Grades:**\n${recentGrades.map(a => {
+          const submission = a.submissions?.find(s => s.student_id === studentData.id);
+          const percentage = submission?.percentage || 0;
+          let emoji = '📊';
+          if (percentage >= 70) emoji = '🎯';
+          else if (percentage >= 50) emoji = '👍';
+          
+          return `• **${a.title}**: ${submission?.marks_obtained || 0}/${a.total_marks} (${percentage}%) ${emoji}`;
+        }).join('\n')}`;
+      }
+      
+      return `📝 **Your Assignments:**\n\n**Summary:**\n• **Total:** ${studentStats.assignments.total}\n• **Submitted:** ${studentStats.assignments.submitted}\n• **Pending:** ${studentStats.assignments.pending}\n• **Overdue:** ${overdueAssignments}\n• **Graded:** ${studentStats.assignments.graded}\n\n${urgencyMessage ? urgencyMessage + '\n' : ''}**Upcoming Deadlines:**\n${upcomingText}\n\n${recentGradesText}`;
     }
     
     if (queryType === 'exams') {
@@ -1442,44 +1024,39 @@ ${recentGrades.map(a => {
         return daysDiff <= 7;
       });
       
-      return `📋 **Your Exam Information:**
-
-**Performance Summary:**
-• **Average Score:** ${performance.average}%
-• **Highest Score:** ${performance.highest}%
-• **Lowest Score:** ${performance.lowest}%
-• **Total Exams:** ${performance.totalExams}
-${performance.grades && Object.keys(performance.grades).length > 0 ? `• **Grade Distribution:** ${Object.entries(performance.grades).map(([grade, count]) => `${grade}: ${count}`).join(', ')}` : ''}
-
-**Exams This Week (${examsThisWeek.length}):**
-${examsThisWeek.length > 0 ? 
-  examsThisWeek.map(e => {
-    const examDate = new Date(e.start_time);
-    const daysLeft = Math.ceil((examDate - now) / (1000 * 60 * 60 * 24));
-    const time = formatTime(e.start_time?.split(' ')[0] || '09:00');
-    let urgency = '';
-    if (daysLeft <= 1) urgency = ' 🚨';
-    else if (daysLeft <= 3) urgency = ' ⚠️';
-    
-    return `• **${e.title}**${urgency}\n  Course: ${e.courses?.course_name || 'Unknown'}\n  Date: ${examDate.toLocaleDateString()} at ${time}\n  Location: ${e.location || 'TBA'}\n  Duration: ${e.duration || '2 hours'} (${daysLeft} day${daysLeft !== 1 ? 's' : ''} left)`;
-  }).join('\n\n') : 
-  'No exams this week!'}
-
-**All Upcoming Exams (${upcomingExams.length}):**
-${upcomingExams.length > 0 ? 
-  upcomingExams.map(e => {
-    const examDate = new Date(e.start_time);
-    const daysLeft = Math.ceil((examDate - now) / (1000 * 60 * 60 * 24));
-    return `• ${daysLeft <= 7 ? '📅' : '📋'} **${e.title}** - ${examDate.toLocaleDateString()} (${daysLeft} days)`;
-  }).join('\n') : 
-  'No upcoming exams scheduled'}
-
-**Exam Preparation Tips:**
-1. Review past papers and sample questions
-2. Create summary notes for each topic
-3. Practice with mock tests
-4. Get adequate rest before the exam
-5. Arrive at least 30 minutes early`;
+      let gradeDistributionText = '';
+      if (performance.grades && Object.keys(performance.grades).length > 0) {
+        gradeDistributionText = `• **Grade Distribution:** ${Object.entries(performance.grades).map(([grade, count]) => `${grade}: ${count}`).join(', ')}`;
+      }
+      
+      let examsThisWeekText = '';
+      if (examsThisWeek.length > 0) {
+        examsThisWeekText = examsThisWeek.map(e => {
+          const examDate = new Date(e.start_time);
+          const daysLeft = Math.ceil((examDate - now) / (1000 * 60 * 60 * 24));
+          const time = formatTime(e.start_time?.split(' ')[0] || '09:00');
+          let urgency = '';
+          if (daysLeft <= 1) urgency = ' 🚨';
+          else if (daysLeft <= 3) urgency = ' ⚠️';
+          
+          return `• **${e.title}**${urgency}\n  Course: ${e.courses?.course_name || 'Unknown'}\n  Date: ${examDate.toLocaleDateString()} at ${time}\n  Location: ${e.location || 'TBA'}\n  Duration: ${e.duration || '2 hours'} (${daysLeft} day${daysLeft !== 1 ? 's' : ''} left)`;
+        }).join('\n\n');
+      } else {
+        examsThisWeekText = 'No exams this week!';
+      }
+      
+      let allUpcomingText = '';
+      if (upcomingExams.length > 0) {
+        allUpcomingText = upcomingExams.map(e => {
+          const examDate = new Date(e.start_time);
+          const daysLeft = Math.ceil((examDate - now) / (1000 * 60 * 60 * 24));
+          return `• ${daysLeft <= 7 ? '📅' : '📋'} **${e.title}** - ${examDate.toLocaleDateString()} (${daysLeft} days)`;
+        }).join('\n');
+      } else {
+        allUpcomingText = 'No upcoming exams scheduled';
+      }
+      
+      return `📋 **Your Exam Information:**\n\n**Performance Summary:**\n• **Average Score:** ${performance.average}%\n• **Highest Score:** ${performance.highest}%\n• **Lowest Score:** ${performance.lowest}%\n• **Total Exams:** ${performance.totalExams}\n${gradeDistributionText}\n\n**Exams This Week (${examsThisWeek.length}):**\n${examsThisWeekText}\n\n**All Upcoming Exams (${upcomingExams.length}):**\n${allUpcomingText}\n\n**Exam Preparation Tips:**\n1. Review past papers and sample questions\n2. Create summary notes for each topic\n3. Practice with mock tests\n4. Get adequate rest before the exam\n5. Arrive at least 30 minutes early`;
     }
     
     // Default response for unknown queries
@@ -1490,57 +1067,463 @@ ${upcomingExams.length > 0 ?
       Math.floor(Math.random() * knowledgeBase.advice.length)
     ];
     
-    return `🤔 **I'm not sure I understood your question completely.**
-
-${randomEncouragement}
-
-**Here's what I can help you with:**
-
-• **Academic Performance** - GPA, CGPA, grades, progress
-• **Exam Results** - Real-time GPA/CGPA from graded exams
-• **Assignments & Exams** - Deadlines, submissions, results
-• **Financial Status** - Fees, payments, balances
-• **Schedule** - Timetable, lectures, classes
-• **Attendance** - Records, percentage, trends
-• **Library** - Books, resources, availability
-• **Campus Life** - Events, activities, clubs
-• **Study Help** - Tips, strategies, resources
-• **University Info** - Policies, contacts, facilities
-• **General Chat** - Motivation, encouragement, advice
-
-**Tip:** ${randomTip}
-
-**Try asking me one of these:**
-"What's my current GPA from exams?"
-"What's my overall CGPA?"
-"What assignments are due this week?"
-"What's my attendance percentage?"
-"How much do I owe in fees?"
-"What lectures do I have today?"
-"Recommend study tips for exams"
-"Check my academic progress"
-"What library books are available?"
-"Give me some motivation"
-"How are you doing today?"`;
+    return `🤔 **I'm not sure I understood your question completely.**\n\n${randomEncouragement}\n\n**Here's what I can help you with:**\n\n• **Academic Performance** - GPA, CGPA, grades, progress\n• **Exam Results** - Real-time GPA/CGPA from graded exams\n• **Assignments & Exams** - Deadlines, submissions, results\n• **Financial Status** - Fees, payments, balances\n• **Schedule** - Timetable, lectures, classes\n• **Attendance** - Records, percentage, trends\n• **Library** - Books, resources, availability\n• **Campus Life** - Events, activities, clubs\n• **Study Help** - Tips, strategies, resources\n• **University Info** - Policies, contacts, facilities\n• **General Chat** - Motivation, encouragement, advice\n\n**Tip:** ${randomTip}\n\n**Try asking me one of these:**\n"What's my current GPA from exams?"\n"What's my overall CGPA?"\n"What assignments are due this week?"\n"What's my attendance percentage?"\n"How much do I owe in fees?"\n"What lectures do I have today?"\n"Recommend study tips for exams"\n"Check my academic progress"\n"What library books are available?"\n"Give me some motivation"\n"How are you doing today?"`;
   };
 
+  // Main data fetching function
+  const fetchAllStudentData = useCallback(async () => {
+    if (isFetchingRef.current) {
+      console.log('⏳ Already fetching data, skipping...');
+      return;
+    }
+    
+    if (!user?.email) {
+      console.log('⏳ No user email yet, waiting...');
+      return;
+    }
+
+    if (loadedHistoryRef.current && messages.length > 0) {
+      console.log('✅ Chat history already loaded, skipping fetch');
+      return;
+    }
+
+    try {
+      isFetchingRef.current = true;
+      setIsLoadingInitial(true);
+      console.log('📊 Starting data fetch for:', user.email);
+      
+      const { data: student, error: studentError } = await supabase
+        .from('students')
+        .select('*')
+        .eq('email', user.email)
+        .single();
+
+      if (studentError) throw studentError;
+      if (!student) throw new Error('Student not found');
+
+      console.log('✅ Student found:', student.id);
+      setStudentData(student);
+
+      let profilePic = null;
+      try {
+        profilePic = await fetchProfilePicture(student.id);
+        if (profilePic) setProfilePictureUrl(profilePic);
+      } catch (picError) {
+        console.warn('⚠️ Could not fetch profile picture:', picError);
+      }
+
+      let session = null;
+      try {
+        session = await chatHistoryService.getOrCreateSession(student.id);
+        setSessionId(session);
+      } catch (sessionError) {
+        console.warn('⚠️ Could not get/create session:', sessionError);
+        session = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        setSessionId(session);
+      }
+
+      // Fetch courses
+      let studentCourses = [];
+      try {
+        const { data: coursesData, error: coursesError } = await supabase
+          .from('student_courses')
+          .select(`
+            *,
+            courses (
+              id,
+              course_code,
+              course_name,
+              credits,
+              year,
+              semester
+            )
+          `)
+          .eq('student_id', student.id);
+
+        if (coursesError) {
+          console.warn('⚠️ Could not fetch courses:', coursesError);
+        } else {
+          studentCourses = coursesData || [];
+        }
+      } catch (coursesError) {
+        console.warn('⚠️ Error fetching courses:', coursesError);
+      }
+
+      const coursesWithGrades = (studentCourses || []).map(sc => {
+        const grade = sc.grade || getGradeFromMarks(sc.marks);
+        return {
+          ...sc,
+          grade: grade,
+          grade_points: sc.grade_points || getGradePoints(grade),
+          credits: sc.courses?.credits || 3,
+          course_code: sc.courses?.course_code || 'N/A',
+          course_name: sc.courses?.course_name || 'Unknown Course',
+          status: sc.status || 'in_progress'
+        };
+      });
+
+      const activeCourses = coursesWithGrades.filter(c => c.status !== 'completed') || [];
+      const activeCourseIds = activeCourses.map(sc => sc.course_id).filter(Boolean);
+
+      // Fetch exam GPA
+      let examGpaData = { gpa: 0.0, cgpa: 0.0, semesterResults: {}, totalExams: 0, totalCredits: 0 };
+      try {
+        examGpaData = await fetchExamBasedGPA(student.id);
+      } catch (gpaError) {
+        console.warn('⚠️ Could not fetch exam GPA:', gpaError);
+      }
+
+      const calculateCourseBasedGPA = (courses) => {
+        if (!courses || courses.length === 0) return 0.0;
+        
+        const completedCourses = courses.filter(
+          course => course.status === 'completed' && (course.grade || course.marks)
+        );
+        
+        if (completedCourses.length === 0) return 0.0;
+        
+        let totalPoints = 0;
+        let totalCredits = 0;
+        
+        completedCourses.forEach(course => {
+          const grade = course.grade || getGradeFromMarks(course.marks);
+          const gradePoints = course.grade_points || getGradePoints(grade);
+          const credits = course.credits || 3;
+          
+          if (gradePoints && credits) {
+            totalPoints += gradePoints * credits;
+            totalCredits += credits;
+          }
+        });
+        
+        return totalCredits > 0 ? parseFloat((totalPoints / totalCredits).toFixed(2)) : 0.0;
+      };
+
+      const courseBasedGPA = calculateCourseBasedGPA(coursesWithGrades);
+
+      // Fetch other data
+      let lectures = [], assignments = [], exams = [], finance = [], attendance = [], timetable = [], libraryBooks = [], events = [];
+
+      try {
+        lectures = await fetchUpcomingLectures(activeCourseIds);
+      } catch (e) { console.warn('⚠️ Could not fetch lectures:', e); }
+
+      try {
+        assignments = await fetchAssignments(activeCourseIds, student.id);
+      } catch (e) { console.warn('⚠️ Could not fetch assignments:', e); }
+
+      try {
+        exams = await fetchExams(activeCourseIds, student.id);
+      } catch (e) { console.warn('⚠️ Could not fetch exams:', e); }
+
+      try {
+        const { data: financeData } = await supabase
+          .from('financial_records')
+          .select('*')
+          .eq('student_id', student.id)
+          .eq('academic_year', student.academic_year)
+          .order('semester', { ascending: true })
+          .order('created_at', { ascending: true });
+        finance = financeData || [];
+      } catch (e) { console.warn('⚠️ Could not fetch finance:', e); }
+
+      try {
+        const { data: attendanceData } = await supabase
+          .from('attendance_records')
+          .select('*, courses(*)')
+          .eq('student_id', student.id)
+          .gte('date', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0])
+          .order('date', { ascending: false });
+        attendance = attendanceData || [];
+      } catch (e) { console.warn('⚠️ Could not fetch attendance:', e); }
+
+      try {
+        const { data: timetableData } = await supabase
+          .from('timetable_slots')
+          .select('*, courses(*), lecturers(*)')
+          .in('course_id', activeCourseIds)
+          .eq('is_active', true);
+        timetable = timetableData || [];
+      } catch (e) { console.warn('⚠️ Could not fetch timetable:', e); }
+
+      try {
+        const { data: libraryData } = await supabase
+          .from('library_books')
+          .select('*')
+          .eq('status', 'available')
+          .limit(5);
+        libraryBooks = libraryData || [];
+      } catch (e) { console.warn('⚠️ Could not fetch library books:', e); }
+
+      try {
+        const { data: eventsData } = await supabase
+          .from('campus_events')
+          .select('*')
+          .gte('date', new Date().toISOString().split('T')[0])
+          .order('date', { ascending: true })
+          .limit(5);
+        events = eventsData || [];
+      } catch (e) { console.warn('⚠️ Could not fetch events:', e); }
+
+      // Build stats
+      const processedStats = {
+        studentInfo: {
+          name: student.full_name,
+          id: student.student_id,
+          program: student.program,
+          year: student.year_of_study,
+          semester: student.semester,
+          email: student.email,
+          phone: student.phone,
+          intake: student.intake,
+          academicYear: student.academic_year
+        },
+        gpa: {
+          currentGPA: examGpaData.gpa || courseBasedGPA,
+          currentCGPA: examGpaData.cgpa || courseBasedGPA,
+          examBasedGPA: examGpaData.gpa,
+          examBasedCGPA: examGpaData.cgpa,
+          courseBasedGPA: courseBasedGPA,
+          courseBasedCGPA: courseBasedGPA,
+          semesterResults: examGpaData.semesterResults,
+          totalGradedExams: examGpaData.totalExams || 0,
+          totalCredits: examGpaData.totalCredits || 0
+        },
+        courses: {
+          total: coursesWithGrades.length || 0,
+          completed: coursesWithGrades.filter(c => c.status === 'completed').length || 0,
+          inProgress: activeCourses.length || 0,
+          list: coursesWithGrades.map(c => ({
+            id: c.course_id,
+            code: c.course_code,
+            name: c.course_name,
+            status: c.status,
+            grade: c.grade,
+            marks: c.marks,
+            gradePoints: c.grade_points,
+            credits: c.credits,
+            lecturer: c.lecturer_name,
+            department: c.department
+          })) || []
+        },
+        lectures: lectures,
+        assignments: {
+          total: assignments?.length || 0,
+          submitted: assignments?.filter(a => a.submissions?.some(s => s.student_id === student.id)).length || 0,
+          pending: assignments?.filter(a => {
+            const submission = a.submissions?.find(s => s.student_id === student.id);
+            return !submission && new Date(a.due_date) > new Date();
+          }).length || 0,
+          graded: assignments?.filter(a => {
+            const submission = a.submissions?.find(s => s.student_id === student.id);
+            return submission?.status === 'graded';
+          }).length || 0,
+          overdue: assignments?.filter(a => {
+            const submission = a.submissions?.find(s => s.student_id === student.id);
+            return !submission && new Date(a.due_date) < new Date();
+          }).length || 0,
+          upcoming: assignments?.filter(a => {
+            const submission = a.submissions?.find(s => s.student_id === student.id);
+            return !submission && new Date(a.due_date) > new Date();
+          }).sort((a, b) => new Date(a.due_date) - new Date(b.due_date)).slice(0, 5),
+          recentGrades: assignments?.filter(a => {
+            const submission = a.submissions?.find(s => s.student_id === student.id);
+            return submission?.status === 'graded';
+          }).sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)).slice(0, 3)
+        },
+        exams: {
+          total: exams?.length || 0,
+          completed: exams?.filter(e => {
+            const submission = e.submissions?.find(s => s.student_id === student.id);
+            return submission && submission.status === 'graded';
+          }).length || 0,
+          upcoming: exams?.filter(e => {
+            const submission = e.submissions?.find(s => s.student_id === student.id);
+            return !submission && new Date(e.start_time) > new Date();
+          }).sort((a, b) => new Date(a.start_time) - new Date(b.start_time)).slice(0, 5),
+          performance: calculateExamPerformance(exams?.filter(e => 
+            e.submissions?.some(s => s.student_id === student.id && s.status === 'graded')
+          ) || [])
+        },
+        finance: {
+          totalPaid: finance?.filter(f => f.status === 'paid').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
+          totalPending: finance?.filter(f => f.status === 'pending').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
+          totalPartial: finance?.filter(f => f.status === 'partial').reduce((sum, f) => sum + (parseFloat(f.balance_due) || parseFloat(f.amount) || 0), 0) || 0,
+          overdue: finance?.filter(f => f.due_date && new Date(f.due_date) < new Date() && f.status !== 'paid').length || 0,
+          allFees: finance?.map(f => ({
+            id: f.id,
+            description: f.description || f.category || f.fee_type || 'Fee',
+            feeType: f.category || f.fee_type || 'tuition',
+            amount: parseFloat(f.amount) || 0,
+            balanceDue: parseFloat(f.balance_due) || 0,
+            status: f.status,
+            semester: f.semester || 1,
+            paymentDate: f.payment_date,
+            dueDate: f.due_date,
+            receiptNumber: f.receipt_number,
+            paymentMethod: f.payment_method
+          })) || [],
+          tuition: {
+            amount: finance?.filter(f => (f.category === 'tuition' || f.fee_type === 'tuition')).reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
+            paid: finance?.filter(f => (f.category === 'tuition' || f.fee_type === 'tuition') && f.status === 'paid').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
+            pending: finance?.filter(f => (f.category === 'tuition' || f.fee_type === 'tuition') && f.status !== 'paid').reduce((sum, f) => sum + (parseFloat(f.balance_due) || parseFloat(f.amount) || 0), 0) || 0,
+            semester1: finance?.filter(f => (f.category === 'tuition' || f.fee_type === 'tuition') && f.semester === 1).map(f => ({ amount: parseFloat(f.amount) || 0, status: f.status, paidDate: f.payment_date })) || [],
+            semester2: finance?.filter(f => (f.category === 'tuition' || f.fee_type === 'tuition') && f.semester === 2).map(f => ({ amount: parseFloat(f.amount) || 0, status: f.status, paidDate: f.payment_date })) || []
+          },
+          functional: {
+            amount: finance?.filter(f => f.category === 'functional').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
+            paid: finance?.filter(f => f.category === 'functional' && f.status === 'paid').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
+            pending: finance?.filter(f => f.category === 'functional' && f.status !== 'paid').reduce((sum, f) => sum + (parseFloat(f.balance_due) || parseFloat(f.amount) || 0), 0) || 0
+          },
+          guild: {
+            amount: finance?.filter(f => f.category === 'guild').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
+            paid: finance?.filter(f => f.category === 'guild' && f.status === 'paid').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
+            pending: finance?.filter(f => f.category === 'guild' && f.status !== 'paid').reduce((sum, f) => sum + (parseFloat(f.balance_due) || parseFloat(f.amount) || 0), 0) || 0
+          },
+          nche: {
+            amount: finance?.filter(f => f.category === 'nche').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
+            paid: finance?.filter(f => f.category === 'nche' && f.status === 'paid').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0
+          },
+          registration: {
+            amount: finance?.filter(f => f.category === 'registration').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
+            paid: finance?.filter(f => f.category === 'registration' && f.status === 'paid').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0
+          },
+          recent: finance?.slice(0, 10) || [],
+          scholarships: finance?.filter(f => f.type === 'scholarship' || f.category === 'scholarship').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0,
+          fines: finance?.filter(f => f.type === 'fine' || f.category === 'fine').reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) || 0
+        },
+        attendance: {
+          total: attendance?.length || 0,
+          present: attendance?.filter(a => a.status === 'present').length || 0,
+          absent: attendance?.filter(a => a.status === 'absent').length || 0,
+          late: attendance?.filter(a => a.status === 'late').length || 0,
+          rate: attendance?.length > 0 ? (attendance.filter(a => a.status === 'present').length / attendance.length * 100).toFixed(1) : 0,
+          recent: attendance?.slice(0, 10) || [],
+          byCourse: groupAttendanceByCourse(attendance || []),
+          trend: calculateAttendanceTrend(attendance || [])
+        },
+        timetable: {
+          total: timetable?.length || 0,
+          today: timetable?.filter(slot => {
+            const today = new Date().getDay();
+            return slot.day_of_week === (today === 0 ? 6 : today - 1);
+          }).sort((a, b) => {
+            const timeA = a.start_time?.split(':').map(Number) || [0, 0];
+            const timeB = b.start_time?.split(':').map(Number) || [0, 0];
+            return (timeA[0] * 60 + timeA[1]) - (timeB[0] * 60 + timeB[1]);
+          }) || [],
+          byDay: groupTimetableByDay(timetable || []),
+          currentClass: getCurrentClass(timetable || [])
+        },
+        library: {
+          available: libraryBooks?.length || 0,
+          books: libraryBooks || [],
+          recommended: libraryBooks?.filter(b => 
+            b.category?.toLowerCase().includes('computer') || 
+            b.category?.toLowerCase().includes('technology')
+          ).slice(0, 3) || []
+        },
+        events: {
+          upcoming: events || [],
+          today: events?.filter(e => new Date(e.date).toDateString() === new Date().toDateString()) || []
+        }
+      };
+
+      setStudentStats(processedStats);
+
+      // Load chat history from database
+      if (!loadedHistoryRef.current) {
+        try {
+          console.log('📥 Loading chat history from database...');
+          const dbHistory = await chatHistoryService.loadChatHistory(student.id);
+          
+          if (dbHistory && dbHistory.length > 0) {
+            console.log('✅ Loaded chat history from database:', dbHistory.length, 'messages');
+            setMessages(dbHistory);
+            loadedHistoryRef.current = true;
+          } else {
+            // No history, create welcome message
+            const welcomeText = generateWelcomeMessage(student, processedStats);
+            const welcomeMessage = {
+              id: `welcome_${Date.now()}`,
+              text: welcomeText,
+              sender: 'ai',
+              timestamp: new Date()
+            };
+            setMessages([welcomeMessage]);
+            loadedHistoryRef.current = true;
+            
+            // Save welcome message to database
+            chatHistoryService.saveMessage(student.id, welcomeMessage, 'ai', session)
+              .then(() => console.log('✅ Welcome message saved'))
+              .catch(e => console.warn('⚠️ Could not save welcome message:', e));
+          }
+        } catch (chatError) {
+          console.warn('⚠️ Could not load chat history:', chatError);
+          const welcomeText = generateWelcomeMessage(student, processedStats);
+          setMessages([{
+            id: `welcome_${Date.now()}`,
+            text: welcomeText,
+            sender: 'ai',
+            timestamp: new Date()
+          }]);
+          loadedHistoryRef.current = true;
+        }
+      }
+      
+      console.log('✅ All data loaded successfully!');
+      
+    } catch (error) {
+      console.error('❌ Error in fetchAllStudentData:', error);
+      if (messages.length === 0) {
+        setMessages([{
+          id: `error_${Date.now()}`,
+          text: `⚠️ Error loading your data: ${error.message}. Please try refreshing the page or contact support.`,
+          sender: 'ai',
+          timestamp: new Date()
+        }]);
+      }
+    } finally {
+      if (mountedRef.current) {
+        setIsLoadingInitial(false);
+      }
+      isFetchingRef.current = false;
+    }
+  }, [user?.email, messages.length]);
+
+  // Handle sending messages - UPDATED
   const handleSendMessage = async () => {
     if (!inputText.trim() || isLoading) return;
 
     const userMessage = {
-      id: messages.length + 1,
+      id: `user_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       text: inputText,
       sender: 'user',
       timestamp: new Date()
     };
 
+    // Add user message to state
     setMessages(prev => {
-      const updated = [...prev, userMessage];
-      saveChatHistory(updated);
-      return updated;
+      const exists = prev.some(msg => 
+        msg.text === userMessage.text && 
+        msg.sender === userMessage.sender
+      );
+      if (exists) return prev;
+      return [...prev, userMessage];
     });
+    
     setInputText('');
     setIsLoading(true);
+
+    // Save user message to database - wait for it
+    if (studentData?.id) {
+      try {
+        await saveMessageToDB(studentData.id, userMessage, 'user');
+        console.log('✅ User message saved to DB');
+      } catch (error) {
+        console.error('❌ Error saving user message:', error);
+      }
+    }
 
     try {
       const conversationHistory = messages
@@ -1551,8 +1534,6 @@ ${randomEncouragement}
           content: msg.text.substring(0, 300)
         }));
 
-      console.log('📝 Sending conversation history:', conversationHistory.length, 'messages');
-
       const aiResponse = await generateAIResponseWithContext(
         inputText, 
         studentStats, 
@@ -1561,31 +1542,56 @@ ${randomEncouragement}
       );
       
       const aiMessage = {
-        id: messages.length + 2,
+        id: `ai_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         text: aiResponse,
         sender: 'ai',
         timestamp: new Date()
       };
       
       setMessages(prev => {
-        const updated = [...prev, aiMessage];
-        saveChatHistory(updated);
-        return updated;
+        const exists = prev.some(msg => 
+          msg.text === aiMessage.text && 
+          msg.sender === aiMessage.sender
+        );
+        if (exists) return prev;
+        return [...prev, aiMessage];
       });
+
+      // Save AI message to database - wait for it
+      if (studentData?.id) {
+        try {
+          await saveMessageToDB(studentData.id, aiMessage, 'ai');
+          console.log('✅ AI message saved to DB');
+        } catch (error) {
+          console.error('❌ Error saving AI message:', error);
+        }
+      }
+      
     } catch (error) {
       console.error('AI response error, using fallback:', error);
       const aiResponse = generateAIResponse(inputText);
       const aiMessage = {
-        id: messages.length + 2,
+        id: `ai_fallback_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         text: aiResponse,
         sender: 'ai',
         timestamp: new Date()
       };
       setMessages(prev => {
-        const updated = [...prev, aiMessage];
-        saveChatHistory(updated);
-        return updated;
+        const exists = prev.some(msg => 
+          msg.text === aiMessage.text && 
+          msg.sender === aiMessage.sender
+        );
+        if (exists) return prev;
+        return [...prev, aiMessage];
       });
+
+      if (studentData?.id) {
+        try {
+          await saveMessageToDB(studentData.id, aiMessage, 'ai');
+        } catch (error) {
+          console.error('❌ Error saving fallback AI message:', error);
+        }
+      }
     } finally {
       setIsLoading(false);
       setTimeout(() => {
@@ -1601,16 +1607,27 @@ ${randomEncouragement}
     }
   };
 
-  const handleClearChat = () => {
-    if (studentData && studentStats) {
+  const handleClearChat = async () => {
+    if (!studentData?.id) return;
+
+    try {
+      await chatHistoryService.clearChatHistory(studentData.id);
+      
+      const welcomeText = generateWelcomeMessage(studentData, studentStats);
       const welcomeMessage = {
-        id: 1,
-        text: generateWelcomeMessage(studentData, studentStats),
+        id: `welcome_${Date.now()}`,
+        text: welcomeText,
         sender: 'ai',
         timestamp: new Date()
       };
       setMessages([welcomeMessage]);
-      saveChatHistory([welcomeMessage]);
+      loadedHistoryRef.current = true;
+      
+      await saveMessageToDB(studentData.id, welcomeMessage, 'ai');
+      localStorage.removeItem(`chat-history-${user.email}-backup`);
+      
+    } catch (error) {
+      console.error('Error clearing chat history:', error);
     }
   };
 
@@ -1632,11 +1649,7 @@ ${randomEncouragement}
     "Lectures today?",
     "My attendance?",
     "Study tips",
-    "Exam schedule",
-    "Library books",
-    "Campus events",
-    "Progress report",
-    "Motivation"
+    "Exam schedule"
   ];
 
   // Scroll to bottom
@@ -1646,9 +1659,14 @@ ${randomEncouragement}
     }
   }, [messages, isLoading]);
 
-  // Fetch data on mount
+  // Initial fetch
   useEffect(() => {
-    fetchAllStudentData();
+    if (!user?.email) return;
+    
+    if (!loadedHistoryRef.current && !isFetchingRef.current) {
+      console.log('🔄 Initial data fetch...');
+      fetchAllStudentData();
+    }
   }, [fetchAllStudentData, user?.email]);
 
   // Loading state
@@ -1679,7 +1697,7 @@ ${randomEncouragement}
           Loading your personal AI assistant...
         </h3>
         <p style={{ color: '#7f8c8d', fontSize: isMobile ? '0.9rem' : '1rem' }}>
-          Fetching your academic data from the database
+          Fetching your academic data
         </p>
         <style>{`
           @keyframes spin {
