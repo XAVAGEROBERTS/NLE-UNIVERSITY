@@ -90,7 +90,7 @@ const Settings = () => {
     return 'F';
   };
 
-  // NEW: Simplified CGPA calculation - Try multiple data sources
+  // CGPA calculation
   const calculateCGPA = async (studentId) => {
     console.log('🔢 Starting CGPA calculation for student:', studentId);
     
@@ -109,7 +109,6 @@ const Settings = () => {
       if (!scError && studentCourses && studentCourses.length > 0) {
         console.log(`✅ Found ${studentCourses.length} courses with grades in student_courses`);
         
-        // Get course credits for these courses
         const courseIds = studentCourses.map(sc => sc.course_id);
         const { data: courses, error: coursesError } = await supabase
           .from('courses')
@@ -117,13 +116,11 @@ const Settings = () => {
           .in('id', courseIds);
 
         if (!coursesError && courses) {
-          // Create a map for quick lookup
           const courseMap = {};
           courses.forEach(course => {
             courseMap[course.id] = course.credits || 3;
           });
 
-          // Calculate points
           studentCourses.forEach(sc => {
             const grade = sc.grade;
             const gradePoints = sc.grade_points || getGradePoints(grade);
@@ -140,7 +137,7 @@ const Settings = () => {
         console.log('📭 No grades found in student_courses table');
       }
 
-      // OPTION 2: Try to get grades from exam_submissions table if we still don't have data
+      // OPTION 2: Try to get grades from exam_submissions table
       if (totalCredits === 0) {
         console.log('📝 Checking exam_submissions table...');
         const { data: examSubmissions, error: esError } = await supabase
@@ -152,50 +149,46 @@ const Settings = () => {
         if (!esError && examSubmissions && examSubmissions.length > 0) {
           console.log(`✅ Found ${examSubmissions.length} graded exam submissions`);
           
-          // Get exam details for credits
           const examIds = examSubmissions.map(es => es.exam_id);
           const { data: exams, error: examsError } = await supabase
             .from('examinations')
             .select('id, course_id')
             .in('id', examIds);
 
-        if (!examsError && exams) {
-          // Get course IDs
-          const courseIds = exams.map(exam => exam.course_id);
-          const { data: courses, error: coursesError } = await supabase
-            .from('courses')
-            .select('id, credits')
-            .in('id', courseIds);
+          if (!examsError && exams) {
+            const courseIds = exams.map(exam => exam.course_id);
+            const { data: courses, error: coursesError } = await supabase
+              .from('courses')
+              .select('id, credits')
+              .in('id', courseIds);
 
-          if (!coursesError && courses) {
-            // Create maps
-            const examMap = {};
-            exams.forEach(exam => {
-              examMap[exam.id] = exam.course_id;
-            });
+            if (!coursesError && courses) {
+              const examMap = {};
+              exams.forEach(exam => {
+                examMap[exam.id] = exam.course_id;
+              });
 
-            const courseMap = {};
-            courses.forEach(course => {
-              courseMap[course.id] = course.credits || 3;
-            });
+              const courseMap = {};
+              courses.forEach(course => {
+                courseMap[course.id] = course.credits || 3;
+              });
 
-            // Calculate points
-            examSubmissions.forEach(sub => {
-              const grade = sub.grade || getGradeFromMarks(sub.total_marks_obtained);
-              if (!grade) return;
+              examSubmissions.forEach(sub => {
+                const grade = sub.grade || getGradeFromMarks(sub.total_marks_obtained);
+                if (!grade) return;
 
-              const gradePoints = sub.grade_points || getGradePoints(grade);
-              const courseId = examMap[sub.exam_id];
-              const credits = courseMap[courseId] || 3;
+                const gradePoints = sub.grade_points || getGradePoints(grade);
+                const courseId = examMap[sub.exam_id];
+                const credits = courseMap[courseId] || 3;
 
-              if (gradePoints && credits) {
-                totalPoints += gradePoints * credits;
-                totalCredits += credits;
-                console.log(`📝 Exam: ${grade} (${gradePoints}) × ${credits} credits`);
-              }
-            });
+                if (gradePoints && credits) {
+                  totalPoints += gradePoints * credits;
+                  totalCredits += credits;
+                  console.log(`📝 Exam: ${grade} (${gradePoints}) × ${credits} credits`);
+                }
+              });
+            }
           }
-        }
         } else {
           console.log('📭 No graded exam submissions found');
         }
@@ -213,7 +206,6 @@ const Settings = () => {
         if (!smError && studentMarks && studentMarks.length > 0) {
           console.log(`✅ Found ${studentMarks.length} courses with marks`);
           
-          // Get course credits
           const courseIds = studentMarks.map(sm => sm.course_id);
           const { data: courses, error: coursesError } = await supabase
             .from('courses')
@@ -226,7 +218,6 @@ const Settings = () => {
               courseMap[course.id] = course.credits || 3;
             });
 
-            // Calculate points from marks
             studentMarks.forEach(sm => {
               const grade = getGradeFromMarks(sm.marks);
               if (!grade) return;
@@ -244,7 +235,6 @@ const Settings = () => {
         }
       }
 
-      // Calculate final CGPA
       if (totalCredits > 0) {
         const cgpa = parseFloat((totalPoints / totalCredits).toFixed(2));
         console.log(`🎓 CGPA Calculation Summary:`);
@@ -268,7 +258,6 @@ const Settings = () => {
     const fetchStudentData = async () => {
       if (!authUser?.email) return;
       
-      // Check cache first
       const cacheKey = `settings-data-${authUser.email}`;
       const cachedData = dataCache.get(cacheKey);
       
@@ -282,7 +271,6 @@ const Settings = () => {
       }
       
       try {
-        // Fetch student record
         console.log('👤 Fetching student data for email:', authUser.email);
         const { data: student, error: studentError } = await supabase
           .from('students')
@@ -298,26 +286,24 @@ const Settings = () => {
         if (!student) throw new Error('Student not found');
 
         console.log('✅ Student data loaded:', student.full_name);
+        console.log('📸 Profile picture URL:', student.profile_picture_url);
         setStudentData(student);
         
-        // Set initial form data
         setFormData(prev => ({
           ...prev,
           phone: student.phone || ''
         }));
 
-        // Fetch profile data (handle 406 error)
         console.log('👤 Fetching profile data...');
         try {
           const { data: profile, error: profileError } = await supabase
             .from('profiles')
             .select('*')
             .eq('user_id', student.id)
-            .maybeSingle(); // Use maybeSingle to handle no rows
+            .maybeSingle();
 
           if (profileError) {
             console.log('⚠️ Profile fetch issue (may not exist):', profileError.message);
-            // Create empty profile object
             setProfileData({
               user_id: student.id,
               user_type: 'student',
@@ -342,7 +328,6 @@ const Settings = () => {
               emergency_contact_phone: profile.emergency_contact_phone || ''
             }));
           } else {
-            // No profile exists
             console.log('📭 No profile found, creating empty structure');
             setProfileData({
               user_id: student.id,
@@ -359,7 +344,6 @@ const Settings = () => {
           }
         } catch (profileErr) {
           console.log('⚠️ Profile fetch failed:', profileErr.message);
-          // Create empty profile object on error
           setProfileData({
             user_id: student.id,
             user_type: 'student',
@@ -374,11 +358,9 @@ const Settings = () => {
           });
         }
 
-        // Fetch academic statistics
         console.log('📊 Fetching academic statistics...');
         await fetchAcademicStats(student.id);
 
-        // Save to cache for 10 minutes
         dataCache.set(`settings-data-${authUser.email}`, {
           studentData: student,
           profileData: profileData,
@@ -410,7 +392,6 @@ const Settings = () => {
     try {
       console.log('📈 Starting academic stats fetch for student:', studentId);
       
-      // Get student's program
       const { data: studentInfo, error: studentError } = await supabase
         .from('students')
         .select('program_code, year_of_study, semester')
@@ -424,7 +405,6 @@ const Settings = () => {
 
       console.log('✅ Student info loaded:', studentInfo);
 
-      // Get ALL courses for the student's program
       const { data: programCourses, error: coursesError } = await supabase
         .from('courses')
         .select('id')
@@ -439,7 +419,6 @@ const Settings = () => {
       const totalCourses = programCourses?.length || 0;
       console.log(`📚 Total courses in program: ${totalCourses}`);
 
-      // Get courses student is enrolled in
       const { data: enrolledCourses, error: enrolledError } = await supabase
         .from('student_courses')
         .select('*')
@@ -450,14 +429,12 @@ const Settings = () => {
         throw enrolledError;
       }
 
-      // Filter completed courses
       const completedCourses = enrolledCourses?.filter(c => 
         c.status === 'completed' || c.status === 'passed'
       ).length || 0;
       
       console.log(`✅ Completed courses: ${completedCourses}`);
 
-      // Filter active/enrolled courses (not completed)
       const activeCourses = enrolledCourses?.filter(c => 
         c.status !== 'completed' && c.status !== 'passed'
       ) || [];
@@ -465,15 +442,12 @@ const Settings = () => {
       
       console.log(`📝 Currently enrolled courses: ${enrolledCoursesCount}`);
 
-      // Get course IDs for ACTIVE courses only
       const activeCourseIds = activeCourses.map(sc => sc.course_id) || [];
       
-      // Calculate CGPA from ALL completed courses with grades
       console.log('🎓 Calculating CGPA...');
       const currentCGPA = await calculateCGPA(studentId);
       console.log(`🎓 Final CGPA: ${currentCGPA}`);
 
-      // Get pending assignments
       let pendingCount = 0;
       if (activeCourseIds.length > 0) {
         console.log('📋 Fetching assignments...');
@@ -494,7 +468,6 @@ const Settings = () => {
         }
       }
 
-      // Get upcoming exams
       let examsCount = 0;
       if (activeCourseIds.length > 0) {
         console.log('📝 Fetching exams...');
@@ -515,7 +488,6 @@ const Settings = () => {
         }
       }
 
-      // Set final stats
       const finalStats = {
         totalCourses: totalCourses,
         enrolledCourses: enrolledCoursesCount,
@@ -577,7 +549,6 @@ const Settings = () => {
     try {
       console.log('💾 Saving profile changes...');
       
-      // Update phone in students table
       if (formData.phone !== (studentData?.phone || '')) {
         const { error: phoneError } = await supabase
           .from('students')
@@ -590,7 +561,6 @@ const Settings = () => {
         if (phoneError) throw phoneError;
       }
 
-      // Prepare profile data
       const profileDataToUpdate = {
         user_id: studentData.id,
         user_type: 'student',
@@ -602,26 +572,23 @@ const Settings = () => {
         updated_at: new Date().toISOString()
       };
 
-      // Check if profile exists
       console.log('🔍 Checking if profile exists...');
       const { data: existingProfile, error: checkError } = await supabase
         .from('profiles')
         .select('id')
         .eq('user_id', studentData.id)
-        .maybeSingle(); // Use maybeSingle to handle no rows
+        .maybeSingle();
 
       let operationError;
       
       if (checkError) {
         console.log('⚠️ Profile check error, attempting insert:', checkError.message);
-        // Try to insert anyway
         profileDataToUpdate.created_at = new Date().toISOString();
         const { error: insertError } = await supabase
           .from('profiles')
           .insert([profileDataToUpdate]);
         operationError = insertError;
       } else if (!existingProfile) {
-        // Profile doesn't exist, insert new
         console.log('📝 Profile does not exist, inserting new...');
         profileDataToUpdate.created_at = new Date().toISOString();
         const { error: insertError } = await supabase
@@ -629,7 +596,6 @@ const Settings = () => {
           .insert([profileDataToUpdate]);
         operationError = insertError;
       } else {
-        // Profile exists, update it
         console.log('✏️ Profile exists, updating...');
         const { error: updateError } = await supabase
           .from('profiles')
@@ -643,7 +609,6 @@ const Settings = () => {
         throw operationError;
       }
 
-      // Update local state
       setProfileData(prev => ({
         ...prev,
         ...profileDataToUpdate
@@ -704,7 +669,6 @@ const Settings = () => {
         throw new Error('User email not found');
       }
 
-      // Verify current password
       const { error: authError } = await supabase.auth.signInWithPassword({
         email: userEmail,
         password: passwordForm.currentPassword
@@ -715,7 +679,6 @@ const Settings = () => {
         throw new Error('Current password is incorrect');
       }
       
-      // Update password
       const { error: updateError } = await supabase.auth.updateUser({
         password: passwordForm.newPassword
       });
@@ -725,7 +688,6 @@ const Settings = () => {
         throw updateError;
       }
       
-      // Clear form
       setPasswordForm({
         currentPassword: '',
         newPassword: '',
@@ -914,12 +876,12 @@ const Settings = () => {
             
             <div className="settings-stat-card">
               <div className="settings-stat-value">{academicStats.pendingAssignments}</div>
-              <div className="settings-stat-label">Pending</div>
+              <div className="settings-stat-label">Pending Assignments</div>
             </div>
             
             <div className="settings-stat-card">
               <div className="settings-stat-value">{academicStats.upcomingExams}</div>
-              <div className="settings-stat-label">Exams</div>
+              <div className="settings-stat-label">Upcoming Exams</div>
             </div>
           </div>
           
@@ -936,7 +898,7 @@ const Settings = () => {
           </div>
         </div>
 
-        {/* Profile Information */}
+        {/* Profile Information with Profile Picture */}
         <div className="settings-card">
           <h3 className="settings-card-title">
             <i className="fas fa-user settings-card-icon"></i>
@@ -946,7 +908,20 @@ const Settings = () => {
           <div className="settings-profile-section">
             <div className="settings-avatar-container">
               <div className="settings-avatar">
-                <i className="fas fa-user-graduate settings-avatar-icon"></i>
+                {studentData.profile_picture_url ? (
+                  <img 
+                    src={studentData.profile_picture_url} 
+                    alt={studentData.full_name}
+                    style={{ 
+                      width: '100%', 
+                      height: '100%', 
+                      objectFit: 'cover',
+                      borderRadius: '50%'
+                    }}
+                  />
+                ) : (
+                  <i className="fas fa-user-graduate settings-avatar-icon"></i>
+                )}
               </div>
             </div>
             
@@ -1431,8 +1406,8 @@ const Settings = () => {
         }
 
         .settings-avatar {
-          width: 100px;
-          height: 100px;
+          width: 120px;
+          height: 120px;
           border-radius: 50%;
           background-color: #e9ecef;
           display: flex;
@@ -1440,16 +1415,24 @@ const Settings = () => {
           justify-content: center;
           font-size: 40px;
           color: #6c757d;
+          overflow: hidden;
           transition: all 0.2s ease;
+          border: 3px solid #dee2e6;
         }
 
         .settings-avatar:hover {
-          background-color: #dee2e6;
           transform: scale(1.05);
+          box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+        }
+
+        .settings-avatar img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
         }
 
         .settings-avatar-icon {
-          font-size: 40px;
+          font-size: 48px;
         }
 
         .settings-profile-info {
@@ -1815,8 +1798,8 @@ const Settings = () => {
           }
           
           .settings-avatar {
-            width: 90px;
-            height: 90px;
+            width: 100px;
+            height: 100px;
           }
           
           .settings-avatar-icon {

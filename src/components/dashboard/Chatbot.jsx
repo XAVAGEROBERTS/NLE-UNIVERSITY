@@ -1699,10 +1699,8 @@ ${randomEncouragement}
     }
   }, [messages, isLoading]);
 
-  // Fetch data on mount
+  // Fetch data on mount - use cache if available
   useEffect(() => {
-    // Clear chatbot cache to get fresh data
-    dataCache.delete(`chatbot-data-${user?.email}`);
     fetchAllStudentData();
   }, [fetchAllStudentData, user?.email]);
 

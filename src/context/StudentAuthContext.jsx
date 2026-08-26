@@ -1,4 +1,5 @@
 // src/context/StudentAuthContext.jsx - WITH CACHE CLEARING
+/* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../services/supabase';
 import { useNavigate } from 'react-router-dom';
@@ -112,9 +113,10 @@ export const StudentAuthProvider = ({ children }) => {
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       console.log('Auth event:', event);
       
-      // Clear cache on sign out
+      // Clear only data cache on sign out, NOT chat history
       if (event === 'SIGNED_OUT') {
         dataCache.clear();
+        // Chat history is preserved in localStorage
       }
       
       processSession(session);
@@ -133,6 +135,7 @@ export const StudentAuthProvider = ({ children }) => {
       clearTimeout(timeoutId);
       listener?.subscription?.unsubscribe();
     };
+       // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigate]);
 
   const signIn = async (email, password) => {
@@ -159,18 +162,16 @@ export const StudentAuthProvider = ({ children }) => {
     try {
       await supabase.auth.signOut();
       
-      // Clear all cached data on logout
+      // Clear only the DATA cache, NOT the chat history
       dataCache.clear();
       
-      // Clear chat history
-      if (user?.email) {
-        localStorage.removeItem(`chat-history-${user.email}`);
-      }
+      // DO NOT clear chat history - keep it for next login
+      // localStorage.removeItem(`chat-history-${user.email}`);
       
-      console.log('✅ Cache and chat history cleared on logout');
+      console.log('✅ Data cache cleared, chat history preserved');
       
       return { success: true };
-    } catch (err) {
+    } catch {
       return { success: false };
     } finally {
       setAuthLoading(false);
@@ -212,7 +213,7 @@ export const StudentAuthProvider = ({ children }) => {
       }
 
       // 2. Verify current password by re-authenticating
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      const { error: authError } = await supabase.auth.signInWithPassword({
         email: authUser?.email || user?.email,
         password: currentPassword
       });
