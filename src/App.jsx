@@ -1,6 +1,6 @@
-// src/App.jsx - FINAL with back button handler
+// src/App.jsx - Updated with Notes route
 import React, { Suspense, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'; // Fixed: removed space
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { StudentAuthProvider, useStudentAuth } from './context/StudentAuthContext';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
@@ -20,6 +20,7 @@ const Examinations = React.lazy(() => import('./components/dashboard/Examination
 const Results = React.lazy(() => import('./components/dashboard/Results'));
 const Finance = React.lazy(() => import('./components/dashboard/Finance'));
 const Tutorials = React.lazy(() => import('./components/dashboard/Tutorials'));
+const Notes = React.lazy(() => import('./components/dashboard/Notes')); // ← NEW
 const Settings = React.lazy(() => import('./components/dashboard/Settings'));
 const Chatbot = React.lazy(() => import('./components/dashboard/Chatbot'));
 const TakeExam = React.lazy(() => import('./components/dashboard/TakeExam'));
@@ -170,6 +171,7 @@ const AppContent = () => {
           <Route path="results" element={<Results />} />
           <Route path="finance" element={<Finance />} />
           <Route path="tutorials" element={<Tutorials />} />
+          <Route path="notes" element={<Notes />} /> {/* ← NEW */}
           <Route path="chatbot" element={<Chatbot />} />
           <Route path="settings" element={<Settings />} />
         </Route>

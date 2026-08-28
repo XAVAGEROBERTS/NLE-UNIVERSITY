@@ -1,22 +1,21 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../services/supabase';
 import { useStudentAuth } from '../../context/StudentAuthContext';
-import { checkAssignmentAccessOnly } from '../../utils/clearanceUtils';
 import { useCachedData } from '../../hooks/useCachedData';
 import { dataCache } from '../../utils/dataCache';
 import SubmissionModal from "./SubmissionModal.jsx";
 
 const Coursework = () => {
-    const [assignments, setAssignments] = useState([]);
+  const [assignments, setAssignments] = useState([]);
   const [showSubmissionModal, setShowSubmissionModal] = useState(false);
   const [showResultsModal, setShowResultsModal] = useState(false);
   const [showFilesModal, setShowFilesModal] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedAssignment, setSelectedAssignment] = useState(null);
   const [studentId, setStudentId] = useState(null);
-  const [hasAssignmentAccess, setHasAssignmentAccess] = useState(false); // NEW STATE
-  const [accessLoading, setAccessLoading] = useState(true); // NEW STATE
-  const [accessDetails, setAccessDetails] = useState(null); // NEW STATE
+  const [hasAssignmentAccess, setHasAssignmentAccess] = useState(false);
+  const [accessLoading, setAccessLoading] = useState(true);
+  const [accessDetails, setAccessDetails] = useState(null);
   const { user } = useStudentAuth();
 
   // Lock scroll when any modal is open
@@ -29,241 +28,332 @@ const Coursework = () => {
     return () => document.body.classList.remove('modal-open');
   }, [showSubmissionModal, showResultsModal, showFilesModal, showDetailsModal]);
 
-  // Main data fetching function
-  const fetchCourseworkData = useCallback(async () => {
-    if (!user?.email) {
-      throw new Error('No user logged in');
+// ===== FIXED: Fetch coursework data with proper loading =====
+const fetchCourseworkData = useCallback(async () => {
+  if (!user?.email) {
+    throw new Error('No user logged in');
+  }
+
+  console.log('📚 Fetching coursework data...');
+
+  // 1. Get student by email
+  const { data: student, error: studentError } = await supabase
+    .from('students')
+    .select('id, student_id, full_name, email, department_code, year_of_study, semester')
+    .eq('email', user.email)
+    .single();
+
+  if (studentError) {
+    console.error('Error fetching student:', studentError);
+    throw studentError;
+  }
+
+  console.log(`👤 Student: ${student.full_name} (${student.student_id})`);
+
+  // 2. Get student's enrolled courses (only non-completed)
+  const { data: studentCourses, error: coursesError } = await supabase
+    .from('student_courses')
+    .select('course_id, status')
+    .eq('student_id', student.id);
+
+  if (coursesError) {
+    console.error('Error fetching student courses:', coursesError);
+    throw coursesError;
+  }
+
+  // Filter out completed courses
+  const nonCompletedCourseIds = studentCourses
+    ?.filter(course => course.status !== 'completed')
+    .map(course => course.course_id) || [];
+
+  console.log(`📚 Found ${nonCompletedCourseIds.length} non-completed courses`);
+
+  if (nonCompletedCourseIds.length === 0) {
+    console.log('✅ All courses completed - no assignments to show');
+    return { studentId: student.id, assignments: [] };
+  }
+
+  // 3. Get assignments for non-completed courses
+  const { data: assignmentsData, error: assignmentsError } = await supabase
+    .from('assignments')
+    .select(`
+      *,
+      courses!inner (
+        id, course_code, course_name, department_code, year, semester
+      ),
+      lecturers (full_name)
+    `)
+    .eq('courses.department_code', student.department_code)
+    .eq('courses.year', student.year_of_study)
+    .eq('courses.semester', student.semester)
+    .in('status', ['published', 'closed', 'graded'])
+    .in('course_id', nonCompletedCourseIds)
+    .order('created_at', { ascending: false });
+
+  if (assignmentsError) {
+    console.error('Error fetching assignments:', assignmentsError);
+    throw assignmentsError;
+  }
+
+  console.log(`📚 Found ${assignmentsData?.length || 0} assignments`);
+
+  // 4. Get submissions
+  const { data: submissions, error: subsError } = await supabase
+    .from('assignment_submissions')
+    .select('*')
+    .eq('student_id', student.id);
+
+  if (subsError) {
+    console.error('Error fetching submissions:', subsError);
+    // Don't throw, just continue without submissions
+  }
+
+  console.log(`📝 Found ${submissions?.length || 0} submissions`);
+
+  // 5. Process assignments
+  const processedAssignments = (assignmentsData || []).map(assignment => {
+    const submission = submissions?.find(sub => sub.assignment_id === assignment.id);
+    
+    let isSubmitted = false;
+    let submissionStatus = 'not submitted';
+    let canSubmit = true;
+    let isGraded = false;
+    
+    if (submission) {
+      submissionStatus = submission.status || 'not submitted';
+      isSubmitted = ['submitted', 'graded', 'late'].includes(submissionStatus);
+      isGraded = submissionStatus === 'graded';
     }
 
-    // 1. Get student by email
-    const { data: student, error: studentError } = await supabase
-      .from('students')
-      .select('id, student_id, full_name, email, department_code, year_of_study, semester')
-      .eq('email', user.email)
-      .single();
+    const dueDate = new Date(assignment.due_date);
+    const now = new Date();
+    const isPastDue = dueDate < now;
+    canSubmit = !isSubmitted && !isPastDue;
 
-    if (studentError) throw studentError;
-
-    // 2. Get student's enrolled courses
-    const { data: studentCourses, error: coursesError } = await supabase
-      .from('student_courses')
-      .select('course_id, status')
-      .eq('student_id', student.id);
-
-    if (coursesError) throw coursesError;
-
-    const nonCompletedCourseIds = studentCourses
-      ?.filter(course => course.status !== 'completed')
-      .map(course => course.course_id) || [];
-
-    if (nonCompletedCourseIds.length === 0) {
-      return { studentId: student.id, assignments: [] };
-    }
-
-    // 3. Get assignments
-    const { data: assignmentsData, error: assignmentsError } = await supabase
-      .from('assignments')
-      .select(`
-        *,
-        courses!inner (
-          id, course_code, course_name, department_code, year, semester
-        ),
-        lecturers (full_name)
-      `)
-      .eq('courses.department_code', student.department_code)
-      .eq('courses.year', student.year_of_study)
-      .eq('courses.semester', student.semester)
-      .in('status', ['published', 'closed', 'graded'])
-      .in('course_id', nonCompletedCourseIds)
-      .order('created_at', { ascending: false });
-
-    if (assignmentsError) throw assignmentsError;
-
-    // 4. Get submissions
-    const { data: submissions, error: subsError } = await supabase
-      .from('assignment_submissions')
-      .select('*')
-      .eq('student_id', student.id);
-
-    if (subsError) throw subsError;
-
-    // 5. Process assignments
-    const processedAssignments = (assignmentsData || []).map(assignment => {
-      const submission = submissions?.find(sub => sub.assignment_id === assignment.id);
+    // Process assignment files from lecturerbucket
+    const assignmentFiles = assignment.file_urls || [];
+    const processedFiles = assignmentFiles.map(fileUrl => {
+      if (!fileUrl) return null;
+      if (fileUrl.startsWith('http')) return fileUrl;
       
-      let isSubmitted = false;
-      let submissionStatus = 'not submitted';
-      let canSubmit = true;
-      let isGraded = false;
+      const projectRef = supabase.supabaseUrl.split('//')[1].split('.')[0];
+      let filePath = fileUrl;
       
-      if (submission) {
-        submissionStatus = submission.status || 'not submitted';
-        isSubmitted = ['submitted', 'graded', 'late'].includes(submissionStatus);
-        isGraded = submissionStatus === 'graded';
+      if (filePath.includes('lecturerbucket/')) {
+        filePath = filePath.split('lecturerbucket/')[1];
       }
+      
+      return `https://${projectRef}.supabase.co/storage/v1/object/public/lecturerbucket/${filePath}`;
+    }).filter(url => url && url !== '');
 
-      const dueDate = new Date(assignment.due_date);
-      const now = new Date();
-      const isPastDue = dueDate < now;
-      canSubmit = !isSubmitted && !isPastDue;
+    // Process student submission files
+    const studentSubmissionFiles = (submission?.file_urls || []).map(fileUrl => {
+      if (!fileUrl) return null;
+      if (fileUrl.startsWith('http')) return fileUrl;
+      
+      const projectRef = supabase.supabaseUrl.split('//')[1].split('.')[0];
+      return `https://${projectRef}.supabase.co/storage/v1/object/public/assignments/${fileUrl}`;
+    }).filter(url => url && url !== '');
 
-      const assignmentFiles = assignment.file_urls || [];
-      const processedFiles = assignmentFiles.map(fileUrl => {
-        if (!fileUrl) return null;
-        if (fileUrl.startsWith('http')) return fileUrl;
-        
-        const projectRef = supabase.supabaseUrl.split('//')[1].split('.')[0];
-        let filePath = fileUrl;
-        
-        if (filePath.includes('lecturerbucket/')) {
-          filePath = filePath.split('lecturerbucket/')[1];
-        }
-        
-        return `https://${projectRef}.supabase.co/storage/v1/object/public/lecturerbucket/${filePath}`;
-      }).filter(url => url && url !== '');
-
-      const studentSubmissionFiles = (submission?.file_urls || []).map(fileUrl => {
-        if (!fileUrl) return null;
-        if (fileUrl.startsWith('http')) return fileUrl;
-        
-        const projectRef = supabase.supabaseUrl.split('//')[1].split('.')[0];
-        return `https://${projectRef}.supabase.co/storage/v1/object/public/assignments/${fileUrl}`;
-      }).filter(url => url && url !== '');
-
-      const mainPdfFile = processedFiles.find(file => 
-        file && (file.toLowerCase().endsWith('.pdf') || 
-        file.includes('assignment') || 
-        file.includes('question'))
-      ) || processedFiles[0];
-
-      return {
-        id: assignment.id,
-        courseCode: assignment.courses?.course_code || 'N/A',
-        courseName: assignment.courses?.course_name || 'N/A',
-        courseDepartment: assignment.courses?.department_code,
-        courseYear: assignment.courses?.year,
-        courseSemester: assignment.courses?.semester,
-        title: assignment.title,
-        description: assignment.description || '',
-        instructions: assignment.instructions || '',
-        assignedDate: new Date(assignment.created_at).toLocaleDateString('en-US', {
-          day: 'numeric', month: 'short', year: 'numeric'
-        }),
-        dueDate: dueDate.toLocaleDateString('en-US', {
-          day: 'numeric', month: 'short', year: 'numeric',
-          hour: '2-digit', minute: '2-digit', hour12: true
-        }) + ' EAT',
-        rawDueDate: dueDate,
-        isPastDue,
-        status: submissionStatus,
-        isSubmitted: isSubmitted,
-        submissionId: submission?.id,
-        submissionDate: submission?.submission_date,
-        fileUrls: studentSubmissionFiles,
-        submittedText: submission?.submitted_text || '',
-        feedback: submission?.feedback || '',
-        marks: submission?.marks_obtained
-          ? `${submission.marks_obtained}/${assignment.total_marks}`
-          : '',
-        totalMarks: assignment.total_marks,
-        obtainedMarks: submission?.marks_obtained,
-        lecturer: assignment.lecturers?.full_name || 'Unknown Lecturer',
-        submission_type: assignment.submission_type || 'file',
-        allowed_formats: assignment.allowed_formats || ['pdf', 'doc', 'docx', 'zip'],
-        max_file_size: assignment.max_file_size || 10,
-        assignment_files: processedFiles,
-        main_assignment_file: mainPdfFile,
-        canSubmit: canSubmit,
-        isGraded: isGraded,
-        original_file_urls: assignment.file_urls || [],
-        created_at: assignment.created_at
-      };
-    });
+    const mainPdfFile = processedFiles.find(file => 
+      file && (file.toLowerCase().endsWith('.pdf') || 
+      file.includes('assignment') || 
+      file.includes('question'))
+    ) || processedFiles[0];
 
     return {
-      studentId: student.id,
-      assignments: processedAssignments
+      id: assignment.id,
+      courseCode: assignment.courses?.course_code || 'N/A',
+      courseName: assignment.courses?.course_name || 'N/A',
+      courseDepartment: assignment.courses?.department_code,
+      courseYear: assignment.courses?.year,
+      courseSemester: assignment.courses?.semester,
+      title: assignment.title,
+      description: assignment.description || '',
+      instructions: assignment.instructions || '',
+      assignedDate: new Date(assignment.created_at).toLocaleDateString('en-US', {
+        day: 'numeric', month: 'short', year: 'numeric'
+      }),
+      dueDate: dueDate.toLocaleDateString('en-US', {
+        day: 'numeric', month: 'short', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', hour12: true
+      }) + ' EAT',
+      rawDueDate: dueDate,
+      isPastDue,
+      status: submissionStatus,
+      isSubmitted: isSubmitted,
+      submissionId: submission?.id,
+      submissionDate: submission?.submission_date,
+      fileUrls: studentSubmissionFiles,
+      submittedText: submission?.submitted_text || '',
+      feedback: submission?.feedback || '',
+      marks: submission?.marks_obtained
+        ? `${submission.marks_obtained}/${assignment.total_marks}`
+        : '',
+      totalMarks: assignment.total_marks,
+      obtainedMarks: submission?.marks_obtained,
+      lecturer: assignment.lecturers?.full_name || 'Unknown Lecturer',
+      submission_type: assignment.submission_type || 'file',
+      allowed_formats: assignment.allowed_formats || ['pdf', 'doc', 'docx', 'zip'],
+      max_file_size: assignment.max_file_size || 10,
+      assignment_files: processedFiles,
+      main_assignment_file: mainPdfFile,
+      canSubmit: canSubmit,
+      isGraded: isGraded,
+      original_file_urls: assignment.file_urls || [],
+      created_at: assignment.created_at
     };
-  }, [user?.email]);
+  });
 
-  // Check assignment access WITH CACHING AND TIMEOUT
+  console.log(`✅ Processed ${processedAssignments.length} assignments`);
+
+  return {
+    studentId: student.id,
+    assignments: processedAssignments
+  };
+}, [user]); // ✅ FIXED: Changed from [user?.email] to [user]
+
+  // ===== FIXED: Check assignment access WITH PROPER LOADING ORDER =====
   useEffect(() => {
     const checkAccess = async () => {
-      if (user?.email) {
-        const cachedAccess = dataCache.get(`access-${user.email}`);
-        
-        if (cachedAccess) {
-          console.log('✅ Access check: CACHE HIT');
-          setHasAssignmentAccess(cachedAccess.hasAccess);
-          setAccessDetails(cachedAccess.accessDetails);
-          setStudentId(cachedAccess.studentId);
-          setAccessLoading(false);
-          return;
-        }
-        
-        try {
-          setAccessLoading(true);
-          
-          // Add timeout to prevent getting stuck
-          const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Access check timeout')), 5000);
-          });
-          
-          const accessPromise = (async () => {
-            const { data: student, error: studentError } = await supabase
-              .from('students')
-              .select('id')
-              .eq('email', user.email)
-              .single();
+      if (!user?.email) {
+        setAccessLoading(false);
+        setHasAssignmentAccess(false);
+        return;
+      }
 
-            if (studentError) throw studentError;
+      // Check cache first
+      const cachedAccess = dataCache.get(`access-${user.email}`);
+      
+      if (cachedAccess) {
+        console.log('✅ Access check: CACHE HIT');
+        setHasAssignmentAccess(cachedAccess.hasAccess);
+        setAccessDetails(cachedAccess.accessDetails);
+        setStudentId(cachedAccess.studentId);
+        setAccessLoading(false);
+        return;
+      }
+      
+      try {
+        setAccessLoading(true);
+        console.log('🔍 Checking assignment access...');
+        
+        // Get student ID first
+        const { data: student, error: studentError } = await supabase
+          .from('students')
+          .select('id, fees_clearance_bypassed')
+          .eq('email', user.email)
+          .single();
 
-            setStudentId(student.id);
-            
-            const accessResult = await checkAssignmentAccessOnly(student.id);
-            
-            return {
-              studentId: student.id,
-              hasAccess: accessResult.hasAccess,
-              accessDetails: {
-                percentagePaid: accessResult.percentagePaid || 0,
-                notes: accessResult.notes,
-                details: accessResult.details || [],
-                cached: accessResult.cached || false
-              }
-            };
-          })();
-          
-          // Race between access check and timeout
-          const accessData = await Promise.race([accessPromise, timeoutPromise]);
-          
-          // Cache the access check for 5 minutes
-          dataCache.set(`access-${user.email}`, accessData, 5 * 60 * 1000);
-          
-          setHasAssignmentAccess(accessData.hasAccess);
-          setAccessDetails(accessData.accessDetails);
-          setStudentId(accessData.studentId);
-          
-        } catch (error) {
-          console.error('Error checking assignment access:', error);
-          // If check fails, DENY access by default (stricter)
+        if (studentError) {
+          console.error('Error fetching student:', studentError);
           setHasAssignmentAccess(false);
           setAccessDetails({
             percentagePaid: 0,
-            notes: 'Unable to verify access. Please try again.',
-            details: ['Access check failed or timed out'],
-            cached: false
+            notes: 'Unable to verify your account. Please contact support.',
+            details: ['Student record not found.']
           });
-        } finally {
           setAccessLoading(false);
+          return;
         }
+
+        setStudentId(student.id);
+
+        // Check if student has fee bypass
+        if (student.fees_clearance_bypassed) {
+          console.log('✅ Fee bypass enabled - granting access');
+          const accessData = {
+            studentId: student.id,
+            hasAccess: true,
+            accessDetails: {
+              percentagePaid: 100,
+              notes: 'Admin bypass enabled',
+              details: ['Fee bypass active - temporary access granted.']
+            }
+          };
+          dataCache.set(`access-${user.email}`, accessData, 5 * 60 * 1000);
+          setHasAssignmentAccess(true);
+          setAccessDetails(accessData.accessDetails);
+          setAccessLoading(false);
+          return;
+        }
+
+        // Get financial records
+        const { data: feeRecords, error: feeError } = await supabase
+          .from('financial_records')
+          .select('amount, status')
+          .eq('student_id', student.id);
+
+        if (feeError) {
+          console.error('Error fetching fee records:', feeError);
+          const accessData = {
+            studentId: student.id,
+            hasAccess: false,
+            accessDetails: {
+              percentagePaid: 0,
+              notes: 'Unable to verify payment status',
+              details: ['Could not retrieve your payment records. Please contact the Finance Office.']
+            }
+          };
+          dataCache.set(`access-${user.email}`, accessData, 5 * 60 * 1000);
+          setHasAssignmentAccess(false);
+          setAccessDetails(accessData.accessDetails);
+          setAccessLoading(false);
+          return;
+        }
+
+        // Calculate payment percentage
+        const totalBilled = feeRecords?.reduce((sum, r) => sum + r.amount, 0) || 0;
+        const totalPaid = feeRecords
+          ?.filter(r => r.status === 'paid')
+          .reduce((sum, r) => sum + r.amount, 0) || 0;
+        
+        const percentagePaid = totalBilled > 0 
+          ? Math.round((totalPaid / totalBilled) * 100) 
+          : 0;
+
+        const hasAccess = percentagePaid >= 50;
+
+        console.log(`💰 Payment status: ${percentagePaid}% paid, Access: ${hasAccess ? 'GRANTED' : 'DENIED'}`);
+
+        const accessData = {
+          studentId: student.id,
+          hasAccess: hasAccess,
+          accessDetails: {
+            percentagePaid: percentagePaid,
+            notes: hasAccess 
+              ? `Access granted - ${percentagePaid}% paid` 
+              : `Access restricted - ${percentagePaid}% paid (50% required)`,
+            details: hasAccess 
+              ? ['You have met the minimum payment requirement.'] 
+              : ['Please pay at least 50% of your tuition fees to access assignments.']
+          }
+        };
+
+        // Cache for 5 minutes
+        dataCache.set(`access-${user.email}`, accessData, 5 * 60 * 1000);
+        
+        setHasAssignmentAccess(hasAccess);
+        setAccessDetails(accessData.accessDetails);
+        setStudentId(student.id);
+        
+      } catch (error) {
+        console.error('Error in access check:', error);
+        setHasAssignmentAccess(false);
+        setAccessDetails({
+          percentagePaid: 0,
+          notes: 'Error checking access',
+          details: ['An error occurred. Please try again later.']
+        });
+      } finally {
+        setAccessLoading(false);
       }
     };
 
     checkAccess();
   }, [user]);
-  // Use cached data hook
-  // Use cached data hook
+
+  // ===== FIXED: Use cached data hook with proper dependencies =====
   const { 
     data: cachedCourseworkData, 
     loading: dataLoading, 
@@ -273,7 +363,7 @@ const Coursework = () => {
     `coursework-${user?.id || user?.email}`,
     fetchCourseworkData,
     {
-      ttl: 10 * 60 * 1000,
+      ttl: 5 * 60 * 1000, // 5 minutes cache
       enabled: !!user?.email && hasAssignmentAccess,
       dependencies: [user?.email, hasAssignmentAccess]
     }
@@ -287,7 +377,6 @@ const Coursework = () => {
     }
   }, [cachedCourseworkData]);
 
-
   // =================== ENHANCED FILE DOWNLOAD FUNCTIONS ===================
   const handleDownloadAssignmentFile = async (assignment, fileUrl = null) => {
     const url = fileUrl || assignment.main_assignment_file;
@@ -298,20 +387,17 @@ const Coursework = () => {
     }
 
     try {
-      // Extract filename from URL
       let fileName = `Assignment_${assignment.title.replace(/[^a-z0-9]/gi, '_')}`;
       
-      // Try to get actual filename from URL
       const urlParts = url.split('/');
       const lastPart = urlParts[urlParts.length - 1];
       if (lastPart && lastPart.includes('.')) {
         const actualFileName = lastPart.split('?')[0];
-        fileName = decodeURIComponent(actualFileName); // Decode URL-encoded characters
+        fileName = decodeURIComponent(actualFileName);
       }
       
       console.log(`📥 Downloading lecturer file: ${fileName} from ${url}`);
 
-      // FORCE DOWNLOAD instead of opening in new tab
       const response = await fetch(url);
       if (!response.ok) {
         throw new Error(`Failed to fetch file: ${response.status} ${response.statusText}`);
@@ -320,16 +406,14 @@ const Coursework = () => {
       const blob = await response.blob();
       const downloadUrl = window.URL.createObjectURL(blob);
       
-      // Create download link
       const a = document.createElement('a');
       a.href = downloadUrl;
-      a.download = fileName; // This forces download instead of opening
+      a.download = fileName;
       a.style.display = 'none';
       
       document.body.appendChild(a);
       a.click();
       
-      // Cleanup
       setTimeout(() => {
         document.body.removeChild(a);
         window.URL.revokeObjectURL(downloadUrl);
@@ -339,12 +423,10 @@ const Coursework = () => {
     } catch (error) {
       console.error('❌ Error downloading assignment file:', error);
       
-      // Fallback to old method if fetch fails
       try {
         const a = document.createElement('a');
         a.href = url;
         
-        // Extract filename for download attribute
         const urlParts = url.split('/');
         const lastPart = urlParts[urlParts.length - 1];
         if (lastPart && lastPart.includes('.')) {
@@ -383,7 +465,6 @@ const Coursework = () => {
         const fileUrl = assignment.fileUrls[i];
         let fileName = `my_submission_${assignment.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${i + 1}`;
         
-        // Try to get actual filename
         const urlParts = fileUrl.split('/');
         const lastPart = urlParts[urlParts.length - 1];
         if (lastPart && lastPart.includes('.')) {
@@ -393,7 +474,6 @@ const Coursework = () => {
         console.log(`📥 Downloading student submission: ${fileName} from ${fileUrl}`);
         
         try {
-          // Try fetch method first for proper download
           const response = await fetch(fileUrl);
           if (response.ok) {
             const blob = await response.blob();
@@ -412,7 +492,6 @@ const Coursework = () => {
               window.URL.revokeObjectURL(downloadUrl);
             }, 100);
           } else {
-            // Fallback to direct method
             const a = document.createElement('a');
             a.href = fileUrl;
             a.download = fileName;
@@ -425,10 +504,8 @@ const Coursework = () => {
           }
         } catch (error) {
           console.warn(`⚠️ Could not download file ${i + 1}:`, error);
-          // Continue with next file
         }
         
-        // Small delay between downloads
         await new Promise(resolve => setTimeout(resolve, 300));
       }
       
@@ -764,69 +841,6 @@ const Coursework = () => {
     );
   };
 
-  // NEW: Payment Required Modal Component
-  const PaymentRequiredModal = () => {
-    if (hasAssignmentAccess || accessLoading) return null;
-
-    return (
-      <div className="coursework-modal-overlay">
-        <div className="coursework-modal coursework-modal-large"> 
-          <div className="coursework-modal-body">
-            <div className="coursework-payment-required">
-             
-              
-              <h4>Assignment Access Requires 50% Tuition Payment</h4>
-              
-              <div className="payment-requirements">
-                <div className="requirement-item requirement-not-met">
-                  <i className="fas fa-times-circle"></i>
-                  <span>Minimum 50% of tuition fees must be paid</span>
-                </div>
-                <div className="requirement-item">
-                  <i className="fas fa-exclamation-triangle"></i>
-                  <span>This is a mandatory requirement to access course assignments</span>
-                </div>
-              </div>
-              
-              {accessDetails && (
-                <div className="payment-details">
-                  <h5>Your Payment Status</h5>
-                  <div className="payment-progress">
-                    <div className="progress-bar">
-                      <div 
-                        className="progress-fill" 
-                        style={{ width: `${Math.min(accessDetails.percentagePaid, 100)}%` }}
-                      ></div>
-                    </div>
-                    <div className="progress-labels">
-                      <span>Current: {accessDetails.percentagePaid}% paid</span>
-                      <span>Required: 50%</span>
-                    </div>
-                  </div>
-                  
-                  <div className="payment-instructions">
-                    <h6>To Gain Access:</h6>
-                    <ol>
-                      <li>Visit the Finance Office or make an online payment</li>
-                      <li>Ensure your payment is recorded in the system</li>
-                      <li>Contact the finance department if you've already paid</li>
-                      <li>Once 50% is paid, assignments will automatically become visible</li>
-                    </ol>
-                  </div>
-                  
-                  <div className="contact-info">
-                    <p><strong>Finance Office:</strong> finance@nleuniversity.com</p>
-                    <p><strong>Phone:</strong> +(256) 765673373</p>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        
-        </div>
-      </div>
-    );
-  };
   // =================== LOADING STATE ===================
   if (accessLoading) {
     return (
@@ -889,7 +903,6 @@ const Coursework = () => {
           </div>
         </div>
         
-        {/* RESTRICTED VIEW STYLES */}
         <style jsx>{`
           .cw-no-access {
             display: flex;
@@ -1027,7 +1040,8 @@ const Coursework = () => {
       </div>
     );
   }
-    // Error state
+
+  // Error state
   if (error) {
     return (
       <div className="coursework-page">
@@ -1044,7 +1058,6 @@ const Coursework = () => {
       </div>
     );
   }
-
 
   return (
     <div className="coursework-page">
@@ -1063,7 +1076,7 @@ const Coursework = () => {
           <div className="cw-no-assignments">
             <p>No assignments available at the moment.</p>
             <button 
-            onClick={refetchAssignments}
+              onClick={refetchAssignments}
               className="cw-refresh-btn"
             >
               🔄 Refresh Assignments
@@ -1410,66 +1423,6 @@ const Coursework = () => {
           font-weight: 600;
         }
 
-        /* =================== FILE ATTACHMENT STYLES =================== */
-        .cw-assignment-files-info {
-          margin: 10px 0;
-        }
-
-        .cw-main-pdf-file {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          font-size: 14px;
-          color: #1e40af;
-          padding: 12px;
-          background: linear-gradient(135deg, #dbeafe, #eff6ff);
-          border-radius: 8px;
-          border: 1px solid #bfdbfe;
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-
-        .cw-main-pdf-file:hover {
-          background: linear-gradient(135deg, #bfdbfe, #dbeafe);
-          transform: translateY(-1px);
-        }
-
-        .cw-main-pdf-file i {
-          color: #ef4444;
-          font-size: 18px;
-        }
-
-        .cw-files-attached {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          font-size: 14px;
-          color: #475569;
-          padding: 12px;
-          background: #f8fafc;
-          border-radius: 8px;
-          border: 1px solid #e2e8f0;
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-
-        .cw-files-attached.clickable:hover {
-          background: #f1f5f9;
-          border-color: #cbd5e1;
-          color: #334155;
-          transform: translateY(-1px);
-        }
-
-        .cw-files-attached i {
-          color: #3b82f6;
-        }
-
-        .cw-files-attached .fa-external-link-alt {
-          margin-left: auto;
-          font-size: 12px;
-          color: #64748b;
-        }
-
         /* =================== STATUS STYLES =================== */
         .cw-card-status {
           display: flex;
@@ -1674,21 +1627,20 @@ const Coursework = () => {
           box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
         }
 
-      .coursework-loading-spinner {
-  width: 50px;
-  height: 50px;
-  border: 4px solid #f1f5f9;
-  border-top: 4px solid #3b82f6;
-  border-radius: 50%;
-  animation: coursework-spin 1s linear infinite;
-  margin: 40px auto;
-}
+        .coursework-loading-spinner {
+          width: 50px;
+          height: 50px;
+          border: 4px solid #f1f5f9;
+          border-top: 4px solid #3b82f6;
+          border-radius: 50%;
+          animation: coursework-spin 1s linear infinite;
+          margin: 40px auto;
+        }
 
-/* Add a unique animation name to avoid conflicts */
-@keyframes coursework-spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
+        @keyframes coursework-spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
 
         /* =================== MODAL STYLES =================== */
         .coursework-modal-overlay {
@@ -2229,7 +2181,6 @@ const Coursework = () => {
         }
 
         /* =================== ANIMATIONS =================== */
-
         @keyframes modalSlideIn {
           from {
             opacity: 0;

@@ -1,4 +1,4 @@
-// src/components/layout/StudentLayout.jsx - COMPLETE WITH PROFILE PICTURE
+// src/components/layout/StudentLayout.jsx - Updated with Notes tab
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useStudentAuth } from '../../context/StudentAuthContext';
@@ -30,6 +30,7 @@ const StudentLayout = () => {
     { id: 'results', label: 'Examination Results', icon: 'fas fa-chart-bar', path: '/results' },
     { id: 'finance', label: 'Financial Statements', icon: 'fas fa-money-bill-wave', path: '/finance' },
     { id: 'tutorials', label: 'Tutorials', icon: 'fas fa-chalkboard-teacher', path: '/tutorials' },
+    { id: 'notes', label: 'Notes', icon: 'fas fa-sticky-note', path: '/notes' }, // ← NEW
     { id: 'chatbot', label: 'Student Assistant', icon: 'fas fa-robot', path: '/chatbot' },
     { id: 'settings', label: 'Settings', icon: 'fas fa-cog', path: '/settings' },
   ];

@@ -22,167 +22,185 @@ const Tutorials = () => {
   const { user } = useStudentAuth();
 
   const [thumbnails, setThumbnails] = useState({});
+  
   const fetchTutorialsData = useCallback(async () => {
   if (!user?.email) {
     throw new Error('No user logged in');
   }
   
   const { data: student, error: studentError } = await supabase
-  .from('students')
-  .select('id, program_code, academic_year, year_of_study, semester')
-  .eq('email', user.email)
-  .single();
+    .from('students')
+    .select('id, program_code, academic_year, year_of_study, semester')
+    .eq('email', user.email)
+    .single();
 
-if (studentError || !student) {
-  throw new Error('Unable to load your profile. Please contact admin.');
-}
+  if (studentError || !student) {
+    throw new Error('Unable to load your profile. Please contact admin.');
+  }
 
-if (!student.program_code || !student.academic_year || !student.year_of_study || !student.semester) {
-  throw new Error('Profile incomplete: missing program, academic year, year, or semester.');
-}
+  if (!student.program_code || !student.academic_year || !student.year_of_study || !student.semester) {
+    throw new Error('Profile incomplete: missing program, academic year, year, or semester.');
+  }
 
-// DESTRUCTURE FIRST
-const {
-  id: studentId,
-  program_code: studentProgramCode,
-  academic_year: studentAcademicYear,
-  year_of_study: studentYear,
-  semester: studentSemester
-} = student;
+  const {
+    id: studentId,
+    program_code: studentProgramCode,
+    academic_year: studentAcademicYear,
+    year_of_study: studentYear,
+    semester: studentSemester
+  } = student;
 
-// NOW DEFINE FILTER VARIABLES (safe)
-const academicParts = studentAcademicYear.trim().split('/');
-const startYear = academicParts[0]?.toUpperCase() || '';
-const endYear = academicParts[1]?.toUpperCase() || '';
+  const academicParts = studentAcademicYear.trim().split('/');
+  const startYear = academicParts[0]?.toUpperCase() || '';
+  const endYear = academicParts[1]?.toUpperCase() || '';
 
-const normProgram = studentProgramCode.toUpperCase().trim();
-const cohortString = `YEAR${studentYear}_SEM${studentSemester}`.toUpperCase();
+  const normProgram = studentProgramCode.toUpperCase().trim();
+  const cohortString = `YEAR${studentYear}_SEM${studentSemester}`.toUpperCase();
 
-const studentCohort = cohortString; // for logs if needed
+  console.log('Student cohort:', {
+    programCode: studentProgramCode,
+    academicYear: studentAcademicYear,
+    cohort: cohortString,
+    uuid: studentId
+  });
 
-console.log('Student cohort:', {
-  programCode: studentProgramCode,
-  academicYear: studentAcademicYear,
-  cohort: studentCohort,
-  uuid: studentId
-});
+  // ⭐ STEP 1: Get ALL completed courses for this student
+  const { data: completedCourses, error: completedError } = await supabase
+    .from('student_courses')
+    .select('course_id')
+    .eq('student_id', studentId)
+    .eq('status', 'completed');
 
-    // === RECURSIVE STORAGE SCAN (CORRECTED & WORKING) ===
-    const scanFolder = async (prefix = '') => {
-      let allFiles = [];
+  if (completedError) {
+    console.warn('Could not fetch completed courses:', completedError);
+  }
 
-      const listAndProcess = async (path = '') => {
-        const { data: items, error } = await supabase.storage
-          .from('Tutorials')
-          .list(path, {
-            limit: 1000,
-            offset: 0,
-            sortBy: { column: 'name', order: 'asc' }
+  const completedCourseIds = new Set(completedCourses?.map(c => c.course_id) || []);
+  console.log(`📚 Student has ${completedCourseIds.size} completed courses`);
+
+  // ⭐ STEP 2: Get all courses that this student is enrolled in
+  const { data: enrolledCourses, error: enrolledError } = await supabase
+    .from('student_courses')
+    .select('course_id, courses(course_code)')
+    .eq('student_id', studentId);
+
+  if (enrolledError) {
+    console.warn('Could not fetch enrolled courses:', enrolledError);
+  }
+
+  const courseCodeMap = new Map();
+  enrolledCourses?.forEach(enrollment => {
+    if (enrollment.courses?.course_code) {
+      courseCodeMap.set(enrollment.course_id, enrollment.courses.course_code);
+    }
+  });
+
+  console.log(`📚 Student has ${courseCodeMap.size} enrolled courses`);
+
+  // ⭐ STEP 3: Get ALL completed course codes
+  const completedCourseCodes = new Set();
+  completedCourses?.forEach(completion => {
+    const courseCode = courseCodeMap.get(completion.course_id);
+    if (courseCode) {
+      completedCourseCodes.add(courseCode.toUpperCase());
+    }
+  });
+
+  console.log('📚 Completed course codes:', [...completedCourseCodes]);
+
+  // === RECURSIVE STORAGE SCAN ===
+  const scanFolder = async (prefix = '') => {
+    let allFiles = [];
+
+    const listAndProcess = async (path = '') => {
+      const { data: items, error } = await supabase.storage
+        .from('Tutorials')
+        .list(path, {
+          limit: 1000,
+          offset: 0,
+          sortBy: { column: 'name', order: 'asc' }
+        });
+
+      if (error) {
+        console.error('Storage list error at path', path, error);
+        return;
+      }
+
+      if (!items || items.length === 0) return;
+
+      for (const item of items) {
+        const fullPath = path ? `${path}/${item.name}` : item.name;
+
+        if (item.id === null || item.name.endsWith('/')) {
+          await listAndProcess(fullPath);
+        } else {
+          const { data: urlData } = supabase.storage
+            .from('Tutorials')
+            .getPublicUrl(fullPath);
+
+          allFiles.push({
+            name: item.name,
+            path: fullPath,
+            url: urlData.publicUrl,
+            created_at: item.created_at
           });
-
-        if (error) {
-          console.error('Storage list error at path', path, error);
-          return;
         }
-
-        if (!items || items.length === 0) return;
-
-        for (const item of items) {
-          const fullPath = path ? `${path}/${item.name}` : item.name;
-
-          // Folder: recurse
-          if (item.id === null || item.name.endsWith('/')) {
-            await listAndProcess(fullPath);
-          } else {
-            // File: add to list
-            const { data: urlData } = supabase.storage
-              .from('Tutorials')
-              .getPublicUrl(fullPath);
-
-            allFiles.push({
-              name: item.name,
-              path: fullPath,
-              url: urlData.publicUrl,
-              created_at: item.created_at
-            });
-          }
-        }
-      };
-
-      await listAndProcess(prefix);
-      return allFiles;
+      }
     };
 
-    // Only ONE declaration of allFiles
-    const allFiles = await scanFolder();
-    console.log(`Found ${allFiles.length} ACTUAL FILES in Tutorials bucket:`, allFiles.map(f => f.path));
-const matchingFiles = allFiles.filter(file => {
-  const upperPath = file.path.toUpperCase();
+    await listAndProcess(prefix);
+    return allFiles;
+  };
 
-  // Must contain program code, cohort string, and both years from academic_year
-  const hasProgram = upperPath.includes(normProgram);
-  const hasCohort = upperPath.includes(cohortString);
-  const hasStartYear = startYear ? upperPath.includes(startYear) : true;
-  const hasEndYear = endYear ? upperPath.includes(endYear) : true;
+  const allFiles = await scanFolder();
+  console.log(`Found ${allFiles.length} ACTUAL FILES in Tutorials bucket:`, allFiles.map(f => f.path));
 
-  return hasProgram && hasCohort && hasStartYear && hasEndYear;
-});
+  // Filter files by program, cohort, and academic year
+  const matchingFiles = allFiles.filter(file => {
+    const upperPath = file.path.toUpperCase();
 
-    console.log(`Filtered to ${matchingFiles.length} matching tutorials`);
-    
-    console.log(`Found ${allFiles.length} files in Tutorials bucket`);
+    const hasProgram = upperPath.includes(normProgram);
+    const hasCohort = upperPath.includes(cohortString);
+    const hasStartYear = startYear ? upperPath.includes(startYear) : true;
+    const hasEndYear = endYear ? upperPath.includes(endYear) : true;
 
-  
+    return hasProgram && hasCohort && hasStartYear && hasEndYear;
+  });
 
-allFiles.forEach(file => {
-  console.log('Available file path:', file.path);
-});
+  console.log(`Filtered to ${matchingFiles.length} matching tutorials`);
 
-    console.log(`Filtered to ${matchingFiles.length} matching tutorials`);
-// Fetch enrollments (for potential future use)
-const { error: enrollError } = await supabase
-  .from('student_courses')
-  .select('courses(course_code)')
-  .eq('student_id', studentId);
-
-if (enrollError) {
-  console.warn('Could not load enrollments:', enrollError);
-  // Continue without strict course check
-}
-
-    // (removed unused variable)
-
-      // Collect unique lecturer IDs from file paths
-    const lecturerIdSet = new Set();
-    matchingFiles.forEach(file => {
-      let parts = file.path.split('/');
-      if (parts[0] === 'tutorials') parts = parts.slice(1);
-      if (parts.length >= 1) {
-        lecturerIdSet.add(parts[0]); // lecturer UUID is first folder
-      }
-    });
-
-    const lecturerIds = Array.from(lecturerIdSet);
-
-    // Fetch real lecturer names (one efficient query)
-    let lecturerMap = new Map();
-    if (lecturerIds.length > 0) {
-      const { data: lecturers, error: lecturerError } = await supabase
-        .from('lecturers')
-        .select('id, full_name') // ← change 'full_name' to your actual column name if different (e.g. 'name')
-        .in('id', lecturerIds);
-
-      if (lecturerError) {
-        console.warn('Could not load lecturer names:', lecturerError);
-      } else {
-        lecturers.forEach(l => {
-          lecturerMap.set(l.id, l.full_name || 'Lecturer');
-        });
-      }
+  // Collect unique lecturer IDs from file paths
+  const lecturerIdSet = new Set();
+  matchingFiles.forEach(file => {
+    let parts = file.path.split('/');
+    if (parts[0] === 'tutorials') parts = parts.slice(1);
+    if (parts.length >= 1) {
+      lecturerIdSet.add(parts[0]);
     }
+  });
 
-    // Create tutorial objects with REAL lecturer names and NO description
-    const studentTutorials = matchingFiles.map(file => {
+  const lecturerIds = Array.from(lecturerIdSet);
+
+  // Fetch real lecturer names
+  let lecturerMap = new Map();
+  if (lecturerIds.length > 0) {
+    const { data: lecturers, error: lecturerError } = await supabase
+      .from('lecturers')
+      .select('id, full_name')
+      .in('id', lecturerIds);
+
+    if (lecturerError) {
+      console.warn('Could not load lecturer names:', lecturerError);
+    } else {
+      lecturers.forEach(l => {
+        lecturerMap.set(l.id, l.full_name || 'Lecturer');
+      });
+    }
+  }
+
+  // ⭐ STEP 4: Create tutorial objects and FILTER OUT completed courses
+  const studentTutorials = matchingFiles
+    .map(file => {
       let parts = file.path.split('/');
       if (parts[0] === 'tutorials') parts = parts.slice(1);
 
@@ -192,8 +210,23 @@ if (enrollError) {
 
       // Course code
       let displayCourseCode = 'General';
+      let rawCourseCode = '';
       if (parts.length >= 4) {
-        displayCourseCode = parts[2].toUpperCase();
+        rawCourseCode = parts[2].toUpperCase();
+        // Format with space if needed
+        const match = rawCourseCode.match(/^([A-Z]+)(\d+)$/);
+        if (match) {
+          displayCourseCode = `${match[1]} ${match[2]}`;
+        } else {
+          displayCourseCode = rawCourseCode;
+        }
+      }
+
+      // ⭐ Check if this course is completed
+      const isCompleted = completedCourseCodes.has(rawCourseCode);
+      if (isCompleted) {
+        console.log(`⏭️ Skipping tutorial for completed course: ${rawCourseCode}`);
+        return null; // Skip this tutorial
       }
 
       // Clean title
@@ -210,28 +243,32 @@ if (enrollError) {
       return {
         id: `storage-${file.path.replace(/\//g, '-').replace(/\./g, '_')}`,
         title: cleanTitle,
-        description: '', // Empty — removes the placeholder text
+        description: '',
         videoSrc: file.url,
         hasVideo: file.name.match(/\.(mp4|webm|ogg|mov)$/i) !== null,
-        lecturer: lecturerName, // Real name or fallback
+        lecturer: lecturerName,
         courseCode: displayCourseCode,
         courseName: displayCourseCode === 'General' ? 'General Tutorial' : displayCourseCode,
         fileUrls: [],
         viewCount: 0,
-        created_at: file.created_at
+        created_at: file.created_at,
+        isCompleted: isCompleted
       };
-    });
+    })
+    .filter(tutorial => tutorial !== null); // Remove null entries (completed courses)
 
-    // Sort: newest first, then alphabetical by title
-    studentTutorials.sort((a, b) => {
-      const dateDiff = new Date(b.created_at) - new Date(a.created_at);
-      return dateDiff !== 0 ? dateDiff : a.title.localeCompare(b.title);
-    });
+  console.log(`📚 After removing completed courses: ${studentTutorials.length} tutorials remaining`);
 
-    return {
-      tutorials: studentTutorials,
-      error: studentTutorials.length === 0 ? 'No tutorials available for your program and cohort yet. Check back later!' : null
-    };
+  // Sort: newest first, then alphabetical by title
+  studentTutorials.sort((a, b) => {
+    const dateDiff = new Date(b.created_at) - new Date(a.created_at);
+    return dateDiff !== 0 ? dateDiff : a.title.localeCompare(b.title);
+  });
+
+  return {
+    tutorials: studentTutorials,
+    error: studentTutorials.length === 0 ? 'No tutorials available for your active courses. Tutorials for completed courses are hidden.' : null
+  };
 
 }, [user]);
 
@@ -245,17 +282,14 @@ const {
   `tutorials-${user?.id || user?.email}`,
   fetchTutorialsData,
   {
-    ttl: 15 * 60 * 1000, // 15 minutes cache
+    ttl: 15 * 60 * 1000,
     enabled: !!user?.email,
     dependencies: [user?.email]
   }
 );
 
-  
   // Define tutorials early (will be populated by cached data)
   const tutorials = cachedTutorialData?.tutorials || [];
-
-
 
   const generateThumbnail = (videoSrc) => {
     return new Promise((resolve) => {
@@ -383,8 +417,6 @@ const {
     }
   };
 
-
-
   const refreshTutorials = () => {
     refetchTutorials();
   };
@@ -395,34 +427,27 @@ const downloadVideo = (videoUrl, videoTitle) => {
     return;
   }
 
-  // Sanitize filename
   const safeTitle = videoTitle
     .replace(/[^a-z0-9]/gi, '_')
     .substring(0, 100)
     .trim();
   const fileName = safeTitle ? `${safeTitle}.mp4` : 'tutorial_video.mp4';
 
-  // Append ?download=filename to force direct download
   const downloadUrl = `${videoUrl}?download=${encodeURIComponent(fileName)}`;
 
-  
-
-  // Create hidden link and click it
   const link = document.createElement('a');
   link.href = downloadUrl;
-  link.download = fileName; // Extra safety
+  link.download = fileName;
   link.style.display = 'none';
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
 
-  // Toast notification
   setDownloadFileName(fileName);
   setShowDownloadToast(true);
 
   console.log('Direct download started:', fileName);
 };
-
 
   const downloadFile = async (fileUrl, fileName) => {
     try {
@@ -439,7 +464,6 @@ const downloadVideo = (videoUrl, videoTitle) => {
     }
   };
 
-  // Handle thumbnail hover for video preview
   const handleThumbnailHover = (tutorialId, videoUrl, isHovering) => {
     if (!hoverVideoRefs.current[tutorialId]) {
       const video = document.createElement('video');
@@ -464,8 +488,6 @@ const downloadVideo = (videoUrl, videoTitle) => {
       video.currentTime = 0;
     }
   };
-
-
 
 // Loading state
 if (loading) {
@@ -608,7 +630,7 @@ if (loading) {
             <i className="fas fa-video"></i> Video Tutorials
           </h1>
           <p className="page-subtitle">
-            {tutorials.length} {tutorials.length === 1 ? 'tutorial' : 'tutorials'} available
+            {tutorials.length} {tutorials.length === 1 ? 'tutorial' : 'tutorials'} available for active courses
           </p>
         </div>
         <div className="header-right">
@@ -627,7 +649,7 @@ if (loading) {
             </div>
             <h3 className="empty-title">No Tutorials Found</h3>
             <p className="empty-message">
-              No video tutorials available. Check back later or contact your instructor.
+              No tutorials available for your active courses. Tutorials for completed courses are hidden.
             </p>
           </div>
         ) : (
@@ -641,9 +663,7 @@ if (loading) {
                 onClick={() => openVideoPlayer(tutorial)}
               >
                 <div className="thumbnail-content">
-                
-                  
-                  {/* Video Preview (hidden) */}
+                  {/* Video Preview */}
                   <div 
                     className="video-preview"
                     ref={el => {
@@ -657,12 +677,12 @@ if (loading) {
                   <div 
                     className="thumbnail-fallback"
                    style={{
-  backgroundImage: thumbnails[tutorial.id]
-    ? `url(${thumbnails[tutorial.id]})`
-    : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-  backgroundSize: 'cover',
-  backgroundPosition: 'center'
-}}
+                      backgroundImage: thumbnails[tutorial.id]
+                        ? `url(${thumbnails[tutorial.id]})`
+                        : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center'
+                    }}
                   />
                   
                   <div className="difficulty-badge" style={{ display:'none',
@@ -756,7 +776,7 @@ if (loading) {
       >
         {activeVideo && (
           <div className="modal-container">
-            {/* Modal Header - Made more compact */}
+            {/* Modal Header */}
             <div className="modal-header">
               <div className="modal-title-section">
                 <h2 className="modal-title">{activeVideo.title}</h2>
@@ -788,7 +808,7 @@ if (loading) {
               </div>
             </div>
 
-            {/* Video Player - Made smaller */}
+            {/* Video Player */}
             <div className="video-container">
               {isVideoLoading && (
                 <div className="video-loading">
@@ -830,7 +850,7 @@ if (loading) {
               )}
             </div>
 
-            {/* Video Description - Made more prominent */}
+            {/* Video Description */}
             <div className="video-description">
               <div className="description-header">
                 <h4 className="description-title">
@@ -847,7 +867,7 @@ if (loading) {
                 </p>
               </div>
 
-              {/* Materials Section - Only show if there are materials */}
+              {/* Materials Section */}
               {activeVideo.fileUrls && activeVideo.fileUrls.length > 0 && (
                 <div className="materials-section">
                   <h5 className="materials-title">
@@ -1353,8 +1373,8 @@ if (loading) {
           border: none;
           outline: none;
           width: 90%;
-          max-width: 800px; /* Reduced from 1000px */
-          max-height: 85vh; /* Reduced from 100vh */
+          max-width: 800px;
+          max-height: 85vh;
           margin: 40px auto;
           overflow: visible;
         }
@@ -1380,7 +1400,7 @@ if (loading) {
           overflow: hidden;
           display: flex;
           flex-direction: column;
-          max-height: 85vh; /* Reduced from 100vh */
+          max-height: 85vh;
           height: auto;
           box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
           animation: modalSlideIn 0.3s ease;
@@ -1397,9 +1417,9 @@ if (loading) {
           }
         }
 
-        /* Modal Header - Made more compact */
+        /* Modal Header */
         .modal-header {
-          padding: 16px 24px; /* Reduced padding */
+          padding: 16px 24px;
           background: #f8f9fa;
           border-bottom: 1px solid #e9ecef;
           display: flex;
@@ -1412,14 +1432,14 @@ if (loading) {
         .modal-title-section {
           flex: 1;
           margin-right: 20px;
-          min-width: 0; /* Allows text truncation */
+          min-width: 0;
         }
 
         .modal-title {
-          font-size: 18px; /* Reduced from 20px */
+          font-size: 18px;
           font-weight: 700;
           color: #1a1a1a;
-          margin: 0 0 6px 0; /* Reduced margin */
+          margin: 0 0 6px 0;
           line-height: 1.4;
           display: -webkit-box;
           -webkit-line-clamp: 2;
@@ -1429,12 +1449,12 @@ if (loading) {
         }
 
         .modal-subtitle {
-          font-size: 13px; /* Reduced from 14px */
+          font-size: 13px;
           color: #666;
           margin: 0;
           display: flex;
           align-items: center;
-          gap: 8px; /* Reduced gap */
+          gap: 8px;
           flex-wrap: wrap;
         }
 
@@ -1451,23 +1471,23 @@ if (loading) {
 
         .modal-subtitle i {
           color: #007bff;
-          font-size: 12px; /* Reduced icon size */
+          font-size: 12px;
         }
 
         .modal-actions {
           display: flex;
-          gap: 8px; /* Reduced gap */
+          gap: 8px;
           align-items: center;
           flex-shrink: 0;
         }
 
         .modal-download-btn {
-          padding: 6px 12px; /* Reduced padding */
+          padding: 6px 12px;
           background: #28a745;
           color: white;
           border: none;
           border-radius: 6px;
-          font-size: 13px; /* Reduced font size */
+          font-size: 13px;
           font-weight: 600;
           cursor: pointer;
           display: flex;
@@ -1483,12 +1503,12 @@ if (loading) {
         }
 
         .modal-close-btn {
-          width: 32px; /* Reduced from 40px */
-          height: 32px; /* Reduced from 40px */
+          width: 32px;
+          height: 32px;
           background: none;
           border: none;
           color: #6c757d;
-          font-size: 16px; /* Reduced from 20px */
+          font-size: 16px;
           cursor: pointer;
           display: flex;
           align-items: center;
@@ -1503,11 +1523,11 @@ if (loading) {
           color: #495057;
         }
 
-        /* Video Container - Made smaller */
+        /* Video Container */
         .video-container {
           position: relative;
           background: #000;
-          padding-top: 45%; /* Reduced from 56.25% (16:9 to 20:9) */
+          padding-top: 45%;
           flex-shrink: 0;
         }
 
@@ -1574,12 +1594,12 @@ if (loading) {
           font-size: 14px;
         }
 
-        /* Video Description - Improved visibility */
+        /* Video Description */
         .video-description {
-          padding: 20px; /* Reduced from 24px */
+          padding: 20px;
           overflow-y: auto;
           flex: 1;
-          max-height: calc(85vh - 200px); /* Ensures it fits */
+          max-height: calc(85vh - 200px);
           background: #ffffff;
           border-top: 1px solid #f1f3f4;
         }
@@ -1592,7 +1612,7 @@ if (loading) {
         }
 
         .description-title {
-          font-size: 16px; /* Reduced from 18px */
+          font-size: 16px;
           font-weight: 600;
           color: #1a1a1a;
           margin: 0;
@@ -1796,7 +1816,7 @@ if (loading) {
           }
 
           .video-container {
-            padding-top: 56.25%; /* Back to 16:9 on mobile */
+            padding-top: 56.25%;
           }
 
           .action-buttons {
