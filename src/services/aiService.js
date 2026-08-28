@@ -13,363 +13,1008 @@ const WORKING_MODELS = [
   'openai/gpt-oss-120b',
 ];
 
-// ===================== EXAM DATA FETCHING =====================
+// ===================== HELPERS =====================
+
+const getGradePoints = (grade) => {
+  if (!grade) return 0;
+  const map = {
+    'A+': 5.0, 'A': 5.0, 'B+': 4.5, 'B': 4.0,
+    'C+': 3.5, 'C': 3.0, 'D+': 2.5, 'D': 2.0, 'F': 0.0
+  };
+  return map[String(grade).toUpperCase()] || 0;
+};
+
+const getGradeFromMarks = (marks) => {
+  if (marks === null || marks === undefined) return null;
+  const n = parseFloat(marks);
+  if (isNaN(n)) return null;
+  if (n >= 90) return 'A+';
+  if (n >= 80) return 'A';
+  if (n >= 75) return 'B+';
+  if (n >= 70) return 'B';
+  if (n >= 65) return 'C+';
+  if (n >= 60) return 'C';
+  if (n >= 55) return 'D+';
+  if (n >= 50) return 'D';
+  return 'F';
+};
+
+// ===================== CORE DATA (CGPA, FEES, ASSIGNMENTS, EXAMS, ATTENDANCE) =====================
+
+const fetchStudentCoreData = async (studentId, studentData) => {
+  try {
+    const { data: studentCourses } = await supabase
+      .from('student_courses')
+      .select('course_id, status, grade, grade_points, marks, credits')
+      .eq('student_id', studentId);
+
+    const activeCourseIds = (studentCourses || [])
+      .filter(c => c.status !== 'completed' && c.status !== 'passed')
+      .map(c => c.course_id)
+      .filter(Boolean);
+
+    // CGPA
+    let totalPoints = 0;
+    let totalCredits = 0;
+
+    const gradedCourses = (studentCourses || []).filter(
+      c => (c.grade || c.marks) && (c.status === 'completed' || c.status === 'passed' || c.grade)
+    );
+
+    if (gradedCourses.length > 0) {
+      const courseIds = gradedCourses.map(c => c.course_id);
+      const { data: courses } = await supabase
+        .from('courses')
+        .select('id, credits')
+        .in('id', courseIds);
+
+      const creditMap = {};
+      (courses || []).forEach(c => { creditMap[c.id] = c.credits || 3; });
+
+      gradedCourses.forEach(sc => {
+        const grade = sc.grade || getGradeFromMarks(sc.marks);
+        const gp = sc.grade_points || getGradePoints(grade);
+        const credits = creditMap[sc.course_id] || sc.credits || 3;
+        if (gp && credits) {
+          totalPoints += gp * credits;
+          totalCredits += credits;
+        }
+      });
+    }
+
+    if (totalCredits === 0) {
+      const { data: submissions } = await supabase
+        .from('exam_submissions')
+        .select('grade, grade_points, total_marks_obtained, exam_id')
+        .eq('student_id', studentId)
+        .eq('status', 'graded');
+
+      if (submissions && submissions.length > 0) {
+        const examIds = submissions.map(s => s.exam_id);
+        const { data: exams } = await supabase
+          .from('examinations')
+          .select('id, course_id')
+          .in('id', examIds);
+
+        const examCourseMap = {};
+        (exams || []).forEach(e => { examCourseMap[e.id] = e.course_id; });
+
+        const courseIds = (exams || []).map(e => e.course_id).filter(Boolean);
+        const { data: courses } = await supabase
+          .from('courses')
+          .select('id, credits')
+          .in('id', courseIds);
+
+        const creditMap = {};
+        (courses || []).forEach(c => { creditMap[c.id] = c.credits || 3; });
+
+        submissions.forEach(sub => {
+          const grade = sub.grade || getGradeFromMarks(sub.total_marks_obtained);
+          if (!grade) return;
+          const gp = sub.grade_points || getGradePoints(grade);
+          const courseId = examCourseMap[sub.exam_id];
+          const credits = creditMap[courseId] || 3;
+          if (gp && credits) {
+            totalPoints += gp * credits;
+            totalCredits += credits;
+          }
+        });
+      }
+    }
+
+    const cgpa = totalCredits > 0 ? parseFloat((totalPoints / totalCredits).toFixed(2)) : 0;
+
+    // Pending assignments
+    let pendingAssignments = 0;
+    if (activeCourseIds.length > 0) {
+      const { data: assignments } = await supabase
+        .from('assignments')
+        .select('id')
+        .in('course_id', activeCourseIds)
+        .eq('status', 'published')
+        .gt('due_date', new Date().toISOString());
+      pendingAssignments = (assignments || []).length;
+    }
+
+    // Upcoming exams
+    let upcomingExams = 0;
+    if (activeCourseIds.length > 0) {
+      const { data: exams } = await supabase
+        .from('examinations')
+        .select('id')
+        .in('course_id', activeCourseIds)
+        .in('status', ['scheduled', 'published', 'active'])
+        .gt('start_time', new Date().toISOString());
+      upcomingExams = (exams || []).length;
+    }
+
+    // Fees
+    const academicYear = studentData?.academic_year || studentData?.academicYear || null;
+    let feeQuery = supabase
+      .from('financial_records')
+      .select('amount, balance_due, status')
+      .eq('student_id', studentId);
+
+    if (academicYear) {
+      feeQuery = feeQuery.eq('academic_year', academicYear);
+    }
+
+    const { data: financial } = await feeQuery;
+
+    const totalPaid = (financial || [])
+      .filter(f => f.status === 'paid')
+      .reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
+
+    const totalPending = (financial || [])
+      .filter(f => f.status === 'partial' || f.status === 'pending')
+      .reduce((sum, f) => sum + (parseFloat(f.balance_due || f.amount) || 0), 0);
+
+    // Attendance (last ~4 months)
+    const semesterStart = new Date();
+    semesterStart.setMonth(semesterStart.getMonth() - 4);
+    semesterStart.setDate(1);
+
+    const { data: attendanceRecords } = await supabase
+      .from('attendance_records')
+      .select('status')
+      .eq('student_id', studentId)
+      .gte('date', semesterStart.toISOString().split('T')[0]);
+
+    const totalDays = (attendanceRecords || []).length;
+    const presentDays = (attendanceRecords || []).filter(r => r.status === 'present').length;
+    const attendanceRate = totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 0;
+
+    return {
+      cgpa,
+      pendingAssignments,
+      upcomingExams,
+      totalPaid,
+      totalPending,
+      attendanceRate,
+      activeCourseIds
+    };
+  } catch (err) {
+    console.error('Error fetching student core data:', err);
+    return {
+      cgpa: 0,
+      pendingAssignments: 0,
+      upcomingExams: 0,
+      totalPaid: 0,
+      totalPending: 0,
+      attendanceRate: 0,
+      activeCourseIds: []
+    };
+  }
+};
+
+// ===================== EXAM SCHEDULE =====================
 
 const fetchExaminationSchedule = async (studentId, studentData) => {
   try {
-    console.log('📊 Fetching examination schedule for student:', studentId);
-
-    // Get student's enrolled courses
     const { data: studentCourses, error: coursesError } = await supabase
       .from('student_courses')
       .select('course_id, status')
       .eq('student_id', studentId)
       .neq('status', 'completed');
 
-    if (coursesError) {
-      console.error('Error fetching student courses:', coursesError);
-      return null;
-    }
+    if (coursesError) return null;
 
-    const courseIds = studentCourses?.map(sc => sc.course_id) || [];
+    const courseIds = (studentCourses || []).map(sc => sc.course_id);
+    if (courseIds.length === 0) return [];
 
-    if (courseIds.length === 0) {
-      return [];
-    }
-
-    // Build query for examinations
     let query = supabase
       .from('examinations')
       .select(`
         *,
-        courses (
-          id,
-          course_code,
-          course_name,
-          credits
-        )
+        courses (id, course_code, course_name, credits)
       `)
       .in('course_id', courseIds)
       .in('status', ['scheduled', 'published', 'active', 'completed'])
       .order('start_time', { ascending: true });
 
-    // Apply cohort targeting
-    const cleanAY = (studentData?.academic_year || '2025/2029').trim().replace(/\s/g, '');
-    
+    const cleanAY = (studentData?.academic_year || studentData?.academicYear || '').trim().replace(/\s/g, '');
     if (cleanAY || studentData?.year_of_study || studentData?.semester || studentData?.program_id) {
       const orConditions = [];
-      
       if (cleanAY) {
-        orConditions.push(`target_academic_year.eq.${cleanAY}`);
-        orConditions.push(`target_academic_year.is.null`);
+        orConditions.push('target_academic_year.eq.' + cleanAY);
+        orConditions.push('target_academic_year.is.null');
       }
-      
       if (studentData?.year_of_study != null) {
-        orConditions.push(`target_year_of_study.eq.${studentData.year_of_study}`);
-        orConditions.push(`target_year_of_study.is.null`);
+        orConditions.push('target_year_of_study.eq.' + studentData.year_of_study);
+        orConditions.push('target_year_of_study.is.null');
       }
-      
       if (studentData?.semester != null) {
-        orConditions.push(`target_semester.eq.${studentData.semester}`);
-        orConditions.push(`target_semester.is.null`);
+        orConditions.push('target_semester.eq.' + studentData.semester);
+        orConditions.push('target_semester.is.null');
       }
-      
       if (studentData?.program_id) {
-        orConditions.push(`target_program_id.eq.${studentData.program_id}`);
-        orConditions.push(`target_program_id.is.null`);
+        orConditions.push('target_program_id.eq.' + studentData.program_id);
+        orConditions.push('target_program_id.is.null');
       }
-      
       if (orConditions.length > 0) {
         query = query.or(orConditions.join(','));
       }
     }
 
     const { data: examsData, error: examsError } = await query;
-    
-    if (examsError) {
-      console.error('Error fetching exams:', examsError);
-      return null;
-    }
+    if (examsError) return null;
 
-    // If no exams found, try without cohort filtering
-    if (!examsData || examsData.length === 0) {
-      const { data: allExams, error: allExamsError } = await supabase
-        .from('examinations')
-        .select(`
-          *,
-          courses (
-            id,
-            course_code,
-            course_name,
-            credits
-          )
-        `)
-        .in('course_id', courseIds)
-        .in('status', ['scheduled', 'published', 'active', 'completed'])
-        .order('start_time', { ascending: true });
-
-      if (!allExamsError && allExams && allExams.length > 0) {
-        examsData = allExams;
-      }
-    }
-
-    if (!examsData || examsData.length === 0) {
-      return [];
-    }
-
-    // Fetch submissions to check status
-    const { data: submissionsData, error: submissionsError } = await supabase
+    const { data: submissionsData } = await supabase
       .from('exam_submissions')
       .select('*')
       .eq('student_id', studentId);
 
-    if (submissionsError) {
-      console.warn('Could not fetch submissions:', submissionsError);
-    }
+    const now = new Date();
 
-    // Process exams with status
-    const processedExams = examsData.map(exam => {
-      const studentSubmission = submissionsData?.find(sub => sub.exam_id === exam.id);
-      const now = new Date();
+    return (examsData || []).map(exam => {
+      const sub = (submissionsData || []).find(s => s.exam_id === exam.id);
       const startTime = new Date(exam.start_time);
       const endTime = new Date(exam.end_time);
 
       const isActiveByTime = now >= startTime && now <= endTime;
       const isUpcoming = now < startTime;
       const isEndedByTime = now > endTime;
-      const isOnlineExam = exam.exam_type === 'online' || exam.exam_type === 'written_online';
-      
-      const hasSubmission = !!studentSubmission;
-      
+
       let isSubmitted = false;
       let isGraded = false;
-      
-      if (studentSubmission) {
-        const status = studentSubmission.status?.toLowerCase();
-        isSubmitted = status === 'submitted' || studentSubmission.submitted_at !== null;
-        isGraded = status === 'graded' || studentSubmission.graded_at !== null;
+      if (sub) {
+        const status = (sub.status || '').toLowerCase();
+        isSubmitted = status === 'submitted' || !!sub.submitted_at;
+        isGraded = status === 'graded' || !!sub.graded_at;
       }
 
-      const isStartedButNotSubmitted = studentSubmission && 
-        studentSubmission.status === 'started' && 
-        !isSubmitted && 
-        !isGraded;
-      
+      const isStartedButNotSubmitted = sub && sub.status === 'started' && !isSubmitted && !isGraded;
       const canResume = isStartedButNotSubmitted && !isEndedByTime;
-      const canStart = !hasSubmission && isActiveByTime && isOnlineExam;
-      
+
       let finalStatus = 'upcoming';
-      
-      if (isGraded) {
-        finalStatus = 'graded';
-      } else if (isSubmitted) {
-        finalStatus = 'submitted';
-      } else if (canResume) {
-        finalStatus = 'resume';
-      } else if (isActiveByTime) {
-        finalStatus = 'active';
-      } else if (isEndedByTime) {
-        finalStatus = 'ended';
-      }
+      if (isGraded) finalStatus = 'graded';
+      else if (isSubmitted) finalStatus = 'submitted';
+      else if (canResume) finalStatus = 'resume';
+      else if (isActiveByTime) finalStatus = 'active';
+      else if (isEndedByTime) finalStatus = 'ended';
 
       return {
         id: exam.id,
-        title: exam.title === 'NA' ? `${exam.courses?.course_code || 'Exam'} Final` : exam.title,
-        description: exam.description === 'NA' ? 'Final examination for the course' : exam.description,
-        courseId: exam.course_id,
+        title: exam.title === 'NA' ? ((exam.courses?.course_code || 'Exam') + ' Final') : exam.title,
         courseCode: exam.courses?.course_code || 'N/A',
         courseName: exam.courses?.course_name || 'N/A',
-        courseCredits: exam.courses?.credits || 0,
         examType: exam.exam_type,
         startTime: exam.start_time,
         endTime: exam.end_time,
         duration: exam.duration_minutes,
-        totalMarks: exam.total_marks,
-        passingMarks: exam.passing_marks,
         location: exam.location || exam.venue || 'TBA',
         supervisor: exam.supervisor,
-        instructions: exam.instructions === 'NA' ? 'Complete all questions within the given time frame.' : exam.instructions,
         status: finalStatus,
         submitted: isSubmitted,
         graded: isGraded,
         isActive: finalStatus === 'active' || finalStatus === 'resume',
         isUpcoming: isUpcoming,
         isEnded: isEndedByTime,
-        canStart: canStart,
-        canResume: canResume,
-        isOnline: isOnlineExam
+        canResume: canResume
       };
     });
-
-    return processedExams;
-  } catch (error) {
-    console.error('Error fetching examination schedule:', error);
+  } catch (err) {
+    console.error('Error fetching exam schedule:', err);
     return null;
   }
 };
 
-// ===================== QUERY DETECTION =====================
-
-const isExamRelatedQuery = (query) => {
-  const examKeywords = [
-    'exam', 'examination', 'exams', 'examinations',
-    'schedule', 'timetable', 'time table', 'time-table',
-    'when', 'what time', 'where', 'location', 'venue',
-    'upcoming', 'next', 'active', 'current', 'today',
-    'submitted', 'graded', 'result', 'results',
-    'paper', 'papers', 'question', 'questions',
-    'online', 'physical', 'written',
-    'duration', 'marks', 'passing',
-    'supervisor', 'invigilator', 'proctor',
-    'my exam', 'my exams', 'exam schedule'
-  ];
-
-  const lowerQuery = query.toLowerCase();
-  return examKeywords.some(keyword => lowerQuery.includes(keyword));
-};
-
-// ===================== CONTEXT BUILDING =====================
-
-const buildCompleteContext = (studentStats, studentData) => {
-  if (!studentStats || !studentData) return '';
-  
-  const firstName = studentData.full_name?.split(' ')[0] || 'Student';
-  
-  return `STUDENT: ${firstName} (${studentData.full_name})
-Program: ${studentData.program}
-Year: ${studentData.year_of_study}, Semester: ${studentData.semester}
-
-ACADEMIC:
-- Exam CGPA: ${studentStats.gpa?.examBasedCGPA?.toFixed(2) || '0.00'}
-- Graded Exams: ${studentStats.gpa?.totalGradedExams || 0}
-
-FINANCE:
-- Total Paid: $${studentStats.finance?.totalPaid || 0}
-- Total Pending: $${studentStats.finance?.totalPending || 0}
-${studentStats.finance?.tuition?.semester1?.map(f => `  • Sem 1 Tuition: $${f.amount} - ${f.status.toUpperCase()}`).join('\n') || ''}
-${studentStats.finance?.tuition?.semester2?.map(f => `  • Sem 2 Tuition: $${f.amount} - ${f.status.toUpperCase()}`).join('\n') || ''}
-
-ASSIGNMENTS: ${studentStats.assignments?.pending || 0} pending, ${studentStats.assignments?.overdue || 0} overdue
-EXAMS: ${studentStats.exams?.upcoming?.length || 0} upcoming
-ATTENDANCE: ${studentStats.attendance?.rate || 0}%`;
-};
-
-// ===================== FORMAT EXAM SCHEDULE =====================
-
 const formatExamScheduleForContext = (exams, studentName) => {
   if (!exams || exams.length === 0) {
-    return `No examinations scheduled for ${studentName}.`;
+    return 'No examinations scheduled for ' + studentName + '.';
   }
 
-  const upcomingExams = exams.filter(exam => exam.isUpcoming || exam.status === 'upcoming');
-  const activeExams = exams.filter(exam => exam.isActive || exam.status === 'active' || exam.status === 'resume');
-  const submittedExams = exams.filter(exam => exam.submitted && !exam.graded);
-  const gradedExams = exams.filter(exam => exam.graded);
-  const endedExams = exams.filter(exam => exam.isEnded && !exam.submitted && !exam.graded);
+  const upcomingExams = exams.filter(e => e.isUpcoming || e.status === 'upcoming');
+  const activeExams = exams.filter(e => e.isActive || e.status === 'active' || e.status === 'resume');
+  const submittedExams = exams.filter(e => e.submitted && !e.graded);
+  const gradedExams = exams.filter(e => e.graded);
+  const endedExams = exams.filter(e => e.isEnded && !e.submitted && !e.graded);
 
-  let context = `EXAMINATION SCHEDULE FOR ${studentName.toUpperCase()}:\n\n`;
+  let context = 'EXAMINATION SCHEDULE FOR ' + studentName.toUpperCase() + ':\n\n';
 
   if (upcomingExams.length > 0) {
-    context += `📅 UPCOMING EXAMS (${upcomingExams.length}):\n`;
+    context += 'UPCOMING EXAMS (' + upcomingExams.length + '):\n';
     upcomingExams.forEach((exam, index) => {
       const date = new Date(exam.startTime);
       const formattedDate = date.toLocaleDateString('en-US', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+        hour: '2-digit', minute: '2-digit', hour12: true
       });
-      context += `  ${index + 1}. ${exam.courseCode} - ${exam.title}\n`;
-      context += `     Date: ${formattedDate}\n`;
-      context += `     Location: ${exam.location}\n`;
-      context += `     Duration: ${exam.duration} minutes\n`;
-      context += `     Type: ${exam.examType}\n`;
-      if (exam.supervisor) {
-        context += `     Supervisor: ${exam.supervisor}\n`;
-      }
-      context += `     Marks: ${exam.totalMarks}`;
-      if (exam.passingMarks) {
-        context += ` (Passing: ${exam.passingMarks})`;
-      }
-      context += `\n\n`;
+      context += '  ' + (index + 1) + '. ' + exam.courseCode + ' - ' + exam.title + '\n';
+      context += '     Date: ' + formattedDate + '\n';
+      context += '     Location: ' + exam.location + '\n';
+      context += '     Duration: ' + exam.duration + ' minutes\n';
+      context += '     Type: ' + exam.examType + '\n';
+      if (exam.supervisor) context += '     Supervisor: ' + exam.supervisor + '\n';
     });
+    context += '\n';
   }
 
   if (activeExams.length > 0) {
-    context += `🟢 ACTIVE EXAMS (${activeExams.length}):\n`;
+    context += 'ACTIVE / RESUME EXAMS (' + activeExams.length + '):\n';
     activeExams.forEach((exam, index) => {
-      const endDate = new Date(exam.endTime);
-      const formattedEnd = endDate.toLocaleDateString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true
-      });
-      context += `  ${index + 1}. ${exam.courseCode} - ${exam.title}\n`;
-      context += `     Location: ${exam.location}\n`;
-      context += `     Ends at: ${formattedEnd}\n`;
-      context += `     Duration: ${exam.duration} minutes\n`;
-      context += `     Type: ${exam.examType}\n`;
-      context += `     Status: ${exam.status === 'resume' ? 'CAN RESUME' : 'CAN START'}\n\n`;
+      context += '  ' + (index + 1) + '. ' + exam.courseCode + ' - ' + exam.title;
+      if (exam.status === 'resume') context += ' (Resume available)';
+      context += '\n';
     });
+    context += '\n';
   }
 
   if (submittedExams.length > 0) {
-    context += `📤 SUBMITTED EXAMS (${submittedExams.length}):\n`;
+    context += 'SUBMITTED (awaiting grade) (' + submittedExams.length + '):\n';
     submittedExams.forEach((exam, index) => {
-      context += `  ${index + 1}. ${exam.courseCode} - ${exam.title} (Awaiting Grading)\n`;
+      context += '  ' + (index + 1) + '. ' + exam.courseCode + ' - ' + exam.title + '\n';
     });
-    context += `\n`;
+    context += '\n';
   }
 
   if (gradedExams.length > 0) {
-    context += `✅ GRADED EXAMS (${gradedExams.length}):\n`;
+    context += 'GRADED EXAMS (' + gradedExams.length + '):\n';
     gradedExams.forEach((exam, index) => {
-      context += `  ${index + 1}. ${exam.courseCode} - ${exam.title} (Graded)\n`;
+      context += '  ' + (index + 1) + '. ' + exam.courseCode + ' - ' + exam.title + ' (Graded)\n';
     });
-    context += `\n`;
+    context += '\n';
   }
 
   if (endedExams.length > 0) {
-    context += `❌ ENDED EXAMS (${endedExams.length}):\n`;
+    context += 'ENDED EXAMS (' + endedExams.length + '):\n';
     endedExams.forEach((exam, index) => {
-      context += `  ${index + 1}. ${exam.courseCode} - ${exam.title} (Ended on ${new Date(exam.endTime).toLocaleDateString()})\n`;
+      context += '  ' + (index + 1) + '. ' + exam.courseCode + ' - ' + exam.title +
+        ' (Ended on ' + new Date(exam.endTime).toLocaleDateString() + ')\n';
     });
-    context += `\n`;
+    context += '\n';
   }
 
-  context += `📊 SUMMARY:\n`;
-  context += `  • Total Exams: ${exams.length}\n`;
-  context += `  • Upcoming: ${upcomingExams.length}\n`;
-  context += `  • Active: ${activeExams.length}\n`;
-  context += `  • Submitted: ${submittedExams.length}\n`;
-  context += `  • Graded: ${gradedExams.length}\n`;
-  context += `  • Ended: ${endedExams.length}\n`;
+  context += 'SUMMARY:\n';
+  context += '  - Total Exams: ' + exams.length + '\n';
+  context += '  - Upcoming: ' + upcomingExams.length + '\n';
+  context += '  - Active: ' + activeExams.length + '\n';
+  context += '  - Submitted: ' + submittedExams.length + '\n';
+  context += '  - Graded: ' + gradedExams.length + '\n';
+  context += '  - Ended: ' + endedExams.length + '\n';
 
   if (upcomingExams.length > 0) {
     const nextExam = upcomingExams[0];
     const nextDate = new Date(nextExam.startTime);
     const formattedNext = nextDate.toLocaleDateString('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+      hour: '2-digit', minute: '2-digit', hour12: true
     });
-    context += `\n🎯 NEXT EXAM:\n`;
-    context += `  • ${nextExam.courseCode} - ${nextExam.title}\n`;
-    context += `  • Date: ${formattedNext}\n`;
-    context += `  • Location: ${nextExam.location}\n`;
+    context += '\nNEXT EXAM:\n';
+    context += '  - ' + nextExam.courseCode + ' - ' + nextExam.title + '\n';
+    context += '  - Date: ' + formattedNext + '\n';
+    context += '  - Location: ' + nextExam.location + '\n';
   }
 
   return context;
 };
 
-// ===================== GENERATE AI RESPONSE =====================
+// ===================== NOTES & TUTORIALS =====================
+
+const isNotesOrTutorialsRelatedQuery = (query) => {
+  const q = (query || '').toLowerCase();
+  const keywords = [
+    'note', 'notes', 'tutorial', 'tutorials', 'lecture note', 'lecture notes',
+    'study material', 'study materials', 'handout', 'handouts', 'slide', 'slides',
+    'pdf', 'video tutorial', 'video tutorials', 'watch tutorial', 'download note',
+    'download notes', 'what notes', 'my notes', 'available notes', 'course notes'
+  ];
+  return keywords.some(k => q.includes(k));
+};
+
+const listAllFilesInBucket = async (bucketName) => {
+  const allFiles = [];
+  const scanFolder = async (path) => {
+    const { data, error } = await supabase.storage.from(bucketName).list(path, {
+      limit: 1000,
+      offset: 0,
+      sortBy: { column: 'name', order: 'asc' }
+    });
+    if (error || !data) return;
+
+    for (const item of data) {
+      const fullPath = path ? path + '/' + item.name : item.name;
+      if (item.id === null) {
+        await scanFolder(fullPath);
+      } else {
+        allFiles.push({
+          name: item.name,
+          path: fullPath,
+          size: item.metadata?.size,
+          updated: item.updated_at || item.created_at
+        });
+      }
+    }
+  };
+  await scanFolder('');
+  return allFiles;
+};
+
+const fetchStudentNotes = async (studentData) => {
+  try {
+    if (!studentData) return [];
+
+    const programCode = (studentData.program_code || studentData.programCode || '').toUpperCase().trim();
+    const academicYear = (studentData.academic_year || studentData.academicYear || '').trim();
+    const yearOfStudy = studentData.year_of_study || studentData.yearOfStudy;
+    const semester = studentData.semester;
+
+    if (!programCode) return [];
+
+    let startYear = '';
+    let endYear = '';
+    if (academicYear) {
+      const parts = academicYear.replace(/\s/g, '').split(/[/ -]/);
+      if (parts.length >= 2) {
+        startYear = parts[0];
+        endYear = parts[1];
+      }
+    }
+
+    const cohortString = 'YEAR' + (yearOfStudy || '') + '_SEM' + (semester || '');
+    const normProgram = programCode.replace(/[^A-Z0-9]/g, '');
+
+    const { data: studentCourses } = await supabase
+      .from('student_courses')
+      .select('course_id, status, courses(course_code)')
+      .eq('student_id', studentData.id);
+
+    const completedCourseCodes = new Set();
+    (studentCourses || []).forEach(sc => {
+      if (sc.status === 'completed' || sc.status === 'passed') {
+        const code = (sc.courses?.course_code || '').toUpperCase().trim();
+        if (code) completedCourseCodes.add(code);
+      }
+    });
+
+    const allFiles = await listAllFilesInBucket('Notes');
+    const matching = allFiles.filter(file => {
+      const upper = file.path.toUpperCase();
+      const hasProgram = upper.includes(normProgram) || upper.includes(programCode);
+      const hasCohort = upper.includes(cohortString.toUpperCase());
+      const hasStart = startYear ? upper.includes(startYear) : true;
+      const hasEnd = endYear ? upper.includes(endYear) : true;
+      return hasProgram && (hasCohort || (hasStart && hasEnd));
+    });
+
+    const notes = [];
+    for (const file of matching) {
+      const parts = file.path.split('/');
+      let rawCourseCode = '';
+      for (let i = parts.length - 2; i >= 0; i--) {
+        const p = parts[i].toUpperCase();
+        if (p && !p.includes('YEAR') && !p.includes('SEM') && p !== normProgram && p !== programCode) {
+          rawCourseCode = p.replace(/[^A-Z0-9]/g, '');
+          break;
+        }
+      }
+      if (rawCourseCode && completedCourseCodes.has(rawCourseCode)) continue;
+
+      const title = file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
+      const ext = (file.name.split('.').pop() || '').toLowerCase();
+
+      notes.push({
+        title: title,
+        courseCode: rawCourseCode || 'General',
+        fileType: ext,
+        path: file.path
+      });
+    }
+    return notes;
+  } catch (err) {
+    console.error('Error fetching notes:', err);
+    return [];
+  }
+};
+
+const fetchStudentTutorials = async (studentData) => {
+  try {
+    if (!studentData) return [];
+
+    const programCode = (studentData.program_code || studentData.programCode || '').toUpperCase().trim();
+    const academicYear = (studentData.academic_year || studentData.academicYear || '').trim();
+    const yearOfStudy = studentData.year_of_study || studentData.yearOfStudy;
+    const semester = studentData.semester;
+
+    if (!programCode) return [];
+
+    let startYear = '';
+    let endYear = '';
+    if (academicYear) {
+      const parts = academicYear.replace(/\s/g, '').split(/[/ -]/);
+      if (parts.length >= 2) {
+        startYear = parts[0];
+        endYear = parts[1];
+      }
+    }
+
+    const cohortString = 'YEAR' + (yearOfStudy || '') + '_SEM' + (semester || '');
+    const normProgram = programCode.replace(/[^A-Z0-9]/g, '');
+
+    const { data: studentCourses } = await supabase
+      .from('student_courses')
+      .select('course_id, status, courses(course_code)')
+      .eq('student_id', studentData.id);
+
+    const completedCourseCodes = new Set();
+    (studentCourses || []).forEach(sc => {
+      if (sc.status === 'completed' || sc.status === 'passed') {
+        const code = (sc.courses?.course_code || '').toUpperCase().trim();
+        if (code) completedCourseCodes.add(code);
+      }
+    });
+
+    const allFiles = await listAllFilesInBucket('Tutorials');
+    const matching = allFiles.filter(file => {
+      const upper = file.path.toUpperCase();
+      const hasProgram = upper.includes(normProgram) || upper.includes(programCode);
+      const hasCohort = upper.includes(cohortString.toUpperCase());
+      const hasStart = startYear ? upper.includes(startYear) : true;
+      const hasEnd = endYear ? upper.includes(endYear) : true;
+      return hasProgram && (hasCohort || (hasStart && hasEnd));
+    });
+
+    const tutorials = [];
+    for (const file of matching) {
+      const parts = file.path.split('/');
+      let rawCourseCode = '';
+      for (let i = parts.length - 2; i >= 0; i--) {
+        const p = parts[i].toUpperCase();
+        if (p && !p.includes('YEAR') && !p.includes('SEM') && p !== normProgram && p !== programCode) {
+          rawCourseCode = p.replace(/[^A-Z0-9]/g, '');
+          break;
+        }
+      }
+      if (rawCourseCode && completedCourseCodes.has(rawCourseCode)) continue;
+
+      const title = file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
+      tutorials.push({
+        title: title,
+        courseCode: rawCourseCode || 'General',
+        path: file.path
+      });
+    }
+    return tutorials;
+  } catch (err) {
+    console.error('Error fetching tutorials:', err);
+    return [];
+  }
+};
+
+const formatNotesForContext = (notes, studentName) => {
+  if (!notes || notes.length === 0) {
+    return 'No notes available for ' + studentName + "'s active courses. (Notes for completed courses are hidden.)";
+  }
+
+  const byCourse = {};
+  notes.forEach(n => {
+    const c = n.courseCode || 'General';
+    if (!byCourse[c]) byCourse[c] = [];
+    byCourse[c].push(n);
+  });
+
+  let context = 'NOTES AVAILABLE FOR ' + studentName.toUpperCase() + ':\n\n';
+  Object.keys(byCourse).sort().forEach(code => {
+    const list = byCourse[code];
+    context += code + ' (' + list.length + '):\n';
+    list.slice(0, 10).forEach(n => {
+      context += '  - ' + n.title;
+      if (n.fileType) context += ' [' + n.fileType.toUpperCase() + ']';
+      context += '\n';
+    });
+    if (list.length > 10) {
+      context += '  - ...and ' + (list.length - 10) + ' more\n';
+    }
+    context += '\n';
+  });
+  context += 'SUMMARY: ' + notes.length + ' notes across ' + Object.keys(byCourse).length + ' course(s).\n';
+  context += 'Students can view and download these from the Notes page.';
+  return context;
+};
+
+const formatTutorialsForContext = (tutorials, studentName) => {
+  if (!tutorials || tutorials.length === 0) {
+    return 'No video tutorials available for ' + studentName + "'s active courses. (Tutorials for completed courses are hidden.)";
+  }
+
+  const byCourse = {};
+  tutorials.forEach(t => {
+    const c = t.courseCode || 'General';
+    if (!byCourse[c]) byCourse[c] = [];
+    byCourse[c].push(t);
+  });
+
+  let context = 'VIDEO TUTORIALS AVAILABLE FOR ' + studentName.toUpperCase() + ':\n\n';
+  Object.keys(byCourse).sort().forEach(code => {
+    const list = byCourse[code];
+    context += code + ' (' + list.length + '):\n';
+    list.slice(0, 10).forEach(t => {
+      context += '  - ' + t.title + '\n';
+    });
+    if (list.length > 10) {
+      context += '  - ...and ' + (list.length - 10) + ' more\n';
+    }
+    context += '\n';
+  });
+  context += 'SUMMARY: ' + tutorials.length + ' tutorials across ' + Object.keys(byCourse).length + ' course(s).\n';
+  context += 'Students can watch and download these from the Tutorials page.';
+  return context;
+};
+
+// ===================== TIMETABLE =====================
+
+const isTimetableRelatedQuery = (query) => {
+  const q = (query || '').toLowerCase();
+  const keywords = [
+    'timetable', 'time table', 'schedule', 'class schedule', 'lecture schedule',
+    'my classes', 'what class', 'when is my class', 'when do i have',
+    'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday',
+    'today lecture', 'tomorrow lecture', 'upcoming lecture', 'upcoming lectures',
+    'what lectures', 'class time', 'lecture time', 'room number', 'which room'
+  ];
+  return keywords.some(k => q.includes(k));
+};
+
+const fetchStudentTimetable = async (studentData) => {
+  try {
+    if (!studentData) return { slots: [], upcoming: [] };
+
+    const programId = studentData.program_id;
+    const academicYear = studentData.academic_year || studentData.academicYear;
+    const semester = studentData.semester;
+    const yearOfStudy = studentData.year_of_study || studentData.yearOfStudy;
+
+    if (!programId || !academicYear || semester == null || yearOfStudy == null) {
+      return { slots: [], upcoming: [] };
+    }
+
+    const { data: programTimetable, error: ptError } = await supabase
+      .from('program_timetables')
+      .select('id')
+      .eq('program_id', programId)
+      .eq('academic_year', academicYear)
+      .eq('semester', semester)
+      .eq('year_of_study', yearOfStudy)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (ptError || !programTimetable) {
+      return { slots: [], upcoming: [] };
+    }
+
+    const { data: timetableSlots, error: slotsError } = await supabase
+      .from('program_timetable_slots')
+      .select(`
+        course_code,
+        course_name,
+        lecturer_id,
+        day_of_week,
+        start_time,
+        end_time,
+        room_number,
+        building,
+        slot_type,
+        lecturers (full_name)
+      `)
+      .eq('program_timetable_id', programTimetable.id)
+      .eq('is_active', true)
+      .order('day_of_week', { ascending: true })
+      .order('start_time', { ascending: true });
+
+    if (slotsError || !timetableSlots || timetableSlots.length === 0) {
+      return { slots: [], upcoming: [] };
+    }
+
+    const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    const slots = timetableSlots.map(slot => ({
+      courseCode: slot.course_code || 'N/A',
+      courseName: slot.course_name || 'Unknown Course',
+      lecturer: slot.lecturers?.full_name || 'Not Assigned',
+      dayOfWeek: slot.day_of_week,
+      dayName: dayNames[slot.day_of_week] || 'Unknown',
+      startTime: slot.start_time,
+      endTime: slot.end_time,
+      room: slot.room_number
+        ? (slot.room_number + (slot.building ? ', ' + slot.building : ''))
+        : 'TBA',
+      slotType: slot.slot_type === 'lab' ? 'LAB' : 'Lecture'
+    }));
+
+    const today = new Date();
+    const nextWeek = new Date(today);
+    nextWeek.setDate(today.getDate() + 7);
+    const todayDayIndex = today.getDay() === 0 ? 6 : today.getDay() - 1;
+
+    const upcoming = [];
+    slots.forEach(slot => {
+      let daysToAdd = slot.dayOfWeek - todayDayIndex;
+      if (daysToAdd < 0) daysToAdd += 7;
+
+      const lectureDate = new Date(today);
+      lectureDate.setDate(today.getDate() + daysToAdd);
+
+      if (lectureDate <= nextWeek) {
+        upcoming.push({
+          ...slot,
+          date: lectureDate.toISOString().split('T')[0],
+          isToday: daysToAdd === 0,
+          isTomorrow: daysToAdd === 1
+        });
+      }
+    });
+
+    upcoming.sort((a, b) => {
+      if (a.date === b.date) return (a.startTime || '').localeCompare(b.startTime || '');
+      return a.date.localeCompare(b.date);
+    });
+
+    return { slots: slots, upcoming: upcoming };
+  } catch (err) {
+    console.error('Error fetching timetable for AI:', err);
+    return { slots: [], upcoming: [] };
+  }
+};
+
+const formatTimetableForContext = (timetable, studentName) => {
+  const slots = timetable?.slots || [];
+  const upcoming = timetable?.upcoming || [];
+
+  if (slots.length === 0) {
+    return 'No timetable available for ' + studentName + ' for the current semester.';
+  }
+
+  let context = 'TIMETABLE FOR ' + studentName.toUpperCase() + ':\n\n';
+
+  const byDay = {};
+  slots.forEach(s => {
+    const day = s.dayName || 'Unknown';
+    if (!byDay[day]) byDay[day] = [];
+    byDay[day].push(s);
+  });
+
+  const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  dayOrder.forEach(day => {
+    if (!byDay[day] || byDay[day].length === 0) return;
+    context += day.toUpperCase() + ':\n';
+    byDay[day]
+      .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''))
+      .forEach(s => {
+        context += '  - ' + s.startTime + '-' + s.endTime + ' | ' + s.courseCode +
+          ' (' + s.courseName + ') | ' + s.room + ' | ' + s.lecturer;
+        if (s.slotType === 'LAB') context += ' [LAB]';
+        context += '\n';
+      });
+    context += '\n';
+  });
+
+  if (upcoming.length > 0) {
+    context += 'UPCOMING LECTURES (next 7 days):\n';
+    upcoming.forEach((u, i) => {
+      const label = u.isToday ? 'Today' : (u.isTomorrow ? 'Tomorrow' : u.dayName);
+      context += '  ' + (i + 1) + '. ' + label + ' ' + u.startTime + '-' + u.endTime +
+        ' | ' + u.courseCode + ' | ' + u.room + ' | ' + u.lecturer + '\n';
+    });
+    context += '\n';
+  }
+
+  context += 'SUMMARY: ' + slots.length + ' weekly slots, ' + upcoming.length +
+    ' lectures in the next 7 days.\n';
+  context += 'Students can view the full timetable on the Timetable page.';
+
+  return context;
+};
+
+// ===================== QUERY DETECTION =====================
+
+const isExamRelatedQuery = (query) => {
+  const q = (query || '').toLowerCase();
+  const keywords = [
+    'exam', 'exams', 'examination', 'examinations', 'test', 'tests',
+    'when is my exam', 'next exam', 'upcoming exam',
+    'exam timetable', 'exam date', 'exam time', 'final exam'
+  ];
+  return keywords.some(k => q.includes(k));
+};
+
+// ===================== CONTEXT BUILDER =====================
+
+const buildCompleteContext = (studentStats, studentData, coreData) => {
+  const name = studentData?.full_name || studentData?.fullName || 'Student';
+
+  const cgpa = coreData?.cgpa ?? studentStats?.gpa?.examBasedCGPA ?? studentStats?.gpa?.cgpa ?? 0;
+  const paid = coreData?.totalPaid ?? studentStats?.finance?.totalPaid ?? 0;
+  const pending = coreData?.totalPending ?? studentStats?.finance?.totalPending ?? 0;
+  const pendingAssign = coreData?.pendingAssignments ?? studentStats?.assignments?.pending ?? 0;
+  const upcoming = coreData?.upcomingExams ?? (studentStats?.exams?.upcoming?.length || studentStats?.exams?.upcomingCount || 0);
+  const attendance = coreData?.attendanceRate ?? studentStats?.attendance?.rate ?? 0;
+
+  let context = 'STUDENT INFORMATION:\n';
+  context += 'Name: ' + name + '\n';
+  context += 'Student ID: ' + (studentData?.student_id || studentData?.studentId || 'N/A') + '\n';
+  context += 'Program: ' + (studentData?.program || 'N/A') + '\n';
+  context += 'Year: ' + (studentData?.year_of_study || studentData?.yearOfStudy || 'N/A') + '\n';
+  context += 'Semester: ' + (studentData?.semester || 'N/A') + '\n';
+  context += 'Academic Year: ' + (studentData?.academic_year || studentData?.academicYear || 'N/A') + '\n\n';
+
+  context += 'ACADEMIC:\n';
+  context += '- CGPA: ' + cgpa + '\n';
+  context += '- Attendance Rate: ' + attendance + '%\n\n';
+
+  context += 'FINANCE:\n';
+  context += '- Total Paid: $' + Number(paid).toLocaleString() + '\n';
+  context += '- Total Pending / Balance: $' + Number(pending).toLocaleString() + '\n\n';
+
+  context += 'ASSIGNMENTS: ' + pendingAssign + ' pending\n';
+  context += 'EXAMS: ' + upcoming + ' upcoming\n';
+
+  return context;
+};
+
+// ===================== FALLBACKS =====================
+
+const fallbackExamResponse = (exams, studentName) => {
+  if (!exams || exams.length === 0) {
+    return 'You currently have no examinations scheduled, ' + (studentName || 'student') + '.';
+  }
+  const upcoming = exams.filter(e => e.isUpcoming || e.status === 'upcoming');
+  if (upcoming.length === 0) {
+    return 'You have no upcoming exams right now. Check the Examinations page for submitted or graded ones.';
+  }
+  const next = upcoming[0];
+  const date = new Date(next.startTime).toLocaleDateString('en-US', {
+    weekday: 'long', month: 'long', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: true
+  });
+  return 'Your next exam is ' + next.courseCode + ' - ' + next.title + ' on ' + date +
+    ' at ' + (next.location || 'TBA') + '. You have ' + upcoming.length + ' upcoming exam(s) in total.';
+};
+
+const fallbackNotesTutorialsResponse = (notes, tutorials, studentName, query) => {
+  const q = (query || '').toLowerCase();
+  const wantsNotes = q.includes('note');
+  const wantsTutorials = q.includes('tutorial') || q.includes('video');
+  const firstName = (studentName || 'Student').split(' ')[0];
+  const parts = [];
+
+  if (wantsNotes || (!wantsNotes && !wantsTutorials)) {
+    if (!notes || notes.length === 0) {
+      parts.push('You have no notes available for your active courses, ' + firstName + '.');
+    } else {
+      const byCourse = {};
+      notes.forEach(n => {
+        const c = n.courseCode || 'General';
+        if (!byCourse[c]) byCourse[c] = [];
+        byCourse[c].push(n.title);
+      });
+      let text = 'You have ' + notes.length + ' note(s):\n';
+      Object.keys(byCourse).sort().forEach(code => {
+        text += '\n' + code + ':\n';
+        byCourse[code].slice(0, 8).forEach(title => {
+          text += '- ' + title + '\n';
+        });
+        if (byCourse[code].length > 8) {
+          text += '- ...and ' + (byCourse[code].length - 8) + ' more\n';
+        }
+      });
+      text += '\nView and download them from the Notes page.';
+      parts.push(text);
+    }
+  }
+
+  if (wantsTutorials || (!wantsNotes && !wantsTutorials)) {
+    if (!tutorials || tutorials.length === 0) {
+      parts.push('You have no video tutorials available for your active courses, ' + firstName + '.');
+    } else {
+      const byCourse = {};
+      tutorials.forEach(t => {
+        const c = t.courseCode || 'General';
+        if (!byCourse[c]) byCourse[c] = [];
+        byCourse[c].push(t.title);
+      });
+      let text = 'You have ' + tutorials.length + ' tutorial(s):\n';
+      Object.keys(byCourse).sort().forEach(code => {
+        text += '\n' + code + ':\n';
+        byCourse[code].slice(0, 8).forEach(title => {
+          text += '- ' + title + '\n';
+        });
+        if (byCourse[code].length > 8) {
+          text += '- ...and ' + (byCourse[code].length - 8) + ' more\n';
+        }
+      });
+      text += '\nWatch and download them from the Tutorials page.';
+      parts.push(text);
+    }
+  }
+
+  return parts.join('\n\n') || ('No notes or tutorials found, ' + firstName + '.');
+};
+
+const fallbackTimetableResponse = (timetable, studentName, query) => {
+  const firstName = (studentName || 'Student').split(' ')[0];
+  const slots = timetable?.slots || [];
+  const upcoming = timetable?.upcoming || [];
+  const q = (query || '').toLowerCase();
+
+  if (slots.length === 0) {
+    return 'No timetable is available for you this semester, ' + firstName +
+      '. Please contact your department.';
+  }
+
+  const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const askedDay = days.find(d => q.includes(d));
+  if (askedDay) {
+    const daySlots = slots.filter(s => (s.dayName || '').toLowerCase() === askedDay);
+    if (daySlots.length === 0) {
+      return 'You have no classes on ' + askedDay.charAt(0).toUpperCase() + askedDay.slice(1) + ', ' + firstName + '.';
+    }
+    let text = 'Your classes on ' + askedDay.charAt(0).toUpperCase() + askedDay.slice(1) + ':\n';
+    daySlots
+      .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''))
+      .forEach(s => {
+        text += '- ' + s.startTime + '-' + s.endTime + ' | ' + s.courseCode + ' | ' + s.room + ' | ' + s.lecturer + '\n';
+      });
+    return text;
+  }
+
+  if (q.includes('today')) {
+    const todaySlots = upcoming.filter(u => u.isToday);
+    if (todaySlots.length === 0) {
+      return 'You have no lectures today, ' + firstName + '.';
+    }
+    let text = 'Your lectures today:\n';
+    todaySlots.forEach(s => {
+      text += '- ' + s.startTime + '-' + s.endTime + ' | ' + s.courseCode + ' | ' + s.room + '\n';
+    });
+    return text;
+  }
+
+  if (q.includes('tomorrow')) {
+    const tomorrowSlots = upcoming.filter(u => u.isTomorrow);
+    if (tomorrowSlots.length === 0) {
+      return 'You have no lectures tomorrow, ' + firstName + '.';
+    }
+    let text = 'Your lectures tomorrow:\n';
+    tomorrowSlots.forEach(s => {
+      text += '- ' + s.startTime + '-' + s.endTime + ' | ' + s.courseCode + ' | ' + s.room + '\n';
+    });
+    return text;
+  }
+
+  let text = 'You have ' + slots.length + ' weekly class slots';
+  if (upcoming.length > 0) {
+    text += ' and ' + upcoming.length + ' lecture(s) in the next 7 days';
+  }
+  text += '.\n\nNext up:\n';
+  upcoming.slice(0, 5).forEach(u => {
+    const label = u.isToday ? 'Today' : (u.isTomorrow ? 'Tomorrow' : u.dayName);
+    text += '- ' + label + ' ' + u.startTime + ' | ' + u.courseCode + ' | ' + u.room + '\n';
+  });
+  text += '\nAsk me about a specific day (e.g. "What do I have on Monday?") for details.';
+  return text;
+};
+
+// ===================== MAIN AI RESPONSE =====================
 
 export const generateAIResponseWithContext = async (
   userQuery,
@@ -377,342 +1022,125 @@ export const generateAIResponseWithContext = async (
   studentData,
   conversationHistory = []
 ) => {
+  if (!GROQ_API_KEY) {
+    return 'AI service is not configured. Please contact support.';
+  }
+
+  const studentName = studentData?.full_name || studentData?.fullName || 'Student';
+  const studentId = studentData?.id;
+
   try {
-    const firstName = studentData?.full_name?.split(' ')[0] || 'Student';
+    let coreData = null;
+    if (studentId) {
+      coreData = await fetchStudentCoreData(studentId, studentData);
+    }
 
-    // Check if this is an exam-related query
-    if (isExamRelatedQuery(userQuery)) {
-      console.log('🔍 Exam-related query detected:', userQuery);
+    let extraContext = '';
+    let examData = null;
+    let notesData = null;
+    let tutorialsData = null;
+    let timetableData = null;
 
-      // Get student ID
-      let studentId = studentData?.id;
-      if (!studentId && studentStats?.student_id) {
-        studentId = studentStats.student_id;
-      }
-
-      if (studentId) {
-        // Fetch examination schedule
-        const exams = await fetchExaminationSchedule(studentId, studentData);
-        
-        if (exams && exams.length > 0) {
-          // Format exam schedule for context
-          const examContext = formatExamScheduleForContext(exams, firstName);
-
-          // Build system prompt with exam data
-          const systemPrompt = `You are a helpful AI assistant for ${firstName} at NLE University.
-
-EXAMINATION DATA:
-${examContext}
-
-STRICT RULES - FOLLOW EXACTLY:
-1. ONLY answer exam-related questions using the provided exam data.
-2. Be DIRECT and CONCISE.
-3. Format dates clearly (e.g., "Monday, January 15, 2026 at 2:30 PM").
-4. If the user asks about a specific exam, provide the details.
-5. If the user asks about the next exam, tell them the next upcoming exam.
-6. If the user asks about exam location, provide the location.
-7. If the user asks "when is my next exam", respond with the next exam details.
-8. If the user asks "do I have any exams today", check the schedule.
-9. If the user asks about exam results, tell them if exams are graded.
-10. DO NOT add extra tips, advice, or suggestions.
-11. DO NOT add emojis unless the user uses them first.
-12. Maximum 100 words for simple questions, 200 words for complex questions.
-13. If no exams match what the user is asking for, say so clearly.
-14. For "exam schedule" → List all upcoming exams in a clear format.
-15. For "exam timetable" → Show the full timetable with dates and times.
-16. NEVER say "Based on the data" or "According to your records".`;
-
-          const messages = [
-            { role: 'system', content: systemPrompt },
-          ];
-
-          if (conversationHistory && conversationHistory.length > 0) {
-            messages.push(...conversationHistory.slice(-6));
-          }
-
-          messages.push({ role: 'user', content: userQuery });
-
-          // Try AI models for exam response
-          let lastError = null;
-
-          for (const model of WORKING_MODELS) {
-            try {
-              console.log(`🔄 Trying exam model: ${model}`);
-              
-              const response = await fetch(GROQ_API_URL, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${GROQ_API_KEY}`
-                },
-                body: JSON.stringify({
-                  model: model,
-                  messages: messages,
-                  temperature: 0.1,
-                  max_tokens: 300,
-                  top_p: 0.9,
-                  tool_choice: 'none',
-                })
-              });
-
-              if (response.ok) {
-                const data = await response.json();
-                const aiResponse = data.choices?.[0]?.message?.content;
-                if (aiResponse) {
-                  console.log(`✅ Exam model ${model} WORKED!`);
-                  return aiResponse;
-                }
-              } else {
-                const errorData = await response.json();
-                console.log(`❌ Exam model ${model}: ${errorData.error?.message}`);
-                lastError = new Error(errorData.error?.message);
-              }
-            } catch (error) {
-              console.log(`❌ Exam model ${model}: ${error.message}`);
-              lastError = error;
-            }
-          }
-
-          console.error('❌ All exam models failed:', lastError?.message);
-          
-          // Fallback: Return formatted exam data directly
-          return generateFallbackExamResponse(exams, userQuery, firstName);
-        } else {
-          return `You have no exams scheduled at the moment, ${firstName}. Check back later for updates.`;
-        }
+    if (isExamRelatedQuery(userQuery) && studentId) {
+      examData = await fetchExaminationSchedule(studentId, studentData);
+      if (examData) {
+        extraContext += '\n\n' + formatExamScheduleForContext(examData, studentName);
       }
     }
 
-    // If not exam-related or exam fetch failed, use regular context
-    console.log('📝 Using regular AI context for query:', userQuery);
-    const context = buildCompleteContext(studentStats, studentData);
+    if (isNotesOrTutorialsRelatedQuery(userQuery) && studentData) {
+      const [notes, tutorials] = await Promise.all([
+        fetchStudentNotes(studentData),
+        fetchStudentTutorials(studentData)
+      ]);
+      notesData = notes;
+      tutorialsData = tutorials;
+      extraContext += '\n\n' + formatNotesForContext(notes, studentName);
+      extraContext += '\n\n' + formatTutorialsForContext(tutorials, studentName);
+    }
 
-    const systemPrompt = `You are a helpful AI assistant for ${firstName} at NLE University.
+    if (isTimetableRelatedQuery(userQuery) && studentData) {
+      timetableData = await fetchStudentTimetable(studentData);
+      extraContext += '\n\n' + formatTimetableForContext(timetableData, studentName);
+    }
 
-STUDENT DATA:
-${context}
+    const baseContext = buildCompleteContext(studentStats, studentData, coreData);
 
-STRICT RULES - FOLLOW EXACTLY:
-1. ONLY answer what is asked. Nothing more.
-2. DO NOT add extra information, tips, advice, or suggestions unless specifically asked.
-3. DO NOT add summaries, conclusions, or "let me know if you need anything else".
-4. DO NOT add emojis unless the user uses them first.
-5. DO NOT add bullet points or lists unless the question requires it.
-6. DO NOT reference the conversation history.
-7. DO NOT say "Based on the data" or "According to your records".
-8. For "hi" or "hello" → Just say "Hello ${firstName}!"
-9. For "how are you" → Just say "I'm good, thanks! How can I help?"
-10. For "what's my CGPA" → Just say "Your CGPA is X.XX"
-11. For "have I paid tuition" → Just say "Yes, you've paid $X for tuition." or "No, you have $X pending."
-12. For "okay" or "thanks" → Just say "You're welcome!" or "👍"
-13. Be DIRECT and CONCISE.
-14. Maximum 50 words for simple questions.
-15. Maximum 100 words for complex questions.
-16. NEVER use tools, code execution, or Python scripts. Just answer directly in plain text.`;
+    const systemPrompt =
+      'You are a helpful academic assistant for a university student portal. ' +
+      'Answer ONLY what the student asks. Be concise and accurate. ' +
+      'Use the provided student data. Do not invent information. ' +
+      'If data is missing, say so politely.\n\n' +
+      baseContext + extraContext;
 
     const messages = [
       { role: 'system', content: systemPrompt },
+      ...conversationHistory.slice(-6).map(m => ({
+        role: m.role === 'user' ? 'user' : 'assistant',
+        content: m.content
+      })),
+      { role: 'user', content: userQuery }
     ];
-
-    if (conversationHistory && conversationHistory.length > 0) {
-      messages.push(...conversationHistory.slice(-6));
-    }
-
-    messages.push({ role: 'user', content: userQuery });
-
-    let lastError = null;
 
     for (const model of WORKING_MODELS) {
       try {
-        console.log(`🔄 Trying model: ${model}`);
-        
         const response = await fetch(GROQ_API_URL, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${GROQ_API_KEY}`
+            'Authorization': 'Bearer ' + GROQ_API_KEY,
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify({
             model: model,
             messages: messages,
-            temperature: 0.1,
-            max_tokens: 150,
-            top_p: 0.9,
-            tool_choice: 'none',
+            temperature: 0.4,
+            max_tokens: 1024
           })
         });
 
-        if (response.ok) {
-          const data = await response.json();
-          const aiResponse = data.choices?.[0]?.message?.content;
-          if (aiResponse) {
-            console.log(`✅ Model ${model} WORKED!`);
-            return aiResponse;
-          }
-        } else {
-          const errorData = await response.json();
-          console.log(`❌ Model ${model}: ${errorData.error?.message}`);
-          lastError = new Error(errorData.error?.message);
+        if (!response.ok) continue;
+
+        const data = await response.json();
+        const content = data?.choices?.[0]?.message?.content;
+        if (content && content.trim()) {
+          return content.trim();
         }
-      } catch (error) {
-        console.log(`❌ Model ${model}: ${error.message}`);
-        lastError = error;
+      } catch (e) {
+        console.warn('Model failed:', model, e.message);
       }
     }
 
-    console.error('❌ All models failed:', lastError?.message);
-    
-    return `**${firstName}, here's your academic summary:**
+    // Fallbacks when all models fail
+    if (isExamRelatedQuery(userQuery) && examData) {
+      return fallbackExamResponse(examData, studentName);
+    }
+    if (isNotesOrTutorialsRelatedQuery(userQuery)) {
+      return fallbackNotesTutorialsResponse(notesData, tutorialsData, studentName, userQuery);
+    }
+    if (isTimetableRelatedQuery(userQuery) && timetableData) {
+      return fallbackTimetableResponse(timetableData, studentName, userQuery);
+    }
 
-• 📊 **CGPA:** ${studentStats?.gpa?.examBasedCGPA?.toFixed(2) || '0.00'}
-• 💰 **Fees Paid:** $${studentStats?.finance?.totalPaid || 0}
-• 📝 **Pending Assignments:** ${studentStats?.assignments?.pending || 0}
-• 📋 **Upcoming Exams:** ${studentStats?.exams?.upcoming?.length || 0}
-• 📅 **Attendance:** ${studentStats?.attendance?.rate || 0}%`;
+    const cgpa = coreData?.cgpa ?? 0;
+    const paid = coreData?.totalPaid ?? 0;
+    const pending = coreData?.totalPending ?? 0;
+    const pendingAssign = coreData?.pendingAssignments ?? 0;
+    const upcoming = coreData?.upcomingExams ?? 0;
 
-  } catch (error) {
-    console.error('❌ Error in AI service:', error);
-    return `I'm having trouble processing your request. Please try again later.`;
+    return (
+      'Here is a quick summary for you:\n' +
+      '- CGPA: ' + cgpa + '\n' +
+      '- Fees paid: $' + Number(paid).toLocaleString() + '\n' +
+      '- Balance: $' + Number(pending).toLocaleString() + '\n' +
+      '- Pending assignments: ' + pendingAssign + '\n' +
+      '- Upcoming exams: ' + upcoming + '\n\n' +
+      'Ask me about a specific area (exams, notes, tutorials, timetable, fees, etc.) for more details.'
+    );
+  } catch (err) {
+    console.error('AI response error:', err);
+    return 'Sorry, I could not process your request right now. Please try again.';
   }
 };
-
-// ===================== FALLBACK RESPONSE =====================
-
-const generateFallbackExamResponse = (exams, query, firstName) => {
-  const lowerQuery = query.toLowerCase();
-  
-  const upcomingExams = exams.filter(e => e.isUpcoming || e.status === 'upcoming');
-  const activeExams = exams.filter(e => e.isActive || e.status === 'active' || e.status === 'resume');
-  
-  // Next exam
-  if (lowerQuery.includes('next') || lowerQuery.includes('upcoming')) {
-    if (upcomingExams.length === 0) {
-      if (activeExams.length > 0) {
-        return `You have ${activeExams.length} active exam(s) right now! Please check the Examinations page.`;
-      }
-      return `You have no upcoming exams scheduled, ${firstName}.`;
-    }
-    
-    const next = upcomingExams[0];
-    const date = new Date(next.startTime);
-    const formattedDate = date.toLocaleDateString('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true
-    });
-    
-    return `Your next exam is ${next.courseCode} - ${next.title} on ${formattedDate} at ${next.location || 'TBA'}. Duration: ${next.duration} minutes.`;
-  }
-  
-  // Today's exams
-  if (lowerQuery.includes('today') || lowerQuery.includes('current')) {
-    const today = new Date().toDateString();
-    const todayExams = exams.filter(e => {
-      const examDate = new Date(e.startTime).toDateString();
-      return examDate === today;
-    });
-    
-    if (todayExams.length === 0) {
-      return `You have no exams today, ${firstName}.`;
-    }
-    
-    let response = `You have ${todayExams.length} exam(s) today:\n`;
-    todayExams.forEach(exam => {
-      const time = new Date(exam.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      response += `• ${exam.courseCode} at ${time} (${exam.location || 'TBA'})\n`;
-    });
-    return response;
-  }
-  
-  // Location
-  if (lowerQuery.includes('location') || lowerQuery.includes('where') || lowerQuery.includes('venue')) {
-    const allExams = [...upcomingExams, ...activeExams];
-    if (allExams.length === 0) {
-      return `No exams scheduled at the moment, ${firstName}.`;
-    }
-    
-    let response = `Exam locations:\n`;
-    allExams.slice(0, 5).forEach(exam => {
-      response += `• ${exam.courseCode}: ${exam.location || 'TBA'}\n`;
-    });
-    if (allExams.length > 5) {
-      response += `And ${allExams.length - 5} more exams. Check the Examinations page.`;
-    }
-    return response;
-  }
-  
-  // Full schedule
-  if (lowerQuery.includes('schedule') || lowerQuery.includes('timetable') || lowerQuery.includes('all')) {
-    if (exams.length === 0) {
-      return `You have no exams scheduled, ${firstName}.`;
-    }
-    
-    let response = `📋 Your Exam Schedule (${exams.length} exams):\n\n`;
-    exams.slice(0, 10).forEach((exam, index) => {
-      const date = new Date(exam.startTime);
-      response += `${index + 1}. ${exam.courseCode}: ${date.toLocaleDateString()} at ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-      response += ` (${exam.location || 'TBA'})\n`;
-    });
-    
-    if (exams.length > 10) {
-      response += `\nAnd ${exams.length - 10} more exams. Check the Examinations page for full details.`;
-    }
-    
-    return response;
-  }
-  
-  // Active exams
-  if (lowerQuery.includes('active')) {
-    if (activeExams.length === 0) {
-      return `You have no active exams right now, ${firstName}.`;
-    }
-    
-    let response = `You have ${activeExams.length} active exam(s):\n`;
-    activeExams.forEach(exam => {
-      const endDate = new Date(exam.endTime);
-      response += `• ${exam.courseCode} (ends at ${endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})\n`;
-    });
-    return response;
-  }
-  
-  // Graded exams
-  if (lowerQuery.includes('graded') || lowerQuery.includes('result') || lowerQuery.includes('results')) {
-    const gradedExams = exams.filter(e => e.graded);
-    const submittedExams = exams.filter(e => e.submitted && !e.graded);
-    
-    if (gradedExams.length === 0) {
-      if (submittedExams.length > 0) {
-        return `You have ${submittedExams.length} submitted exam(s) awaiting grading. No graded exams yet.`;
-      }
-      return `No graded exams available yet, ${firstName}.`;
-    }
-    
-    let response = `You have ${gradedExams.length} graded exam(s):\n`;
-    gradedExams.forEach(exam => {
-      response += `• ${exam.courseCode}: ${exam.title}\n`;
-    });
-    return response;
-  }
-  
-  // Default response
-  const total = exams.length;
-  const upcoming = upcomingExams.length;
-  const active = activeExams.length;
-  const submitted = exams.filter(e => e.submitted && !e.graded).length;
-  const graded = exams.filter(e => e.graded).length;
-  
-  if (total === 0) {
-    return `You have no exams scheduled, ${firstName}.`;
-  }
-  
-  return `You have ${total} exam(s): ${upcoming} upcoming, ${active} active, ${submitted} submitted, ${graded} graded. Check the Examinations page for full details.`;
-};
-
-// ===================== DEFAULT EXPORT =====================
 
 export default {
   generateAIResponseWithContext

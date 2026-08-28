@@ -11,7 +11,14 @@ const Chatbot = () => {
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isLoadingInitial, setIsLoadingInitial] = useState(true);
+const [isLoadingInitial, setIsLoadingInitial] = useState(() => {
+  // If cache already has data, never show the full-page loader
+  try {
+    const key = 'chatbot-data-' + (user?.id || user?.email || '');
+    if (key && dataCache.get(key)) return false;
+  } catch (e) {}
+  return true;
+});
   const [studentData, setStudentData] = useState(null);
   const [studentStats, setStudentStats] = useState(null);
   const [isMobile, setIsMobile] = useState(false);
@@ -1070,28 +1077,73 @@ const Chatbot = () => {
     return `🤔 **I'm not sure I understood your question completely.**\n\n${randomEncouragement}\n\n**Here's what I can help you with:**\n\n• **Academic Performance** - GPA, CGPA, grades, progress\n• **Exam Results** - Real-time GPA/CGPA from graded exams\n• **Assignments & Exams** - Deadlines, submissions, results\n• **Financial Status** - Fees, payments, balances\n• **Schedule** - Timetable, lectures, classes\n• **Attendance** - Records, percentage, trends\n• **Library** - Books, resources, availability\n• **Campus Life** - Events, activities, clubs\n• **Study Help** - Tips, strategies, resources\n• **University Info** - Policies, contacts, facilities\n• **General Chat** - Motivation, encouragement, advice\n\n**Tip:** ${randomTip}\n\n**Try asking me one of these:**\n"What's my current GPA from exams?"\n"What's my overall CGPA?"\n"What assignments are due this week?"\n"What's my attendance percentage?"\n"How much do I owe in fees?"\n"What lectures do I have today?"\n"Recommend study tips for exams"\n"Check my academic progress"\n"What library books are available?"\n"Give me some motivation"\n"How are you doing today?"`;
   };
 
-  // Main data fetching function
-  const fetchAllStudentData = useCallback(async () => {
+  // Main data fetching function — uses dataCache like Dashboard / Timetable
+  const fetchAllStudentData = useCallback(async (forceRefresh = false) => {
     if (isFetchingRef.current) {
       console.log('⏳ Already fetching data, skipping...');
       return;
     }
-    
+
     if (!user?.email) {
       console.log('⏳ No user email yet, waiting...');
       return;
     }
 
-    if (loadedHistoryRef.current && messages.length > 0) {
-      console.log('✅ Chat history already loaded, skipping fetch');
-      return;
-    }
+    const cacheKey = 'chatbot-data-' + (user.id || user.email);
+    const CACHE_TTL = 10 * 60 * 1000; // 10 minutes (same idea as Dashboard)
 
+   // ===== CACHE HIT =====
+if (!forceRefresh) {
+  const cached = dataCache.get(cacheKey);
+  if (cached) {
+    console.log('✅ Chatbot: CACHE HIT — no loader');
+    if (mountedRef.current) {
+      setStudentData(cached.student);
+      setStudentStats(cached.stats);
+      if (cached.profilePictureUrl) setProfilePictureUrl(cached.profilePictureUrl);
+      if (cached.sessionId) setSessionId(cached.sessionId);
+
+      // Load chat history only if needed (no full-page loader)
+      if (!loadedHistoryRef.current) {
+        (async () => {
+          try {
+            const dbHistory = await chatHistoryService.loadChatHistory(cached.student.id);
+            if (!mountedRef.current) return;
+            if (dbHistory && dbHistory.length > 0) {
+              setMessages(dbHistory);
+            } else if (messages.length === 0) {
+              const welcomeText = generateWelcomeMessage(cached.student, cached.stats);
+              setMessages([{
+                id: 'welcome_' + Date.now(),
+                text: welcomeText,
+                sender: 'ai',
+                timestamp: new Date()
+              }]);
+            }
+          } catch (e) {
+            console.warn('⚠️ Chat history load failed:', e);
+          }
+          loadedHistoryRef.current = true;
+        })();
+      }
+
+      setIsLoadingInitial(false); // ensure loader is off
+    }
+    isFetchingRef.current = false;
+    return; // ← stop here, never enter the network path
+  }
+}
+
+// Only show loader when we actually need to fetch from network
+setIsLoadingInitial(true);
+isFetchingRef.current = true;
+
+    // ===== CACHE MISS / FORCE REFRESH =====
     try {
       isFetchingRef.current = true;
       setIsLoadingInitial(true);
-      console.log('📊 Starting data fetch for:', user.email);
-      
+      console.log('📊 Chatbot: CACHE MISS — fetching for:', user.email);
+
       const { data: student, error: studentError } = await supabase
         .from('students')
         .select('*')
@@ -1118,7 +1170,7 @@ const Chatbot = () => {
         setSessionId(session);
       } catch (sessionError) {
         console.warn('⚠️ Could not get/create session:', sessionError);
-        session = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        session = 'session_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
         setSessionId(session);
       }
 
@@ -1175,27 +1227,21 @@ const Chatbot = () => {
 
       const calculateCourseBasedGPA = (courses) => {
         if (!courses || courses.length === 0) return 0.0;
-        
         const completedCourses = courses.filter(
           course => course.status === 'completed' && (course.grade || course.marks)
         );
-        
         if (completedCourses.length === 0) return 0.0;
-        
         let totalPoints = 0;
         let totalCredits = 0;
-        
         completedCourses.forEach(course => {
           const grade = course.grade || getGradeFromMarks(course.marks);
           const gradePoints = course.grade_points || getGradePoints(grade);
           const credits = course.credits || 3;
-          
           if (gradePoints && credits) {
             totalPoints += gradePoints * credits;
             totalCredits += credits;
           }
         });
-        
         return totalCredits > 0 ? parseFloat((totalPoints / totalCredits).toFixed(2)) : 0.0;
       };
 
@@ -1204,17 +1250,9 @@ const Chatbot = () => {
       // Fetch other data
       let lectures = [], assignments = [], exams = [], finance = [], attendance = [], timetable = [], libraryBooks = [], events = [];
 
-      try {
-        lectures = await fetchUpcomingLectures(activeCourseIds);
-      } catch (e) { console.warn('⚠️ Could not fetch lectures:', e); }
-
-      try {
-        assignments = await fetchAssignments(activeCourseIds, student.id);
-      } catch (e) { console.warn('⚠️ Could not fetch assignments:', e); }
-
-      try {
-        exams = await fetchExams(activeCourseIds, student.id);
-      } catch (e) { console.warn('⚠️ Could not fetch exams:', e); }
+      try { lectures = await fetchUpcomingLectures(activeCourseIds); } catch (e) { console.warn('⚠️ lectures:', e); }
+      try { assignments = await fetchAssignments(activeCourseIds, student.id); } catch (e) { console.warn('⚠️ assignments:', e); }
+      try { exams = await fetchExams(activeCourseIds, student.id); } catch (e) { console.warn('⚠️ exams:', e); }
 
       try {
         const { data: financeData } = await supabase
@@ -1225,7 +1263,7 @@ const Chatbot = () => {
           .order('semester', { ascending: true })
           .order('created_at', { ascending: true });
         finance = financeData || [];
-      } catch (e) { console.warn('⚠️ Could not fetch finance:', e); }
+      } catch (e) { console.warn('⚠️ finance:', e); }
 
       try {
         const { data: attendanceData } = await supabase
@@ -1235,7 +1273,7 @@ const Chatbot = () => {
           .gte('date', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0])
           .order('date', { ascending: false });
         attendance = attendanceData || [];
-      } catch (e) { console.warn('⚠️ Could not fetch attendance:', e); }
+      } catch (e) { console.warn('⚠️ attendance:', e); }
 
       try {
         const { data: timetableData } = await supabase
@@ -1244,7 +1282,7 @@ const Chatbot = () => {
           .in('course_id', activeCourseIds)
           .eq('is_active', true);
         timetable = timetableData || [];
-      } catch (e) { console.warn('⚠️ Could not fetch timetable:', e); }
+      } catch (e) { console.warn('⚠️ timetable:', e); }
 
       try {
         const { data: libraryData } = await supabase
@@ -1253,7 +1291,7 @@ const Chatbot = () => {
           .eq('status', 'available')
           .limit(5);
         libraryBooks = libraryData || [];
-      } catch (e) { console.warn('⚠️ Could not fetch library books:', e); }
+      } catch (e) { console.warn('⚠️ library:', e); }
 
       try {
         const { data: eventsData } = await supabase
@@ -1263,9 +1301,9 @@ const Chatbot = () => {
           .order('date', { ascending: true })
           .limit(5);
         events = eventsData || [];
-      } catch (e) { console.warn('⚠️ Could not fetch events:', e); }
+      } catch (e) { console.warn('⚠️ events:', e); }
 
-      // Build stats
+      // Build stats (same structure as before)
       const processedStats = {
         studentInfo: {
           name: student.full_name,
@@ -1341,7 +1379,7 @@ const Chatbot = () => {
             const submission = e.submissions?.find(s => s.student_id === student.id);
             return !submission && new Date(e.start_time) > new Date();
           }).sort((a, b) => new Date(a.start_time) - new Date(b.start_time)).slice(0, 5),
-          performance: calculateExamPerformance(exams?.filter(e => 
+          performance: calculateExamPerformance(exams?.filter(e =>
             e.submissions?.some(s => s.student_id === student.id && s.status === 'graded')
           ) || [])
         },
@@ -1418,8 +1456,8 @@ const Chatbot = () => {
         library: {
           available: libraryBooks?.length || 0,
           books: libraryBooks || [],
-          recommended: libraryBooks?.filter(b => 
-            b.category?.toLowerCase().includes('computer') || 
+          recommended: libraryBooks?.filter(b =>
+            b.category?.toLowerCase().includes('computer') ||
             b.category?.toLowerCase().includes('technology')
           ).slice(0, 3) || []
         },
@@ -1431,29 +1469,36 @@ const Chatbot = () => {
 
       setStudentStats(processedStats);
 
-      // Load chat history from database
+      // ===== SAVE TO CACHE (survives tab switches) =====
+      dataCache.set(cacheKey, {
+        student: student,
+        stats: processedStats,
+        profilePictureUrl: profilePic,
+        sessionId: session
+      }, CACHE_TTL);
+
+      console.log('✅ Chatbot data cached for 10 minutes');
+
+      // Load chat history (only once per mount)
       if (!loadedHistoryRef.current) {
         try {
           console.log('📥 Loading chat history from database...');
           const dbHistory = await chatHistoryService.loadChatHistory(student.id);
-          
+
           if (dbHistory && dbHistory.length > 0) {
-            console.log('✅ Loaded chat history from database:', dbHistory.length, 'messages');
+            console.log('✅ Loaded chat history:', dbHistory.length, 'messages');
             setMessages(dbHistory);
             loadedHistoryRef.current = true;
           } else {
-            // No history, create welcome message
             const welcomeText = generateWelcomeMessage(student, processedStats);
             const welcomeMessage = {
-              id: `welcome_${Date.now()}`,
+              id: 'welcome_' + Date.now(),
               text: welcomeText,
               sender: 'ai',
               timestamp: new Date()
             };
             setMessages([welcomeMessage]);
             loadedHistoryRef.current = true;
-            
-            // Save welcome message to database
             chatHistoryService.saveMessage(student.id, welcomeMessage, 'ai', session)
               .then(() => console.log('✅ Welcome message saved'))
               .catch(e => console.warn('⚠️ Could not save welcome message:', e));
@@ -1462,7 +1507,7 @@ const Chatbot = () => {
           console.warn('⚠️ Could not load chat history:', chatError);
           const welcomeText = generateWelcomeMessage(student, processedStats);
           setMessages([{
-            id: `welcome_${Date.now()}`,
+            id: 'welcome_' + Date.now(),
             text: welcomeText,
             sender: 'ai',
             timestamp: new Date()
@@ -1470,15 +1515,15 @@ const Chatbot = () => {
           loadedHistoryRef.current = true;
         }
       }
-      
+
       console.log('✅ All data loaded successfully!');
-      
+
     } catch (error) {
       console.error('❌ Error in fetchAllStudentData:', error);
       if (messages.length === 0) {
         setMessages([{
-          id: `error_${Date.now()}`,
-          text: `⚠️ Error loading your data: ${error.message}. Please try refreshing the page or contact support.`,
+          id: 'error_' + Date.now(),
+          text: '⚠️ Error loading your data: ' + error.message + '. Please try refreshing the page or contact support.',
           sender: 'ai',
           timestamp: new Date()
         }]);
@@ -1489,7 +1534,7 @@ const Chatbot = () => {
       }
       isFetchingRef.current = false;
     }
-  }, [user?.email, messages.length]);
+  }, [user?.email, user?.id]);
 
   // Handle sending messages - UPDATED
   const handleSendMessage = async () => {
@@ -1659,16 +1704,16 @@ const Chatbot = () => {
     }
   }, [messages, isLoading]);
 
-  // Initial fetch
+   // Initial fetch — uses cache, so tab switches do NOT re-fetch
   useEffect(() => {
     if (!user?.email) return;
-    
-    if (!loadedHistoryRef.current && !isFetchingRef.current) {
-      console.log('🔄 Initial data fetch...');
-      fetchAllStudentData();
-    }
-  }, [fetchAllStudentData, user?.email]);
+    if (isFetchingRef.current) return;
 
+    console.log('🔄 Chatbot mount — checking cache...');
+    fetchAllStudentData(false); // false = use cache if available
+  }, [user?.email]); // do NOT depend on fetchAllStudentData to avoid loops
+  
+  
   // Loading state
   if (isLoadingInitial) {
     return (
@@ -1915,6 +1960,17 @@ const Chatbot = () => {
               <span>🗑️</span>
               {!isMobile && 'Clear Chat'}
             </button>
+            <button
+  onClick={() => {
+    const cacheKey = 'chatbot-data-' + (user?.id || user?.email);
+    dataCache.delete?.(cacheKey); // or dataCache.set(cacheKey, null)
+    loadedHistoryRef.current = false;
+    fetchAllStudentData(true); // force refresh
+  }}
+  style={{ /* same style as Clear Chat */ }}
+>
+  🔄 Refresh
+</button>
           </div>
         </div>
 
