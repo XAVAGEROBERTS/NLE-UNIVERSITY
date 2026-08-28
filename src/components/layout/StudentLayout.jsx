@@ -40,7 +40,7 @@ const StudentLayout = () => {
     return location.pathname === path;
   };
 
-  // Check mobile on mount and resize
+  // Check mobile on mount 
   useEffect(() => {
     const checkMobile = () => {
       const mobile = window.innerWidth < 1024;
