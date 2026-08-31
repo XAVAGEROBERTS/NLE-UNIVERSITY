@@ -79,16 +79,16 @@ const Notes = () => {
     return types[fileType?.toLowerCase()] || 'other';
   };
 
-  // Fetch notes data using SAME logic as Tutorials
+  // Fetch notes data with proper cohort filtering
   const fetchNotesData = useCallback(async () => {
     if (!user?.email) {
       throw new Error('No user logged in');
     }
 
-    // Get student profile
+    // Get student profile with cohort info
     const { data: student, error: studentError } = await supabase
       .from('students')
-      .select('id, program_code, academic_year, year_of_study, semester')
+      .select('id, program_code, academic_year, year_of_study, semester, department_code')
       .eq('email', user.email)
       .single();
 
@@ -105,165 +105,165 @@ const Notes = () => {
       program_code: studentProgramCode,
       academic_year: studentAcademicYear,
       year_of_study: studentYear,
-      semester: studentSemester
+      semester: studentSemester,
+      department_code: studentDepartmentCode
     } = student;
 
     const academicParts = studentAcademicYear.trim().split('/');
-    const startYear = academicParts[0]?.toUpperCase() || '';
-    const endYear = academicParts[1]?.toUpperCase() || '';
+    const startYear = academicParts[0]?.trim() || '';
+    const endYear = academicParts[1]?.trim() || '';
 
     const normProgram = studentProgramCode.toUpperCase().trim();
     const cohortString = `YEAR${studentYear}_SEM${studentSemester}`.toUpperCase();
 
-    console.log('Student cohort for Notes:', {
-      programCode: studentProgramCode,
+    console.log('🎯 Student cohort for Notes:', {
+      studentId,
+      programCode: normProgram,
       academicYear: studentAcademicYear,
+      startYear,
+      endYear,
       cohort: cohortString,
-      uuid: studentId
+      departmentCode: studentDepartmentCode
     });
 
-    // ⭐ STEP 1: Get ALL completed courses for this student
-    const { data: completedCourses, error: completedError } = await supabase
-      .from('student_courses')
-      .select('course_id')
-      .eq('student_id', studentId)
-      .eq('status', 'completed');
-
-    if (completedError) {
-      console.warn('Could not fetch completed courses:', completedError);
-    }
-
-    // Create a Set of course IDs that are completed
-    const completedCourseIds = new Set(completedCourses?.map(c => c.course_id) || []);
-    console.log(`📚 Student has ${completedCourseIds.size} completed courses`);
-
-    // ⭐ STEP 2: Get all courses that this student is enrolled in (to get course codes)
+    // ⭐ STEP 1: Get enrolled courses for this student
     const { data: enrolledCourses, error: enrolledError } = await supabase
       .from('student_courses')
-      .select('course_id, courses(course_code)')
+      .select(`
+        course_id,
+        status,
+        courses(course_code, course_name)
+      `)
       .eq('student_id', studentId);
 
     if (enrolledError) {
       console.warn('Could not fetch enrolled courses:', enrolledError);
     }
 
-    // Create a map of course_id -> course_code
-    const courseCodeMap = new Map();
+    // Create a map of course_id -> course info
+    const courseMap = new Map();
+    const activeCourseCodes = new Set();
+    const completedCourseCodes = new Set();
+
     enrolledCourses?.forEach(enrollment => {
       if (enrollment.courses?.course_code) {
-        courseCodeMap.set(enrollment.course_id, enrollment.courses.course_code);
+        const courseCode = enrollment.courses.course_code.toUpperCase();
+        courseMap.set(enrollment.course_id, enrollment.courses);
+        
+        if (enrollment.status === 'completed') {
+          completedCourseCodes.add(courseCode);
+        } else {
+          activeCourseCodes.add(courseCode);
+        }
       }
     });
 
-    console.log(`📚 Student has ${courseCodeMap.size} enrolled courses`);
+    console.log('📚 Active course codes:', [...activeCourseCodes]);
+    console.log('✅ Completed course codes:', [...completedCourseCodes]);
 
-    // ⭐ STEP 3: Get ALL completed course codes
-    const completedCourseCodes = new Set();
-    completedCourses?.forEach(completion => {
-      const courseCode = courseCodeMap.get(completion.course_id);
-      if (courseCode) {
-        completedCourseCodes.add(courseCode.toUpperCase());
-      }
-    });
-
-    console.log('📚 Completed course codes:', [...completedCourseCodes]);
-
-    // Scan the Notes bucket
-    const scanFolder = async (prefix = '') => {
+    // ⭐ STEP 2: Scan the Notes bucket recursively
+    const scanFolder = async (path = '') => {
       let allFiles = [];
 
-      const listAndProcess = async (path = '') => {
-        const { data: items, error } = await supabase.storage
-          .from('Notes')
-          .list(path, {
-            limit: 1000,
-            offset: 0,
-            sortBy: { column: 'name', order: 'asc' }
+      const { data: items, error } = await supabase.storage
+        .from('Notes')
+        .list(path, {
+          limit: 1000,
+          offset: 0,
+          sortBy: { column: 'name', order: 'asc' }
+        });
+
+      if (error) {
+        console.error('Storage list error at path', path, error);
+        return allFiles;
+      }
+
+      if (!items || items.length === 0) return allFiles;
+
+      for (const item of items) {
+        const fullPath = path ? `${path}/${item.name}` : item.name;
+
+        if (item.id === null) {
+          // This is a folder, recurse into it
+          const subFiles = await scanFolder(fullPath);
+          allFiles = allFiles.concat(subFiles);
+        } else {
+          // This is a file
+          if (item.name === '.emptyFolderPlaceholder') continue;
+          
+          const { data: urlData } = supabase.storage
+            .from('Notes')
+            .getPublicUrl(fullPath);
+
+          let fileSize = item.metadata?.size || 0;
+          
+          allFiles.push({
+            name: item.name,
+            path: fullPath,
+            url: urlData.publicUrl,
+            created_at: item.created_at,
+            size: fileSize,
+            metadata: item.metadata
           });
-
-        if (error) {
-          console.error('Storage list error at path', path, error);
-          return;
         }
+      }
 
-        if (!items || items.length === 0) return;
-
-        for (const item of items) {
-          const fullPath = path ? `${path}/${item.name}` : item.name;
-
-          if (item.id === null || item.name.endsWith('/')) {
-            await listAndProcess(fullPath);
-          } else {
-            const { data: urlData } = supabase.storage
-              .from('Notes')
-              .getPublicUrl(fullPath);
-
-            // Get file size using HEAD request
-            let fileSize = 0;
-            try {
-              const headResponse = await fetch(urlData.publicUrl, { method: 'HEAD' });
-              fileSize = parseInt(headResponse.headers.get('content-length')) || 0;
-            } catch (err) {
-              console.warn('Could not get file size:', err);
-            }
-
-            allFiles.push({
-              name: item.name,
-              path: fullPath,
-              url: urlData.publicUrl,
-              created_at: item.created_at,
-              size: fileSize
-            });
-          }
-        }
-      };
-
-      await listAndProcess(prefix);
       return allFiles;
     };
 
     const allFiles = await scanFolder();
-    console.log(`📚 Found ${allFiles.length} files in Notes bucket:`, allFiles.map(f => f.path));
+    console.log(`📁 Found ${allFiles.length} total files in Notes bucket`);
 
-    // Filter files - Match program, cohort, and academic year
-    const matchingFiles = allFiles.filter(file => {
+    // ⭐ STEP 3: Filter files by cohort (program, year, semester, academic year)
+    const cohortMatchingFiles = allFiles.filter(file => {
       const upperPath = file.path.toUpperCase();
-
-      const hasProgram = upperPath.includes(normProgram);
-      const hasCohort = upperPath.includes(cohortString);
-      const hasStartYear = startYear ? upperPath.includes(startYear) : true;
-      const hasEndYear = endYear ? upperPath.includes(endYear) : true;
-
-      return hasProgram && hasCohort && hasStartYear && hasEndYear;
+      
+      // Parse the path to extract cohort info
+      // Format: notes/lecturerId/programCode/courseCode/startYear/endYear/YEARX_SEMY/filename
+      const parts = file.path.split('/');
+      
+      if (parts.length < 7) return false;
+      
+      const fileProgramCode = parts[2]?.toUpperCase() || '';
+      const fileStartYear = parts[4] || '';
+      const fileEndYear = parts[5] || '';
+      const fileCohort = parts[6]?.toUpperCase() || '';
+      
+      const programMatch = fileProgramCode === normProgram;
+      const cohortMatch = fileCohort === cohortString;
+      const yearMatch = startYear ? (fileStartYear === startYear || fileEndYear === endYear) : true;
+      
+      return programMatch && cohortMatch && yearMatch;
     });
 
-    console.log(`📚 Filtered to ${matchingFiles.length} matching notes`);
+    console.log(`🎯 Found ${cohortMatchingFiles.length} files matching cohort ${cohortString}`);
 
-    // If no files found, try lenient approach
-    let finalFiles = matchingFiles;
+    // If strict cohort matching finds nothing, try lenient matching
+    let filteredFiles = cohortMatchingFiles;
     
-    if (matchingFiles.length === 0) {
-      console.log('⚠️ No files found with strict filtering, trying lenient approach...');
+    if (cohortMatchingFiles.length === 0) {
+      console.log('⚠️ No strict cohort matches, trying lenient program-only match...');
       
-      finalFiles = allFiles.filter(file => {
-        const upperPath = file.path.toUpperCase();
-        return upperPath.includes(normProgram);
+      filteredFiles = allFiles.filter(file => {
+        const parts = file.path.split('/');
+        const fileProgramCode = parts[2]?.toUpperCase() || '';
+        return fileProgramCode === normProgram;
       });
       
-      console.log(`📚 Lenient filter found ${finalFiles.length} notes`);
+      console.log(`📁 Lenient filter found ${filteredFiles.length} files for program ${normProgram}`);
     }
 
-    // Collect unique lecturer IDs from file paths
+    // ⭐ STEP 4: Collect unique lecturer IDs from file paths
     const lecturerIdSet = new Set();
-    finalFiles.forEach(file => {
-      let parts = file.path.split('/');
-      if (parts[0] === 'notes') parts = parts.slice(1);
+    filteredFiles.forEach(file => {
+      const parts = file.path.split('/');
       if (parts.length >= 1) {
-        lecturerIdSet.add(parts[0]);
+        lecturerIdSet.add(parts[1]); // lecturerId is at index 1
       }
     });
 
     const lecturerIds = Array.from(lecturerIdSet);
+    console.log('👨‍🏫 Lecturer IDs found:', lecturerIds);
 
     // Fetch lecturer names
     let lecturerMap = new Map();
@@ -276,81 +276,48 @@ const Notes = () => {
       if (lecturerError) {
         console.warn('Could not load lecturer names:', lecturerError);
       } else {
-        lecturers.forEach(l => {
+        lecturers?.forEach(l => {
           lecturerMap.set(l.id, l.full_name || 'Lecturer');
         });
       }
     }
 
-    // ⭐ STEP 4: Process notes and FILTER OUT completed courses
-    const studentNotes = finalFiles
+    // ⭐ STEP 5: Process notes and filter by course status
+    const studentNotes = filteredFiles
       .map(file => {
-        let parts = file.path.split('/');
-        if (parts[0] === 'notes') parts = parts.slice(1);
-
-        // Lecturer name
-        const lecturerId = parts.length >= 1 ? parts[0] : null;
-        const lecturerName = lecturerMap.get(lecturerId) || 'Lecturer';
-
-        // Extract course code
-        let displayCourseCode = 'General';
-        let rawCourseCode = '';
+        const parts = file.path.split('/');
         
-        if (parts.length >= 4) {
-          rawCourseCode = parts[2] || '';
-          const match = rawCourseCode.match(/^([A-Z]+)(\d+)$/);
-          if (match) {
-            displayCourseCode = `${match[1]} ${match[2]}`;
-          } else {
-            displayCourseCode = rawCourseCode;
-          }
-        } else {
-          // Try to extract course code from filename
-          const fileNameUpper = file.name.toUpperCase();
-          const courseCodeMatch = fileNameUpper.match(/([A-Z]{2,4}\d{3,4})/);
-          if (courseCodeMatch) {
-            const code = courseCodeMatch[1];
-            const match = code.match(/^([A-Z]+)(\d+)$/);
-            if (match) {
-              displayCourseCode = `${match[1]} ${match[2]}`;
-              rawCourseCode = code;
-            }
-          }
+        // Parse path: notes/lecturerId/programCode/courseCode/startYear/endYear/YEARX_SEMY/filename
+        const lecturerId = parts[1] || '';
+        const programCode = parts[2] || '';
+        const rawCourseCode = parts[3] || '';
+        const fileCohort = parts[6] || '';
+        
+        const lecturerName = lecturerMap.get(lecturerId) || 'Lecturer';
+        
+        // Format course code for display (e.g., CSE1101 -> CSE 1101)
+        let displayCourseCode = rawCourseCode || 'General';
+        const match = rawCourseCode.match(/^([A-Z]+)(\d+)$/);
+        if (match) {
+          displayCourseCode = `${match[1]} ${match[2]}`;
         }
 
-        // ⭐ Check if this course is completed
+        // Check if this course is completed (hide completed course notes)
         const isCompleted = completedCourseCodes.has(rawCourseCode.toUpperCase());
         if (isCompleted) {
           console.log(`⏭️ Skipping note for completed course: ${rawCourseCode}`);
-          return null; // Skip this note
+          return null;
         }
 
-        // Clean title - STRIP ALL YEAR PATTERNS
+        // Parse cohort info for display
+        const cohortDisplay = fileCohort.replace('YEAR', 'Year ').replace('_SEM', ' Semester ');
+
+        // Clean title
         let cleanTitle = file.name
-          .replace(/\.[^.]+$/, '') // Remove extension
-          .replace(/^\d{10,14}_[a-z0-9]{6,10}_/i, '') // Remove timestamp pattern
-          .replace(/\b(19|20)\d{2}\s*\/\s*(19|20)\d{2}\b/g, '') // 2025/2029
-          .replace(/\b(19|20)\d{2}\s*-\s*(19|20)\d{2}\b/g, '') // 2025-2029
-          .replace(/\b(19|20)\d{2}\s*(?:-\s*(19|20)\d{2})?\b/g, '') // 2025 or 2025-2029
-          .replace(/\b(19|20)\d{2}\s*(?:\/\s*(19|20)\d{2})?\b/g, '') // 2025 or 2025/2029
-          .replace(/\b(19|20)\d{2}\b/g, '') // Any 4-digit year
-          .replace(/_+/g, ' ') // Replace underscores with spaces
-          .replace(/\s+/g, ' ') // Remove extra spaces
+          .replace(/\.[^.]+$/, '')
+          .replace(/_+/g, ' ')
+          .replace(/\s+/g, ' ')
           .trim();
-
-        // Remove year at start
-        cleanTitle = cleanTitle.replace(/^\s*(19|20)\d{2}\s*/, '');
-        // Remove year at end
-        cleanTitle = cleanTitle.replace(/\s*(19|20)\d{2}\s*$/, '');
-        // Remove any remaining years
-        cleanTitle = cleanTitle.replace(/\b(19|20)\d{2}\b/g, '');
-        // Clean up extra spaces
-        cleanTitle = cleanTitle.replace(/\s+/g, ' ').trim();
-
-        // If title is empty after cleaning, use the original filename
-        if (!cleanTitle) {
-          cleanTitle = file.name.replace(/\.[^.]+$/, '').replace(/_/g, ' ');
-        }
 
         // Capitalize first letter of each word
         cleanTitle = cleanTitle
@@ -358,28 +325,29 @@ const Notes = () => {
           .replace(/\b\w/g, l => l.toUpperCase());
 
         const fileExt = file.name.split('.').pop().toLowerCase();
-        const fileSize = file.metadata?.size || 0;
 
         return {
           id: `storage-${file.path.replace(/\//g, '-').replace(/\./g, '_')}`,
           title: cleanTitle,
           description: `${lecturerName}`,
           name: file.name,
-          fileSize: fileSize,
-          fileSizeFormatted: formatFileSize(fileSize),
+          fileSize: file.size,
+          fileSizeFormatted: formatFileSize(file.size),
           downloadUrl: file.url,
           fileType: fileExt,
           icon: getFileIcon(file.name),
           courseCode: displayCourseCode,
           lecturer: lecturerName,
           path: file.path,
+          cohort: cohortDisplay,
           isViewable: isViewable(fileExt),
-          isCompleted: isCompleted
+          isCompleted: isCompleted,
+          uploadDate: file.created_at
         };
       })
-      .filter(note => note !== null); // Remove null entries (completed courses)
+      .filter(note => note !== null);
 
-    console.log(`📚 After removing completed courses: ${studentNotes.length} notes remaining`);
+    console.log(`📚 After filtering completed courses: ${studentNotes.length} notes remaining`);
 
     // Sort: newest first
     studentNotes.sort((a, b) => {
@@ -526,7 +494,6 @@ const Notes = () => {
     try {
       console.log(`📥 Downloading note: ${note.title}`);
       console.log(`📥 Path: ${note.path}`);
-      console.log(`📥 URL: ${note.downloadUrl}`);
 
       // Try direct URL first
       let response;
@@ -550,13 +517,7 @@ const Notes = () => {
       }
 
       if (!response.ok) {
-        console.error(`❌ Response not OK: ${response.status} ${response.statusText}`);
         throw new Error(`Download failed: ${response.status} ${response.statusText}`);
-      }
-
-      const contentLength = response.headers.get('content-length');
-      if (contentLength && parseInt(contentLength) === 0) {
-        throw new Error('File is empty');
       }
 
       const blob = await response.blob();
@@ -564,8 +525,6 @@ const Notes = () => {
       if (blob.size === 0) {
         throw new Error('Downloaded file is empty');
       }
-
-      console.log(`✅ Blob size: ${blob.size} bytes`);
 
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -641,7 +600,7 @@ const Notes = () => {
         <div>
           <h1 className="page-title">📚 Notes</h1>
           <p className="page-subtitle">
-            {notes.length} {notes.length === 1 ? 'note' : 'notes'} available for active courses
+            {notes.length} {notes.length === 1 ? 'note' : 'notes'} available for your cohort
           </p>
         </div>
         {filteredNotes.length > 0 && (
@@ -674,7 +633,7 @@ const Notes = () => {
         <span>Total: <strong>{notes.length}</strong> notes</span>
         <span>Showing: <strong>{filteredNotes.length}</strong></span>
         <span style={{ color: '#6c757d', fontSize: '12px' }}>
-          (Notes for completed courses are hidden)
+          (Notes filtered by your cohort and active courses)
         </span>
       </div>
 
@@ -686,7 +645,7 @@ const Notes = () => {
           <p>
             {searchTerm
               ? 'Try adjusting your search criteria'
-              : 'No notes available for your active courses. Notes for completed courses are hidden.'}
+              : 'No notes available for your cohort and active courses.'}
           </p>
           {searchTerm && (
             <button
@@ -744,14 +703,13 @@ const Notes = () => {
                   👨‍🏫 {note.lecturer}
                 </div>
                 
-                <p style={{ 
-                  fontSize: '15px', 
-                  color: '#555',
-                  margin: '4px 0 0 0',
-                  lineHeight: '1.4'
+                <div style={{ 
+                  fontSize: '13px', 
+                  color: '#388e3c',
+                  marginBottom: '4px'
                 }}>
-                  {note.description}
-                </p>
+                  🎯 {note.cohort}
+                </div>
               </div>
               <div className="note-card-footer" style={{
                 padding: '12px 16px 16px 16px',
@@ -835,7 +793,7 @@ const Notes = () => {
         </div>
       )}
 
-      {/* View Modal - Same as before */}
+      {/* View Modal */}
       <Modal
         isOpen={isModalOpen}
         onRequestClose={closeModal}

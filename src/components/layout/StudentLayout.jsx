@@ -20,20 +20,21 @@ const StudentLayout = () => {
   const logoutModalRef = useRef(null);
   const mobileMenuRef = useRef(null);
 
-  const menuItems = [
-    { id: 'dashboard', label: 'Home', icon: 'fas fa-home', path: '/dashboard' },
-    { id: 'courses', label: 'Course Units', icon: 'fas fa-book', path: '/courses' },
-    { id: 'lectures', label: 'Lectures', icon: 'fas fa-video', path: '/lectures' },
-    { id: 'timetable', label: 'My Time Table', icon: 'fas fa-calendar-alt', path: '/timetable' },
-    { id: 'coursework', label: 'Course Work', icon: 'fas fa-tasks', path: '/coursework' },
-    { id: 'examinations', label: 'Examination', icon: 'fas fa-clipboard-list', path: '/examinations' },
-    { id: 'results', label: 'Examination Results', icon: 'fas fa-chart-bar', path: '/results' },
-    { id: 'finance', label: 'Financial Statements', icon: 'fas fa-money-bill-wave', path: '/finance' },
-    { id: 'tutorials', label: 'Tutorials', icon: 'fas fa-chalkboard-teacher', path: '/tutorials' },
-    { id: 'notes', label: 'Notes', icon: 'fas fa-sticky-note', path: '/notes' }, // ← NEW
-    { id: 'chatbot', label: 'Student Assistant', icon: 'fas fa-robot', path: '/chatbot' },
-    { id: 'settings', label: 'Settings', icon: 'fas fa-cog', path: '/settings' },
-  ];
+const menuItems = [
+  { id: 'dashboard', label: 'Home', icon: 'fas fa-home', path: '/dashboard' },
+  { id: 'courses', label: 'Course Units', icon: 'fas fa-book', path: '/courses' },
+  { id: 'lectures', label: 'Lectures', icon: 'fas fa-video', path: '/lectures' },
+  { id: 'timetable', label: 'My Time Table', icon: 'fas fa-calendar-alt', path: '/timetable' },
+  { id: 'coursework', label: 'Course Work', icon: 'fas fa-tasks', path: '/coursework' },
+  { id: 'examinations', label: 'Examination', icon: 'fas fa-clipboard-list', path: '/examinations' },
+  { id: 'results', label: 'Examination Results', icon: 'fas fa-chart-bar', path: '/results' },
+  { id: 'finance', label: 'Financial Statements', icon: 'fas fa-money-bill-wave', path: '/finance' },
+  { id: 'tutorials', label: 'Tutorials', icon: 'fas fa-chalkboard-teacher', path: '/tutorials' },
+  { id: 'notes', label: 'Notes', icon: 'fas fa-sticky-note', path: '/notes' },
+  { id: 'help', label: 'Help & Support', icon: 'fas fa-headset', path: '/help-support' }, // ← NEW
+  { id: 'chatbot', label: 'Student Assistant', icon: 'fas fa-robot', path: '/chatbot' },
+  { id: 'settings', label: 'Settings', icon: 'fas fa-cog', path: '/settings' },
+];
 
   // Check if current path is active
   const isActive = (path) => {

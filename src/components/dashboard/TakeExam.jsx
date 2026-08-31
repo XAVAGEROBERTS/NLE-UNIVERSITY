@@ -1,5 +1,5 @@
 // components/dashboard/TakeExam.jsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
 import { useStudentAuth } from '../../context/StudentAuthContext';
@@ -66,12 +66,8 @@ const TakeExam = () => {
     return tempDiv.textContent || tempDiv.innerText || '';
   };
 
-  // Get word count from text
-  const getWordCount = (text) => {
-    if (!text) return 0;
-    const plainText = getPlainTextFromHTML(text);
-    return plainText.split(/\s+/).filter(word => word.length > 0).length;
-  };
+  // Use memo for character count
+  const answerCharCount = useMemo(() => answerText.length, [answerText]);
 
   // Modal functions
   const showConfirmModal = (title, message, onConfirm, onCancel = null, confirmText = 'Yes', cancelText = 'Cancel') => {
@@ -963,9 +959,8 @@ const TakeExam = () => {
       }
       
       if (exam.examType === 'written_online' || exam.examType === 'written') {
-        const plainText = getPlainTextFromHTML(answerText);
-        if (!answerText || answerText.trim().length < 20 || plainText.trim().length < 10) {
-          showAlertModal('No Answer', 'Please write your answer (at least 10 characters) before submitting.', 'alert');
+        if (answerText.trim().length < 20) {
+          showAlertModal('Insufficient Answer', `Your answer is too short (${answerText.length} characters). Minimum 20 characters required.`, 'alert');
           return false;
         }
         return true;
@@ -987,11 +982,9 @@ const TakeExam = () => {
     if (submissionType === 'file') {
       confirmMessage = `Are you sure you want to submit the exam?\n\nYou have uploaded ${examFiles.length} file(s).\nOnce submitted, you cannot make changes.`;
     } else if (submissionType === 'text') {
-      const wordCount = getWordCount(answerText);
-      confirmMessage = `Are you sure you want to submit the exam?\n\nYour answer contains approximately ${wordCount} words.\nOnce submitted, you cannot make changes.`;
+      confirmMessage = `Are you sure you want to submit the exam?\n\nYour answer contains ${answerText.length} characters.\nOnce submitted, you cannot make changes.`;
     } else {
-      const wordCount = getWordCount(answerText);
-      confirmMessage = `Are you sure you want to submit the exam?\n\nText answer: ${wordCount} words\nFiles uploaded: ${examFiles.length}\nOnce submitted, you cannot make changes.`;
+      confirmMessage = `Are you sure you want to submit the exam?\n\nText answer: ${answerText.length} characters\nFiles uploaded: ${examFiles.length}\nOnce submitted, you cannot make changes.`;
     }
     
     showConfirmModal(
@@ -1113,8 +1106,7 @@ const TakeExam = () => {
       if (submissionType === 'file') {
         successMessage = `✅ Your exam has been submitted successfully!\n\n${answerFileUrls.length} file(s) uploaded.\n\nYou will now be redirected to the examinations page.`;
       } else if (submissionType === 'text') {
-        const wordCount = getWordCount(answerText);
-        successMessage = `✅ Your exam has been submitted successfully!\n\nYour answer (${wordCount} words) has been saved.\n\nYou will now be redirected to the examinations page.`;
+        successMessage = `✅ Your exam has been submitted successfully!\n\nYour answer (${answerText.length} characters) has been saved.\n\nYou will now be redirected to the examinations page.`;
       }
 
       showAlertModal(
@@ -1792,37 +1784,89 @@ const TakeExam = () => {
                       borderLeft: '4px solid #007bff'
                     }}>
                       <strong>Submission Requirements:</strong>
-                      {submissionType === 'text' && ' You must provide a text answer (minimum 10 characters).'}
+                      {submissionType === 'text' && ' You must provide a text answer (minimum 20 characters).'}
                       {submissionType === 'file' && ' You must upload at least one file (PDF, DOC, DOCX, JPG, PNG).'}
                       {submissionType === 'both' && ' You must provide either a text answer OR upload files (or both).'}
                     </div>
                   </div>
                   
                   {showTextArea && (
-                    <textarea
-                      value={answerText}
-                      onChange={(e) => setAnswerText(e.target.value)}
-                      onPaste={(e) => { 
-                        e.preventDefault(); 
-                        e.stopPropagation();
-                        showAlertModal('Action Blocked', 'Pasting is not allowed during exams.', 'alert');
-                        return false;
-                      }}
-                      onCopy={(e) => e.stopPropagation()}
-                      onCut={(e) => { 
-                        e.preventDefault(); 
-                        e.stopPropagation();
-                        showAlertModal('Action Blocked', 'Cutting is not allowed during exams.', 'alert');
-                        return false;
-                      }}
-                      placeholder={submissionType === 'file' ? 'Text answer is not required for this exam.' : "Write your exam answers here..."}
-                      style={{
-                        ...styles.writtenTextarea,
-                        opacity: submissionType === 'file' ? 0.5 : 1,
-                        cursor: submissionType === 'file' ? 'not-allowed' : 'text'
-                      }}
-                      disabled={submissionType === 'file'}
-                    />
+                    <div>
+                      <textarea
+                        value={answerText}
+                        onChange={(e) => setAnswerText(e.target.value)}
+                        onPaste={(e) => { 
+                          e.preventDefault(); 
+                          e.stopPropagation();
+                          showAlertModal('Action Blocked', 'Pasting is not allowed during exams.', 'alert');
+                          return false;
+                        }}
+                        onCopy={(e) => e.stopPropagation()}
+                        onCut={(e) => { 
+                          e.preventDefault(); 
+                          e.stopPropagation();
+                          showAlertModal('Action Blocked', 'Cutting is not allowed during exams.', 'alert');
+                          return false;
+                        }}
+                        placeholder={submissionType === 'file' ? 'Text answer is not required for this exam.' : "Write your exam answers here..."}
+                        style={{
+                          ...styles.writtenTextarea,
+                          opacity: submissionType === 'file' ? 0.5 : 1,
+                          cursor: submissionType === 'file' ? 'not-allowed' : 'text'
+                        }}
+                        disabled={submissionType === 'file'}
+                      />
+                      
+                      {/* Character count display */}
+                      {submissionType !== 'file' && (
+                        <div style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginTop: '-20px',
+                          marginBottom: '20px',
+                          padding: '0 15px'
+                        }}>
+                          <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '10px'
+                          }}>
+                            <span style={{
+                              backgroundColor: answerCharCount > 0 ? '#e8f4fd' : '#f3f4f6',
+                              color: answerCharCount > 0 ? '#0066cc' : '#6b7280',
+                              padding: '4px 12px',
+                              borderRadius: '12px',
+                              fontSize: '13px',
+                              fontWeight: '500',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '5px'
+                            }}>
+                              <i className="fas fa-keyboard"></i>
+                              {answerCharCount} {answerCharCount === 1 ? 'character' : 'characters'}
+                            </span>
+                          </div>
+                          
+                          {answerCharCount > 0 && (
+                            <div style={{
+                              fontSize: '12px',
+                              color: answerCharCount < 20 ? '#dc3545' : '#28a745'
+                            }}>
+                              {answerCharCount < 20 ? (
+                                <span>
+                                  <i className="fas fa-exclamation-circle"></i> Minimum 20 characters required
+                                </span>
+                              ) : (
+                                <span>
+                                  <i className="fas fa-check-circle"></i> Character count satisfied
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   )}
 
                   {!showTextArea && (
@@ -2019,7 +2063,7 @@ const TakeExam = () => {
                   {submissionType === 'both' && ' 📝 Text + 📎 File Upload'}
                 </li>
                 {submissionType === 'text' && (
-                  <li>You must provide a text answer (minimum 10 characters)</li>
+                  <li>You must provide a text answer (minimum 20 characters)</li>
                 )}
                 {submissionType === 'file' && (
                   <li>You must upload at least one file (PDF, DOC, DOCX, JPG, PNG)</li>
@@ -2271,7 +2315,7 @@ const TakeExam = () => {
   );
 };
 
-// Styles (keeping the same styles as before)
+// Styles (same as before)
 const styles = {
   container: {
     minHeight: '100vh',

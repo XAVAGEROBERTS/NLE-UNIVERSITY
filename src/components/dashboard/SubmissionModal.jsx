@@ -1,5 +1,5 @@
 // src/components/SubmissionModal.jsx
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { supabase } from '../../services/supabase';
 
 const SubmissionModal = ({ assignment, studentId, onClose, onSubmitSuccess }) => {
@@ -10,6 +10,26 @@ const SubmissionModal = ({ assignment, studentId, onClose, onSubmitSuccess }) =>
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const fileInputRef = useRef(null);
+
+  // Fixed word count function
+  const countWords = (text) => {
+    if (!text || typeof text !== 'string') return 0;
+    const trimmed = text.trim();
+    if (trimmed === '') return 0;
+    const words = trimmed.split(/\s+/);
+    return words.length;
+  };
+
+  // Use useMemo for optimized word counting
+  const wordCount = useMemo(() => countWords(submissionText), [submissionText]);
+  const charCount = useMemo(() => submissionText.length, [submissionText]);
+
+  const handleTextChange = (e) => {
+    const newText = e.target.value;
+    setSubmissionText(newText);
+    console.log('Text changed:', newText);
+    console.log('Word count:', countWords(newText));
+  };
 
   const handleFileChange = (e) => {
     const selectedFiles = Array.from(e.target.files);
@@ -145,7 +165,7 @@ const SubmissionModal = ({ assignment, studentId, onClose, onSubmitSuccess }) =>
         backgroundColor: 'white',
         borderRadius: '12px',
         width: '100%',
-        maxWidth: '560px',           // Reduced from 700px
+        maxWidth: '560px',
         maxHeight: '90vh',
         display: 'flex',
         flexDirection: 'column',
@@ -238,7 +258,7 @@ const SubmissionModal = ({ assignment, studentId, onClose, onSubmitSuccess }) =>
               </label>
               <textarea
                 value={submissionText}
-                onChange={e => setSubmissionText(e.target.value)}
+                onChange={handleTextChange}
                 placeholder="Enter your answer here..."
                 rows={5}
                 style={{
@@ -247,11 +267,35 @@ const SubmissionModal = ({ assignment, studentId, onClose, onSubmitSuccess }) =>
                   border: '1px solid #d1d5db',
                   borderRadius: '6px',
                   fontSize: '14px',
-                  resize: 'vertical'
+                  resize: 'vertical',
+                  minHeight: '100px'
                 }}
               />
-              <div style={{ textAlign: 'right', fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
-                {submissionText.length} characters
+              <div style={{ 
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                fontSize: '12px', 
+                color: '#6b7280', 
+                marginTop: '4px',
+                padding: '0 2px'
+              }}>
+                <span style={{ 
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}>
+                  <span style={{ 
+                    backgroundColor: wordCount > 0 ? '#e0f2fe' : '#f3f4f6',
+                    color: wordCount > 0 ? '#0369a1' : '#6b7280',
+                    padding: '2px 8px',
+                    borderRadius: '12px',
+                    fontWeight: '500'
+                  }}>
+                    {wordCount} {wordCount === 1 ? 'word' : 'words'}
+                  </span>
+                </span>
+                <span>{charCount} characters</span>
               </div>
             </div>
           )}

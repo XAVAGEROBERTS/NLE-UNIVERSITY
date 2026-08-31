@@ -5,7 +5,7 @@ import { useStudentAuth } from '../../context/StudentAuthContext';
 import { useCachedData } from '../../hooks/useCachedData';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import './Results.css'; // Import the separate CSS file
+import './Results.css';
 
 const Results = () => {
   const location = useLocation();
@@ -38,7 +38,6 @@ const Results = () => {
 
   const fetchSpecificExamData = async () => {
     try {
-      
       // Get student data
       const { data: student, error: studentError } = await supabase
         .from('students')
@@ -111,164 +110,172 @@ const Results = () => {
     }
 
     const { data: student, error: studentError } = await supabase
-        .from('students')
-        .select('id, full_name, student_id, program, year_of_study, academic_year, semester')
-        .eq('email', user.email)
-        .single();
+      .from('students')
+      .select('id, full_name, student_id, program, year_of_study, academic_year, semester')
+      .eq('email', user.email)
+      .single();
 
-      if (studentError) throw new Error(`Student data error: ${studentError.message}`);
-      if (!student) throw new Error('Student not found');
+    if (studentError) throw new Error(`Student data error: ${studentError.message}`);
+    if (!student) throw new Error('Student not found');
 
-      // Fetch exam submissions that are graded
-      const { data: examSubmissions, error: subError } = await supabase
-        .from('exam_submissions')
-        .select('*')
-        .eq('student_id', student.id)
-        .eq('status', 'graded')
-        .not('total_marks_obtained', 'is', null);
+    // Fetch exam submissions that are graded
+    const { data: examSubmissions, error: subError } = await supabase
+      .from('exam_submissions')
+      .select('*')
+      .eq('student_id', student.id)
+      .eq('status', 'graded')
+      .not('total_marks_obtained', 'is', null);
 
-      if (subError) throw new Error(`Exam submissions error: ${subError.message}`);
+    if (subError) throw new Error(`Exam submissions error: ${subError.message}`);
 
-      // Also fetch student courses for academic results
-      const { data: studentCourses, error: scError } = await supabase
-        .from('student_courses')
-        .select('*')
-        .eq('student_id', student.id)
-        .eq('status', 'completed')
-        .not('grade', 'is', null);
+    // Also fetch student courses for academic results
+    const { data: studentCourses, error: scError } = await supabase
+      .from('student_courses')
+      .select('*')
+      .eq('student_id', student.id)
+      .eq('status', 'completed')
+      .not('grade', 'is', null);
 
-      if (scError) throw new Error(`Student courses error: ${scError.message}`);
+    if (scError) throw new Error(`Student courses error: ${scError.message}`);
 
-      if ((!examSubmissions || examSubmissions.length === 0) && 
-          (!studentCourses || studentCourses.length === 0)) {
-        return {
-          student,
-          resultsData: {},
-          cgpa: 0.0
-        };
-      }
-
-      // Organize exam results
-      if (examSubmissions && examSubmissions.length > 0) {
-        // Fetch exam details for graded submissions
-        const examIds = examSubmissions.map(sub => sub.exam_id);
-        const { data: exams, error: examsError } = await supabase
-          .from('examinations')
-          .select(`
-            *,
-            courses (id, course_code, course_name, credits, year, semester)
-          `)
-          .in('id', examIds);
-
-        if (examsError) throw new Error(`Exams error: ${examsError.message}`);
-
-        const examMap = {};
-        exams.forEach(exam => {
-          examMap[exam.id] = exam;
-        });
-
-        const organizedExamResults = {};
-        
-        examSubmissions.forEach(sub => {
-          const exam = examMap[sub.exam_id];
-          if (!exam || !exam.courses) return;
-
-          const yearKey = `year${exam.courses.year}`;
-          if (!organizedExamResults[yearKey]) {
-            organizedExamResults[yearKey] = {
-              year: exam.courses.year,
-              semester1: [],
-              semester2: [],
-              totalCredits: 0,
-              totalPoints: 0,
-              gpa: 0
-            };
-          }
-
-          const gradePoints = sub.grade_points || getGradePoints(sub.grade);
-          const result = {
-            id: sub.id,
-            examId: exam.id,
-            courseId: exam.course_id,
-            courseCode: exam.courses.course_code,
-            courseName: exam.courses.course_name,
-            examTitle: exam.title,
-            grade: sub.grade || getGradeFromMarks(sub.total_marks_obtained),
-            gradeLetter: sub.grade || getGradeFromMarks(sub.total_marks_obtained),
-            credits: exam.courses.credits || 3,
-            score: sub.total_marks_obtained || 0,
-            totalMarks: exam.total_marks,
-            percentage: sub.percentage || (sub.total_marks_obtained && exam.total_marks 
-              ? (sub.total_marks_obtained / exam.total_marks * 100).toFixed(2)
-              : 0),
-            gpa: gradePoints,
-            isCore: exam.courses.is_core,
-            semester: exam.courses.semester,
-            academicYear: exam.academic_year,
-            submissionDate: sub.submitted_at,
-            gradedDate: sub.graded_at,
-            feedback: sub.feedback
-          };
-
-          if (exam.courses.semester === 1) {
-            organizedExamResults[yearKey].semester1.push(result);
-          } else if (exam.courses.semester === 2) {
-            organizedExamResults[yearKey].semester2.push(result);
-          }
-
-          if (gradePoints && exam.courses.credits) {
-            organizedExamResults[yearKey].totalPoints += gradePoints * exam.courses.credits;
-            organizedExamResults[yearKey].totalCredits += exam.courses.credits;
-          }
-        });
-
-        // Calculate GPA for each year
-        Object.keys(organizedExamResults).forEach(yearKey => {
-          const yearData = organizedExamResults[yearKey];
-          yearData.semester1.sort((a, b) => a.courseCode.localeCompare(b.courseCode));
-          yearData.semester2.sort((a, b) => a.courseCode.localeCompare(b.courseCode));
-          if (yearData.totalCredits > 0) {
-            yearData.gpa = parseFloat((yearData.totalPoints / yearData.totalCredits).toFixed(2));
-          }
-        });
-
-        // Calculate overall CGPA from exam results
-        let totalPoints = 0;
-        let totalCredits = 0;
-        
-        Object.values(organizedExamResults).forEach(yearData => {
-          totalPoints += yearData.totalPoints;
-          totalCredits += yearData.totalCredits;
-        });
-        
-        const weightedGPA = totalCredits > 0 ? totalPoints / totalCredits : 0.0;
-
-        if (student?.year_of_study) {
-          const currentYearKey = `year${student.year_of_study}`;
-          if (organizedExamResults[currentYearKey]) {
-            setActiveYear(currentYearKey);
-          } else if (Object.keys(organizedExamResults).length > 0) {
-            const years = Object.keys(organizedExamResults).map(key => organizedExamResults[key].year);
-            const maxYear = Math.max(...years);
-            setActiveYear(`year${maxYear}`);
-          }
-        }
-
-        return {
-          student,
-          resultsData: organizedExamResults,
-          cgpa: parseFloat(weightedGPA.toFixed(2))
-        };
-      }
-
+    if ((!examSubmissions || examSubmissions.length === 0) && 
+        (!studentCourses || studentCourses.length === 0)) {
       return {
         student,
         resultsData: {},
         cgpa: 0.0
       };
+    }
 
+    // Organize exam results
+    if (examSubmissions && examSubmissions.length > 0) {
+      // Fetch exam details for graded submissions
+      const examIds = examSubmissions.map(sub => sub.exam_id);
+      const { data: exams, error: examsError } = await supabase
+        .from('examinations')
+        .select(`
+          *,
+          courses (id, course_code, course_name, credits, year, semester)
+        `)
+        .in('id', examIds);
 
+      if (examsError) throw new Error(`Exams error: ${examsError.message}`);
 
+      const examMap = {};
+      exams.forEach(exam => {
+        examMap[exam.id] = exam;
+      });
+
+      const organizedExamResults = {};
+      
+      examSubmissions.forEach(sub => {
+        const exam = examMap[sub.exam_id];
+        if (!exam || !exam.courses) return;
+
+        const yearKey = `year${exam.courses.year}`;
+        if (!organizedExamResults[yearKey]) {
+          organizedExamResults[yearKey] = {
+            year: exam.courses.year,
+            semester1: [],
+            semester2: [],
+            totalCredits: 0,
+            totalPoints: 0,
+            gpa: 0
+          };
+        }
+
+        // FIXED: Handle grade points calculation correctly
+        let gradePoints = 0;
+        if (sub.grade_points !== null && sub.grade_points !== undefined) {
+          gradePoints = parseFloat(sub.grade_points);
+        } else if (sub.grade) {
+          gradePoints = getGradePoints(sub.grade);
+        } else {
+          const calculatedGrade = getGradeFromMarks(sub.total_marks_obtained);
+          gradePoints = getGradePoints(calculatedGrade);
+        }
+
+        const result = {
+          id: sub.id,
+          examId: exam.id,
+          courseId: exam.course_id,
+          courseCode: exam.courses.course_code,
+          courseName: exam.courses.course_name,
+          examTitle: exam.title,
+          grade: sub.grade || getGradeFromMarks(sub.total_marks_obtained),
+          gradeLetter: sub.grade || getGradeFromMarks(sub.total_marks_obtained),
+          credits: exam.courses.credits || 3,
+          score: sub.total_marks_obtained || 0,
+          totalMarks: exam.total_marks,
+          percentage: sub.percentage || (sub.total_marks_obtained && exam.total_marks 
+            ? (sub.total_marks_obtained / exam.total_marks * 100).toFixed(2)
+            : 0),
+          gpa: gradePoints,
+          isCore: exam.courses.is_core,
+          semester: exam.courses.semester,
+          academicYear: exam.academic_year,
+          submissionDate: sub.submitted_at,
+          gradedDate: sub.graded_at,
+          feedback: sub.feedback
+        };
+
+        if (exam.courses.semester === 1) {
+          organizedExamResults[yearKey].semester1.push(result);
+        } else if (exam.courses.semester === 2) {
+          organizedExamResults[yearKey].semester2.push(result);
+        }
+
+        // FIXED: Always add credits and points, even for F grades
+        if (exam.courses.credits) {
+          organizedExamResults[yearKey].totalPoints += (gradePoints || 0) * exam.courses.credits;
+          organizedExamResults[yearKey].totalCredits += exam.courses.credits;
+        }
+      });
+
+      // Calculate GPA for each year
+      Object.keys(organizedExamResults).forEach(yearKey => {
+        const yearData = organizedExamResults[yearKey];
+        yearData.semester1.sort((a, b) => a.courseCode.localeCompare(b.courseCode));
+        yearData.semester2.sort((a, b) => a.courseCode.localeCompare(b.courseCode));
+        if (yearData.totalCredits > 0) {
+          yearData.gpa = parseFloat((yearData.totalPoints / yearData.totalCredits).toFixed(2));
+        }
+      });
+
+      // Calculate overall CGPA from exam results
+      let totalPoints = 0;
+      let totalCredits = 0;
+      
+      Object.values(organizedExamResults).forEach(yearData => {
+        totalPoints += yearData.totalPoints;
+        totalCredits += yearData.totalCredits;
+      });
+      
+      const weightedGPA = totalCredits > 0 ? totalPoints / totalCredits : 0.0;
+
+      if (student?.year_of_study) {
+        const currentYearKey = `year${student.year_of_study}`;
+        if (organizedExamResults[currentYearKey]) {
+          setActiveYear(currentYearKey);
+        } else if (Object.keys(organizedExamResults).length > 0) {
+          const years = Object.keys(organizedExamResults).map(key => organizedExamResults[key].year);
+          const maxYear = Math.max(...years);
+          setActiveYear(`year${maxYear}`);
+        }
+      }
+
+      return {
+        student,
+        resultsData: organizedExamResults,
+        cgpa: parseFloat(weightedGPA.toFixed(2))
+      };
+    }
+
+    return {
+      student,
+      resultsData: {},
+      cgpa: 0.0
+    };
   }, [user?.email]);
 
   // Use cached data hook
@@ -325,7 +332,8 @@ const Results = () => {
       'D': 2.0,
       'F': 0.0
     };
-    return gradeMap[grade.toUpperCase()] || 0.0;
+    const points = gradeMap[grade.toUpperCase()];
+    return points !== undefined ? points : 0.0;
   };
 
   const calculateSemesterGPA = (semesterResults) => {
@@ -333,8 +341,8 @@ const Results = () => {
     let totalPoints = 0;
     let totalCredits = 0;
     semesterResults.forEach(course => {
-      if (course.gpa && course.credits) {
-        totalPoints += course.gpa * course.credits;
+      if (course.credits) {
+        totalPoints += (course.gpa || 0) * course.credits;
         totalCredits += course.credits;
       }
     });
@@ -701,14 +709,15 @@ const Results = () => {
   };
 
   const renderGeneralResults = () => {
-  if (loading) {
-  return (
-    <div className="loading-container">
-      <div className="results-spinner"></div>
-      <p className="loading-text">Loading results...</p>
-    </div>
-  );
-}
+    if (loading) {
+      return (
+        <div className="loading-container">
+          <div className="results-spinner"></div>
+          <p className="loading-text">Loading results...</p>
+        </div>
+      );
+    }
+    
     if (error) {
       return (
         <div className="error-container">
