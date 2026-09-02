@@ -23,32 +23,7 @@ const Examinations = () => {
   const [checkingClearance, setCheckingClearance] = useState(false);
   const [activeTab, setActiveTab] = useState('all');
   const [hasScheduledExams, setHasScheduledExams] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
-  // ========== CHECK FOR RETURN FROM EXAM ==========
-  useEffect(() => {
-    // Check if we're returning from an exam submission
-    const searchParams = new URLSearchParams(location.search);
-    const fromExam = searchParams.get('fromExam');
-    const examStatus = searchParams.get('status');
-    
-    if (fromExam === 'true') {
-      // Force refresh data when returning from exam
-      console.log('🔄 Returning from exam with status:', examStatus);
-      
-      // Show refreshing state
-      setIsRefreshing(true);
-      
-      // Force refresh after a short delay
-      setTimeout(() => {
-        refreshExams();
-        setIsRefreshing(false);
-      }, 300);
-      
-      // Clean URL params
-      navigate('/examinations', { replace: true });
-    }
-  }, [location.search]);
+  const [isRefreshing] = useState(false); // Only keep the getter since we don't need the setter
 
   // ========== MOBILE DETECTION EFFECT ==========
   useEffect(() => {
@@ -268,7 +243,7 @@ const Examinations = () => {
       hasScheduledExams: hasScheduled,
       clearanceStatus: clearance
     };
-  }, [user?.email]);
+  }, [user]);
 
   // ========== CACHED DATA HOOK ==========
   const { 
@@ -296,32 +271,74 @@ const Examinations = () => {
 
   // ========== UPDATE STATE FROM CACHED DATA ==========
   useEffect(() => {
+    let timeoutId = null;
+    let rafId = null;
+    
     if (cachedExamData) {
-      setStudentInfo(cachedExamData.student);
-      setExams(cachedExamData.exams || []);
-      setHasScheduledExams(cachedExamData.hasScheduledExams);
-      setClearanceStatus(cachedExamData.clearanceStatus);
+      // Batch all state updates together
+      const updateState = () => {
+        setStudentInfo(cachedExamData.student);
+        setExams(cachedExamData.exams || []);
+        setHasScheduledExams(cachedExamData.hasScheduledExams);
+        setClearanceStatus(cachedExamData.clearanceStatus);
+        
+        const resumeExams = (cachedExamData.exams || []).filter(e => e.status === 'resume');
+        if (resumeExams.length > 0) {
+          console.log(`🔄 Found ${resumeExams.length} exams with resume status:`, 
+            resumeExams.map(e => ({ id: e.id.slice(0, 8), title: e.title }))
+          );
+        }
+        
+        if (cachedExamData.clearanceStatus && 
+            !cachedExamData.clearanceStatus.cleared && 
+            !cachedExamData.student?.fees_clearance_bypassed &&
+            !cachedExamData.student?.attendance_clearance_bypassed &&
+            !cachedExamData.student?.exam_clearance_bypassed &&
+            cachedExamData.hasScheduledExams) {
+          timeoutId = setTimeout(() => {
+            setShowClearanceModal(true);
+          }, 1000);
+        }
+      };
       
-      // Log resume exams for debugging
-      const resumeExams = (cachedExamData.exams || []).filter(e => e.status === 'resume');
-      if (resumeExams.length > 0) {
-        console.log(`🔄 Found ${resumeExams.length} exams with resume status:`, 
-          resumeExams.map(e => ({ id: e.id.slice(0, 8), title: e.title }))
-        );
-      }
-      
-      if (cachedExamData.clearanceStatus && 
-          !cachedExamData.clearanceStatus.cleared && 
-          !cachedExamData.student?.fees_clearance_bypassed &&
-          !cachedExamData.student?.attendance_clearance_bypassed &&
-          !cachedExamData.student?.exam_clearance_bypassed &&
-          cachedExamData.hasScheduledExams) {
-        setTimeout(() => {
-          setShowClearanceModal(true);
-        }, 1000);
-      }
+      // Use requestAnimationFrame to batch updates
+      rafId = requestAnimationFrame(updateState);
     }
+    
+    return () => {
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+      }
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
   }, [cachedExamData]);
+
+  // ========== REFRESH FUNCTION ==========
+  const refreshExams = () => {
+    console.log('🔄 Refreshing examinations...');
+    // Clear the cache to force fresh data
+    if (user?.id) {
+      localStorage.removeItem(`examinations-${user.id}`);
+      localStorage.removeItem(`examinations-${user.email}`);
+    }
+    refetchExams();
+  };
+
+  // ========== CHECK FOR RETURN FROM EXAM ==========
+  useEffect(() => {
+    const searchParams = new URLSearchParams(location.search);
+    const fromExam = searchParams.get('fromExam');
+    const examStatus = searchParams.get('status');
+    
+    if (fromExam === 'true') {
+      console.log('🔄 Returning from exam with status:', examStatus);
+      refreshExams();
+      navigate('/examinations', { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search, navigate]);
 
   // ========== HANDLER FUNCTIONS ==========
 
@@ -432,16 +449,6 @@ const Examinations = () => {
     });
   };
 
-  const refreshExams = () => {
-    console.log('🔄 Refreshing examinations...');
-    // Clear the cache to force fresh data
-    if (user?.id) {
-      localStorage.removeItem(`examinations-${user.id}`);
-      localStorage.removeItem(`examinations-${user.email}`);
-    }
-    refetchExams();
-  };
-
   const recheckClearance = async () => {
     if (!studentInfo || !hasScheduledExams) return;
     
@@ -485,6 +492,11 @@ const Examinations = () => {
         !exam.graded && 
         (exam.status === 'upcoming' || exam.status === 'active' || exam.status === 'resume')
       );
+
+      // Generate unique ID using timestamp + random (safe inside event handler)
+      const uniqueId = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+      const generatedDate = new Date().toLocaleString();
+      const issuedDate = new Date().toLocaleDateString();
 
       const permitElement = document.createElement('div');
       permitElement.id = 'exam-permit-content';
@@ -544,7 +556,7 @@ const Examinations = () => {
               <strong>Attendance Status:</strong> ${clearanceStatus?.attendance?.notes || 'Checking...'}
             </div>
             <div style="margin-bottom: 10px;">
-              <strong>Issued Date:</strong> ${new Date().toLocaleDateString()}
+              <strong>Issued Date:</strong> ${issuedDate}
             </div>
             <div style="margin-bottom: 10px;">
               <strong>Valid Until:</strong> End of Semester
@@ -621,8 +633,8 @@ const Examinations = () => {
             University Examination Department
           </div>
           <div style="color: #999; font-size: 12px;">
-            Generated on: ${new Date().toLocaleString()}<br/>
-            Permit ID: PERMIT-${studentInfo.student_id}-${Date.now().toString().slice(-8)}
+            Generated on: ${generatedDate}<br/>
+            Permit ID: PERMIT-${studentInfo.student_id}-${uniqueId}
           </div>
         </div>
       `;
@@ -725,7 +737,7 @@ const Examinations = () => {
                       {clearanceStatus.financial?.outstandingBalance > 0 && (
                         <div className="outstanding-amount">
                           <i className="fas fa-exclamation-circle"></i>
-                          <span>Outstanding Balance: $${clearanceStatus.financial.outstandingBalance.toLocaleString()}</span>
+                          <span>Outstanding Balance: ${clearanceStatus.financial.outstandingBalance.toLocaleString()}</span>
                         </div>
                       )}
                     </div>
@@ -746,8 +758,59 @@ const Examinations = () => {
                       </div>
                     </div>
                   )}
+
+                  {/* ========== NEW: Assignment Submissions Check ========== */}
+                  {!clearanceStatus.assignmentSubmissions?.allSubmitted && (
+                    <div className="clearance-issue assignment-issue">
+                      <div className="clearance-issue-header">
+                        <i className="fas fa-tasks"></i>
+                        <h4>All Assignments Must Be Submitted</h4>
+                        <span className="issue-status">NOT CLEARED</span>
+                      </div>
+                      <p className="issue-notes">
+                        You must submit <strong>ALL assignments</strong> for each course with a scheduled exam.
+                      </p>
+                      <div className="clearance-details">
+                        {clearanceStatus.assignmentSubmissions?.missingSubmissions?.map((missing, idx) => (
+                          <div key={idx} className="clearance-detail">
+                            <strong>{missing.courseCode}:</strong> {missing.courseName}
+                            <div className="assignment-list">
+                              <span className="assignment-warning">
+                                ⚠️ {missing.submittedCount}/{missing.totalAssignments} assignments submitted ({missing.missingCount} missing)
+                              </span>
+                              {missing.missingAssignmentTitles?.length > 0 && (
+                                <div className="assignment-titles missing">
+                                  <small>❌ Missing submissions for:</small>
+                                  <ul>
+                                    {missing.missingAssignmentTitles.map((title, i) => (
+                                      <li key={i}>{title}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                              {missing.submittedAssignmentTitles?.length > 0 && (
+                                <div className="assignment-titles submitted">
+                                  <small>✅ Submitted:</small>
+                                  <ul>
+                                    {missing.submittedAssignmentTitles.map((title, i) => (
+                                      <li key={i}>{title}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="clearance-action-hint">
+                        <i className="fas fa-info-circle"></i>
+                        <span>Please submit <strong>ALL missing assignments</strong> for each course above to clear this requirement.</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 
+                {/* ========== UPDATED: Requirements Section ========== */}
                 <div className="clearance-requirements">
                   <h4><i className="fas fa-list-check"></i> Requirements to be Cleared:</h4>
                   <ul>
@@ -758,6 +821,10 @@ const Examinations = () => {
                     <li>
                       <i className="fas fa-calendar-check"></i>
                       <span>Minimum attendance of {clearanceStatus.requirements?.minimum_attendance_percentage || 75}%</span>
+                    </li>
+                    <li>
+                      <i className="fas fa-tasks"></i>
+                      <span>Submit <strong>ALL assignments</strong> for each course with a scheduled exam</span>
                     </li>
                     <li>
                       <i className="fas fa-file-contract"></i>
@@ -781,6 +848,13 @@ const Examinations = () => {
                         <i className="fas fa-user-graduate"></i>
                         <h5>Contact Department</h5>
                         <p>Submit absence excuses or check attendance records</p>
+                      </div>
+                    )}
+                    {!clearanceStatus.assignmentSubmissions?.allSubmitted && (
+                      <div className="instruction-card">
+                        <i className="fas fa-upload"></i>
+                        <h5>Submit Missing Assignments</h5>
+                        <p>Go to Course Work and submit all pending assignments</p>
                       </div>
                     )}
                     <div className="instruction-card">
@@ -892,6 +966,13 @@ const Examinations = () => {
               <div>
                 <span className="detail-label">Attendance</span>
                 <span className="detail-value">{clearanceStatus.attendance?.cleared ? 'Cleared' : 'Pending'}</span>
+              </div>
+            </div>
+            <div className={`clearance-detail ${clearanceStatus.assignmentSubmissions?.allSubmitted ? 'success' : 'error'}`}>
+              <i className={`fas ${clearanceStatus.assignmentSubmissions?.allSubmitted ? 'fa-check' : 'fa-times'}`}></i>
+              <div>
+                <span className="detail-label">Assignments</span>
+                <span className="detail-value">{clearanceStatus.assignmentSubmissions?.allSubmitted ? 'All Submitted' : 'Pending'}</span>
               </div>
             </div>
           </div>

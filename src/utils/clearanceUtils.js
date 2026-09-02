@@ -1,9 +1,9 @@
-// utils/clearanceUtils.js - SIMPLIFIED VERSION
 import { supabase } from '../services/supabase';
 
 /**
  * Main function to check exam clearance for a student
  * Uses dashboard attendance percentage for consistency
+ * Now also checks if student has submitted ALL assignments for each course with scheduled exams
  */
 export const checkExamClearance = async (studentId, academicYear, semester) => {
   try {
@@ -13,7 +13,7 @@ export const checkExamClearance = async (studentId, academicYear, semester) => {
     // 1. First, get student details for verification
     const { data: student, error: studentError } = await supabase
       .from('students')
-      .select('id, student_id, full_name, program_code, year_of_study, semester, academic_year, email')
+      .select('id, student_id, full_name, program_code, year_of_study, semester, academic_year, email, department_code, program_id')
       .eq('id', studentId)
       .single();
 
@@ -42,25 +42,31 @@ export const checkExamClearance = async (studentId, academicYear, semester) => {
     // 3. Check financial records
     const financialResult = await checkFinancialClearance(studentId, academicYear, semester, student);
     
-    // 4. NEW: Check assignment access (50% tuition fees paid)
+    // 4. Check assignment access (50% tuition fees paid)
     const assignmentAccessResult = await checkAssignmentAccess(studentId, academicYear, semester, student);
     
-    // 5. Determine clearance status
-    const attendanceCleared = attendancePercentage >= 75;
-    const overallCleared = financialResult.cleared && attendanceCleared;
+    // 5. Check ALL assignment submissions for courses with upcoming/active exams
+    const assignmentSubmissionResult = await checkAllAssignmentSubmissionsForExams(studentId, academicYear, semester, student);
     
-    // 6. Save to clearance table
+    // 6. Determine clearance status
+    const attendanceCleared = attendancePercentage >= 75;
+    const allAssignmentsSubmitted = assignmentSubmissionResult.allSubmitted;
+    const overallCleared = financialResult.cleared && attendanceCleared && allAssignmentsSubmitted;
+    
+    // 7. Save to clearance table
     const clearanceData = {
       student_id: studentId,
       academic_year: academicYear || student.academic_year || '2025/2029',
       semester: semester || student.semester || 1,
       financial_cleared: financialResult.cleared,
       attendance_cleared: attendanceCleared,
-      assignment_access: assignmentAccessResult.hasAccess, // NEW FIELD
+      assignment_access: assignmentAccessResult.hasAccess,
+      assignment_submissions_cleared: allAssignmentsSubmitted,
       overall_cleared: overallCleared,
       financial_notes: financialResult.notes,
       attendance_notes: `Attendance: ${attendancePercentage}%`,
-      assignment_notes: assignmentAccessResult.notes, // NEW FIELD
+      assignment_notes: assignmentAccessResult.notes,
+      assignment_submissions_notes: assignmentSubmissionResult.notes,
       attendance_percentage: attendancePercentage,
       updated_at: new Date().toISOString()
     };
@@ -75,7 +81,7 @@ export const checkExamClearance = async (studentId, academicYear, semester) => {
         onConflict: 'student_id,academic_year,semester'
       });
 
-    // 7. Return formatted result
+    // 8. Return formatted result
     return {
       cleared: overallCleared,
       financial: {
@@ -87,7 +93,7 @@ export const checkExamClearance = async (studentId, academicYear, semester) => {
         totalPaid: financialResult.totalPaid,
         programCode: student.program_code
       },
-      assignmentAccess: { // NEW SECTION
+      assignmentAccess: {
         hasAccess: assignmentAccessResult.hasAccess,
         notes: assignmentAccessResult.notes,
         details: assignmentAccessResult.details,
@@ -95,6 +101,13 @@ export const checkExamClearance = async (studentId, academicYear, semester) => {
         minimumRequired: 50,
         requiredAmount: assignmentAccessResult.requiredAmount,
         paidAmount: assignmentAccessResult.paidAmount
+      },
+      assignmentSubmissions: {
+        allSubmitted: assignmentSubmissionResult.allSubmitted,
+        notes: assignmentSubmissionResult.notes,
+        details: assignmentSubmissionResult.details,
+        coursesWithExams: assignmentSubmissionResult.coursesWithExams,
+        missingSubmissions: assignmentSubmissionResult.missingSubmissions
       },
       attendance: {
         cleared: attendanceCleared,
@@ -118,7 +131,8 @@ export const checkExamClearance = async (studentId, academicYear, semester) => {
         minimum_attendance_percentage: 75,
         require_financial_clearance: true,
         require_attendance_clearance: true,
-        minimum_fee_payment_percentage: 50 // NEW REQUIREMENT
+        minimum_fee_payment_percentage: 50,
+        require_all_assignment_submissions: true
       },
       timestamp: new Date().toISOString(),
       source: 'dashboard-attendance-calculation'
@@ -131,7 +145,328 @@ export const checkExamClearance = async (studentId, academicYear, semester) => {
 };
 
 /**
- * NEW: Check if student has access to assignments (50% tuition fees paid)
+ * FIXED: Check if student has submitted ALL assignments for courses with upcoming/active exams ONLY
+ * (excludes ended exams by filtering end_time > NOW())
+ */
+const checkAllAssignmentSubmissionsForExams = async (studentId, academicYear, semester, student) => {
+  try {
+    console.log('=== CHECKING ALL ASSIGNMENT SUBMISSIONS FOR UPCOMING/ACTIVE EXAMS ===');
+    
+    const targetAcademicYear = academicYear || student.academic_year || '2025/2029';
+    const targetSemester = semester || student.semester || 1;
+    const targetYear = student.year_of_study || 1;
+    const now = new Date().toISOString(); // current time for filtering
+    
+    // 1. Get student's enrolled courses (non-completed)
+    const { data: studentCourses, error: coursesError } = await supabase
+      .from('student_courses')
+      .select('course_id, status')
+      .eq('student_id', studentId)
+      .neq('status', 'completed');
+
+    if (coursesError) {
+      console.error('Error fetching student courses:', coursesError);
+      return {
+        allSubmitted: false,
+        notes: 'Error checking course enrollment',
+        details: ['❌ Could not verify your course enrollment'],
+        coursesWithExams: [],
+        missingSubmissions: []
+      };
+    }
+
+    const courseIds = studentCourses?.map(sc => sc.course_id) || [];
+    
+    if (courseIds.length === 0) {
+      return {
+        allSubmitted: true,
+        notes: 'No courses enrolled',
+        details: ['ℹ️ No courses found - clearance granted by default'],
+        coursesWithExams: [],
+        missingSubmissions: []
+      };
+    }
+
+    // 2. Get exams that are NOT ended (end_time > now) and status in ['scheduled','published','active']
+    let query = supabase
+      .from('examinations')
+      .select(`
+        id,
+        course_id,
+        title,
+        start_time,
+        end_time,
+        courses!inner (
+          id, course_code, course_name
+        )
+      `)
+      .in('course_id', courseIds)
+      .in('status', ['scheduled', 'published', 'active'])
+      .gt('end_time', now) // ⭐ KEY FIX: only exams that haven't ended yet
+      .order('start_time', { ascending: true });
+
+    // Apply cohort targeting (same as before)
+    const cleanAY = (targetAcademicYear).trim().replace(/\s/g, '');
+    
+    if (cleanAY || targetYear || targetSemester || student.program_id) {
+      const orConditions = [];
+      
+      if (cleanAY) {
+        orConditions.push(`target_academic_year.eq.${cleanAY}`);
+        orConditions.push(`target_academic_year.is.null`);
+      }
+      
+      if (targetYear != null) {
+        orConditions.push(`target_year_of_study.eq.${targetYear}`);
+        orConditions.push(`target_year_of_study.is.null`);
+      }
+      
+      if (targetSemester != null) {
+        orConditions.push(`target_semester.eq.${targetSemester}`);
+        orConditions.push(`target_semester.is.null`);
+      }
+      
+      if (student.program_id) {
+        orConditions.push(`target_program_id.eq.${student.program_id}`);
+        orConditions.push(`target_program_id.is.null`);
+      }
+      
+      if (orConditions.length > 0) {
+        query = query.or(orConditions.join(','));
+      }
+    }
+
+    const { data: examsData, error: examsError } = await query;
+    
+    if (examsError) {
+      console.error('Error fetching exams:', examsError);
+      return {
+        allSubmitted: false,
+        notes: 'Error checking scheduled exams',
+        details: ['❌ Could not verify your scheduled exams'],
+        coursesWithExams: [],
+        missingSubmissions: []
+      };
+    }
+
+    // Get unique course IDs from upcoming/active exams
+    const courseIdsWithExams = [...new Set(examsData?.map(e => e.course_id) || [])];
+    
+    if (courseIdsWithExams.length === 0) {
+      return {
+        allSubmitted: true,
+        notes: 'No upcoming or active exams found',
+        details: ['ℹ️ No upcoming/active exams - clearance granted by default'],
+        coursesWithExams: [],
+        missingSubmissions: []
+      };
+    }
+
+    console.log(`📚 Found ${courseIdsWithExams.length} courses with upcoming/active exams`);
+
+    // 3. Get ALL assignments for these courses
+    const { data: assignmentsData, error: assignmentsError } = await supabase
+      .from('assignments')
+      .select('id, course_id, title, due_date, status')
+      .in('course_id', courseIdsWithExams)
+      .in('status', ['published', 'closed', 'graded']);
+
+    if (assignmentsError) {
+      console.error('Error fetching assignments:', assignmentsError);
+      return {
+        allSubmitted: false,
+        notes: 'Error checking assignments',
+        details: ['❌ Could not verify assignment submissions'],
+        coursesWithExams: [],
+        missingSubmissions: []
+      };
+    }
+
+    // Group assignments by course
+    const assignmentsByCourse = {};
+    assignmentsData?.forEach(assignment => {
+      if (!assignmentsByCourse[assignment.course_id]) {
+        assignmentsByCourse[assignment.course_id] = [];
+      }
+      assignmentsByCourse[assignment.course_id].push(assignment);
+    });
+
+    // 4. Get ALL student's submissions for these assignments
+    const assignmentIds = assignmentsData?.map(a => a.id) || [];
+    
+    if (assignmentIds.length === 0) {
+      // No assignments found for these courses - consider it cleared
+      return {
+        allSubmitted: true,
+        notes: 'No assignments found for upcoming/active exam courses',
+        details: ['ℹ️ No assignments to submit - clearance granted'],
+        coursesWithExams: courseIdsWithExams.map(cid => {
+          const exam = examsData?.find(e => e.course_id === cid);
+          return {
+            courseId: cid,
+            courseCode: exam?.courses?.course_code || 'N/A',
+            courseName: exam?.courses?.course_name || 'N/A',
+            totalAssignments: 0,
+            submittedCount: 0,
+            allSubmitted: true,
+            reason: 'No assignments available'
+          };
+        }),
+        missingSubmissions: []
+      };
+    }
+
+    const { data: submissionsData, error: submissionsError } = await supabase
+      .from('assignment_submissions')
+      .select('assignment_id, status')
+      .eq('student_id', studentId)
+      .in('assignment_id', assignmentIds);
+
+    if (submissionsError) {
+      console.error('Error fetching submissions:', submissionsError);
+      return {
+        allSubmitted: false,
+        notes: 'Error checking your submissions',
+        details: ['❌ Could not verify your assignment submissions'],
+        coursesWithExams: [],
+        missingSubmissions: []
+      };
+    }
+
+    // Create set of submitted assignment IDs
+    const submittedAssignmentIds = new Set();
+    submissionsData?.forEach(sub => {
+      if (sub.status === 'submitted' || sub.status === 'graded') {
+        submittedAssignmentIds.add(sub.assignment_id);
+      }
+    });
+
+    // 5. Check each course with exams - ALL assignments must be submitted
+    const coursesWithExams = [];
+    const missingSubmissions = [];
+
+    for (const courseId of courseIdsWithExams) {
+      const courseAssignments = assignmentsByCourse[courseId] || [];
+      const exam = examsData?.find(e => e.course_id === courseId);
+      
+      // Check if ALL assignments are submitted
+      let submittedCount = 0;
+      const missingAssignments = [];
+      const submittedAssignments = [];
+      const allAssignmentStatuses = [];
+      
+      courseAssignments.forEach(assignment => {
+        const isSubmitted = submittedAssignmentIds.has(assignment.id);
+        if (isSubmitted) {
+          submittedCount++;
+          submittedAssignments.push(assignment.title);
+        } else {
+          missingAssignments.push(assignment.title);
+        }
+        allAssignmentStatuses.push({
+          assignmentId: assignment.id,
+          title: assignment.title,
+          isSubmitted: isSubmitted,
+          dueDate: assignment.due_date,
+          status: assignment.status
+        });
+      });
+
+      const allSubmitted = submittedCount === courseAssignments.length && courseAssignments.length > 0;
+      const hasNoAssignments = courseAssignments.length === 0;
+      
+      coursesWithExams.push({
+        courseId: courseId,
+        courseCode: exam?.courses?.course_code || 'N/A',
+        courseName: exam?.courses?.course_name || 'N/A',
+        totalAssignments: courseAssignments.length,
+        submittedCount: submittedCount,
+        allSubmitted: allSubmitted || hasNoAssignments,
+        submittedAssignments: submittedAssignments,
+        missingAssignments: missingAssignments,
+        assignmentStatuses: allAssignmentStatuses,
+        hasNoAssignments: hasNoAssignments
+      });
+
+      // If there are assignments and not all are submitted, add to missing
+      if (!hasNoAssignments && !allSubmitted) {
+        missingSubmissions.push({
+          courseId: courseId,
+          courseCode: exam?.courses?.course_code || 'N/A',
+          courseName: exam?.courses?.course_name || 'N/A',
+          totalAssignments: courseAssignments.length,
+          submittedCount: submittedCount,
+          missingCount: courseAssignments.length - submittedCount,
+          missingAssignmentTitles: missingAssignments,
+          submittedAssignmentTitles: submittedAssignments
+        });
+      }
+    }
+
+    const allSubmitted = missingSubmissions.length === 0;
+    
+    // Build details
+    const details = [];
+    const notes = allSubmitted 
+      ? '✅ All assignment submissions completed for courses with upcoming/active exams'
+      : `❌ Missing assignment submissions for ${missingSubmissions.length} course(s) with upcoming/active exams`;
+
+    if (allSubmitted) {
+      details.push('✅ All assignment submissions completed');
+      coursesWithExams.forEach(c => {
+        if (c.totalAssignments > 0) {
+          details.push(`  - ${c.courseCode}: ${c.submittedCount}/${c.totalAssignments} assignments submitted ✓`);
+        } else {
+          details.push(`  - ${c.courseCode}: No assignments required ✓`);
+        }
+      });
+    } else {
+      details.push('❌ Missing assignment submissions:');
+      missingSubmissions.forEach(m => {
+        details.push(`  - ${m.courseCode}: ${m.submittedCount}/${m.totalAssignments} assignments submitted (${m.missingCount} missing)`);
+        m.missingAssignmentTitles.forEach(title => {
+          details.push(`    ✗ ${title}`);
+        });
+        if (m.submittedAssignmentTitles.length > 0) {
+          details.push(`    ✓ Submitted: ${m.submittedAssignmentTitles.join(', ')}`);
+        }
+      });
+      
+      // Also show courses that are fully submitted
+      const okCourses = coursesWithExams.filter(c => c.allSubmitted && c.totalAssignments > 0);
+      if (okCourses.length > 0) {
+        details.push('✅ Courses with all assignments submitted:');
+        okCourses.forEach(c => {
+          details.push(`  - ${c.courseCode}: ${c.submittedCount}/${c.totalAssignments} ✓`);
+        });
+      }
+    }
+
+    console.log(`✅ ALL assignment submission check: ${allSubmitted ? 'PASSED' : 'FAILED'}`);
+    console.log(`   - ${missingSubmissions.length} courses with missing submissions`);
+
+    return {
+      allSubmitted,
+      notes,
+      details,
+      coursesWithExams,
+      missingSubmissions
+    };
+
+  } catch (error) {
+    console.error('Error in checkAllAssignmentSubmissionsForExams:', error);
+    return {
+      allSubmitted: false,
+      notes: `Error checking assignment submissions: ${error.message}`,
+      details: ['❌ System error checking assignment submissions'],
+      coursesWithExams: [],
+      missingSubmissions: []
+    };
+  }
+};
+
+/**
+ * Check assignment access (50% tuition fees paid)
  */
 const checkAssignmentAccess = async (studentId, academicYear, semester, student) => {
   try {
@@ -385,61 +720,6 @@ const checkFinancialClearance = async (studentId, academicYear, semester, studen
   }
 };
 
-// Rest of the file remains the same (getDashboardAttendancePercentage, getExamClearanceStatus, etc.)
-// ... (keep all existing functions exactly as they were)
-
-/**
- * NEW: Quick check for assignment access only
- */
-export const checkAssignmentAccessOnly = async (studentId) => {
-  try {
-    const { data: student, error: studentError } = await supabase
-      .from('students')
-      .select('id, academic_year, semester, student_id, full_name')
-      .eq('id', studentId)
-      .single();
-
-    if (studentError || !student) {
-      return { hasAccess: false, error: 'Student not found' };
-    }
-
-    // Check cached clearance status
-    const existingStatus = await getExamClearanceStatus(
-      studentId,
-      student.academic_year,
-      student.semester
-    );
-
-    if (existingStatus && existingStatus.assignment_access !== undefined) {
-      return {
-        hasAccess: existingStatus.assignment_access,
-        cached: true,
-        lastChecked: existingStatus.updated_at,
-        notes: existingStatus.assignment_notes
-      };
-    }
-
-    // Run full check if no cached status
-    const result = await checkExamClearance(studentId, student.academic_year, student.semester);
-    
-    return {
-      hasAccess: result.assignmentAccess?.hasAccess || false,
-      cached: false,
-      percentagePaid: result.assignmentAccess?.percentagePaid || 0,
-      notes: result.assignmentAccess?.notes || 'No assignment access information',
-      details: result.assignmentAccess?.details || []
-    };
-
-  } catch (error) {
-    console.error('Error in checkAssignmentAccessOnly:', error);
-    return { 
-      hasAccess: false, 
-      error: error.message,
-      notes: 'Error checking assignment access'
-    };
-  }
-};
-
 /**
  * Get attendance percentage using dashboard logic
  */
@@ -462,7 +742,7 @@ const getDashboardAttendancePercentage = async (studentId) => {
     // Use the SAME logic as dashboard: last 4 months
     const semesterStart = new Date();
     semesterStart.setMonth(semesterStart.getMonth() - 4);
-    semesterStart.setDate(1); // Start of month
+    semesterStart.setDate(1);
 
     const startDateStr = semesterStart.toISOString().split('T')[0];
     
@@ -520,7 +800,7 @@ export const getExamClearanceStatus = async (studentId, academicYear, semester) 
       .single();
 
     if (error) {
-      if (error.code === 'PGRST116') { // No rows returned
+      if (error.code === 'PGRST116') {
         return null;
       }
       throw error;
@@ -546,6 +826,91 @@ export const manuallyCheckClearance = async (studentId, academicYear, semester) 
 };
 
 /**
+ * Quick check for assignment submissions only (ALL assignments)
+ */
+export const checkAllAssignmentSubmissionsOnly = async (studentId) => {
+  try {
+    const { data: student, error: studentError } = await supabase
+      .from('students')
+      .select('id, academic_year, semester, student_id, full_name, year_of_study, department_code, program_id')
+      .eq('id', studentId)
+      .single();
+
+    if (studentError || !student) {
+      return { allSubmitted: false, error: 'Student not found' };
+    }
+
+    const result = await checkExamClearance(studentId, student.academic_year, student.semester);
+    
+    return {
+      allSubmitted: result.assignmentSubmissions?.allSubmitted || false,
+      coursesWithExams: result.assignmentSubmissions?.coursesWithExams || [],
+      missingSubmissions: result.assignmentSubmissions?.missingSubmissions || [],
+      details: result.assignmentSubmissions?.details || [],
+      notes: result.assignmentSubmissions?.notes || 'No assignment submission information'
+    };
+
+  } catch (error) {
+    console.error('Error in checkAllAssignmentSubmissionsOnly:', error);
+    return { 
+      allSubmitted: false, 
+      error: error.message,
+      notes: 'Error checking assignment submissions'
+    };
+  }
+};
+
+/**
+ * Quick check for assignment access only
+ */
+export const checkAssignmentAccessOnly = async (studentId) => {
+  try {
+    const { data: student, error: studentError } = await supabase
+      .from('students')
+      .select('id, academic_year, semester, student_id, full_name')
+      .eq('id', studentId)
+      .single();
+
+    if (studentError || !student) {
+      return { hasAccess: false, error: 'Student not found' };
+    }
+
+    const existingStatus = await getExamClearanceStatus(
+      studentId,
+      student.academic_year,
+      student.semester
+    );
+
+    if (existingStatus && existingStatus.assignment_access !== undefined) {
+      return {
+        hasAccess: existingStatus.assignment_access,
+        cached: true,
+        lastChecked: existingStatus.updated_at,
+        notes: existingStatus.assignment_notes
+      };
+    }
+
+    const result = await checkExamClearance(studentId, student.academic_year, student.semester);
+    
+    return {
+      hasAccess: result.assignmentAccess?.hasAccess || false,
+      cached: false,
+      percentagePaid: result.assignmentAccess?.percentagePaid || 0,
+      notes: result.assignmentAccess?.notes || 'No assignment access information',
+      details: result.assignmentAccess?.details || []
+    };
+
+  } catch (error) {
+    console.error('Error in checkAssignmentAccessOnly:', error);
+    return { 
+      hasAccess: false, 
+      error: error.message,
+      notes: 'Error checking assignment access'
+    };
+  }
+};
+
+/**
  * DEBUG: Get detailed attendance analysis
  */
 export const debugAttendanceRecords = async (studentId) => {
@@ -562,10 +927,8 @@ export const debugAttendanceRecords = async (studentId) => {
       return { error: 'Student not found', details: studentError };
     }
 
-    // Get dashboard attendance percentage
     const dashboardPercentage = await getDashboardAttendancePercentage(studentId);
     
-    // Also get all records for debugging
     const { data: allRecords, error: allRecordsError } = await supabase
       .from('attendance_records')
       .select('*')
@@ -623,7 +986,6 @@ export const quickClearanceCheck = async (studentId) => {
       return { cleared: false, error: 'Student not found' };
     }
 
-    // Get existing clearance status from database
     const existingStatus = await getExamClearanceStatus(
       studentId,
       student.academic_year,
@@ -636,12 +998,14 @@ export const quickClearanceCheck = async (studentId) => {
         financial: existingStatus.financial_cleared,
         attendance: existingStatus.attendance_cleared,
         assignment_access: existingStatus.assignment_access,
+        assignment_submissions_cleared: existingStatus.assignment_submissions_cleared,
         cached: true,
         lastChecked: existingStatus.updated_at,
         notes: {
           financial: existingStatus.financial_notes,
           attendance: existingStatus.attendance_notes,
-          assignment: existingStatus.assignment_notes
+          assignment: existingStatus.assignment_notes,
+          assignmentSubmissions: existingStatus.assignment_submissions_notes
         }
       };
     }
@@ -651,6 +1015,7 @@ export const quickClearanceCheck = async (studentId) => {
       financial: false,
       attendance: false,
       assignment_access: false,
+      assignment_submissions_cleared: false,
       cached: false,
       needsFullCheck: true,
       message: 'No cached clearance status found'
@@ -684,6 +1049,13 @@ const getErrorResponse = (errorMessage) => {
       requiredAmount: 0,
       paidAmount: 0
     },
+    assignmentSubmissions: {
+      allSubmitted: false,
+      notes: errorMessage,
+      details: ['❌ System error checking assignment submissions'],
+      coursesWithExams: [],
+      missingSubmissions: []
+    },
     attendance: { 
       cleared: false, 
       notes: errorMessage,
@@ -700,7 +1072,8 @@ const getErrorResponse = (errorMessage) => {
 
 export default {
   checkExamClearance,
-  checkAssignmentAccessOnly, // NEW EXPORT
+  checkAssignmentAccessOnly,
+  checkAllAssignmentSubmissionsOnly,
   getExamClearanceStatus,
   manuallyCheckClearance,
   debugAttendanceRecords,

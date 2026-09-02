@@ -1,4 +1,4 @@
-// src/components/dashboard/Dashboard.jsx
+// src/components/dashboard/Dashboard.jsx - UPDATED with Results component CGPA logic
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useStudentAuth } from '../../context/StudentAuthContext';
 import { supabase } from '../../services/supabase';
@@ -64,22 +64,7 @@ const Dashboard = () => {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  const getGradePoints = (grade) => {
-    if (!grade) return 0.0;
-    const gradeMap = {
-      'A+': 5.0,
-      'A': 5.0,
-      'B+': 4.5,
-      'B': 4.0,
-      'C+': 3.5,
-      'C': 3.0,
-      'D+': 2.5,
-      'D': 2.0,
-      'F': 0.0
-    };
-    return gradeMap[grade.toUpperCase()] || 0.0;
-  };
-
+  // ==================== GRADE HELPERS (EXACTLY LIKE RESULTS COMPONENT) ====================
   const getGradeFromMarks = (marks) => {
     if (!marks && marks !== 0) return 'N/A';
     const numericMarks = parseFloat(marks);
@@ -96,32 +81,169 @@ const Dashboard = () => {
     return 'F';
   };
 
-  // Calculate GPA from completed courses
-  const calculateGPA = (studentCourses) => {
-    if (!studentCourses || studentCourses.length === 0) return 0.0;
-    
-    const completedCourses = studentCourses.filter(
-      course => course.status === 'completed' && (course.grade || course.marks)
-    );
-    
-    if (completedCourses.length === 0) return 0.0;
-    
+  const getGradePoints = (grade) => {
+    if (!grade) return 0.0;
+    const gradeMap = {
+      'A+': 5.0,
+      'A': 5.0,
+      'B+': 4.5,
+      'B': 4.0,
+      'C+': 3.5,
+      'C': 3.0,
+      'D+': 2.5,
+      'D': 2.0,
+      'F': 0.0
+    };
+    const points = gradeMap[grade.toUpperCase()];
+    return points !== undefined ? points : 0.0;
+  };
+
+  // ==================== CALCULATE CGPA (EXACTLY LIKE RESULTS COMPONENT) ====================
+  const calculateCGPA = useCallback(async (studentId) => {
+    if (!studentId) return 0.0;
+
     let totalPoints = 0;
     let totalCredits = 0;
-    
-    completedCourses.forEach(course => {
-      const grade = course.grade || getGradeFromMarks(course.marks);
-      const gradePoints = course.grade_points || getGradePoints(grade);
-      const credits = course.credits || 3;
-      
-      if (gradePoints && credits) {
-        totalPoints += gradePoints * credits;
-        totalCredits += credits;
+
+    try {
+      // 1. Fetch student courses that are completed with grades
+      const { data: studentCourses, error: scError } = await supabase
+        .from('student_courses')
+        .select(`
+          id,
+          course_id,
+          status,
+          grade,
+          grade_points,
+          marks,
+          courses:course_id (
+            id,
+            course_code,
+            course_name,
+            credits,
+            year,
+            semester
+          )
+        `)
+        .eq('student_id', studentId)
+        .eq('status', 'completed')
+        .not('grade', 'is', null);
+
+      if (scError) {
+        console.error('Error fetching student courses:', scError);
       }
-    });
-    
-    return totalCredits > 0 ? parseFloat((totalPoints / totalCredits).toFixed(2)) : 0.0;
-  };
+
+      // 2. Fetch exam submissions that are graded
+      const { data: examSubmissions, error: subError } = await supabase
+        .from('exam_submissions')
+        .select(`
+          id,
+          exam_id,
+          total_marks_obtained,
+          grade,
+          grade_points,
+          percentage,
+          status
+        `)
+        .eq('student_id', studentId)
+        .eq('status', 'graded')
+        .not('total_marks_obtained', 'is', null);
+
+      if (subError) {
+        console.error('Error fetching exam submissions:', subError);
+      }
+
+      // ===== PROCESS STUDENT COURSES (like Results component) =====
+      if (studentCourses && studentCourses.length > 0) {
+        studentCourses.forEach(sc => {
+          const grade = sc.grade || getGradeFromMarks(sc.marks);
+          if (!grade) return;
+          
+          // FIXED: Handle grade points calculation correctly
+          let gradePoints = 0;
+          if (sc.grade_points !== null && sc.grade_points !== undefined) {
+            gradePoints = parseFloat(sc.grade_points);
+          } else if (sc.grade) {
+            gradePoints = getGradePoints(sc.grade);
+          } else {
+            const calculatedGrade = getGradeFromMarks(sc.marks);
+            gradePoints = getGradePoints(calculatedGrade);
+          }
+
+          const credits = sc.courses?.credits || 3;
+          
+          if (gradePoints && credits) {
+            totalPoints += gradePoints * credits;
+            totalCredits += credits;
+          }
+        });
+      }
+
+      // ===== PROCESS EXAM SUBMISSIONS (like Results component) =====
+      if (examSubmissions && examSubmissions.length > 0) {
+        // Fetch exam details to get course credits
+        const examIds = examSubmissions.map(sub => sub.exam_id);
+        const { data: exams, error: examsError } = await supabase
+          .from('examinations')
+          .select(`
+            id,
+            course_id,
+            total_marks,
+            courses:course_id (
+              id,
+              course_code,
+              course_name,
+              credits,
+              year,
+              semester
+            )
+          `)
+          .in('id', examIds);
+
+        if (examsError) {
+          console.error('Error fetching exams:', examsError);
+        }
+
+        const examMap = {};
+        exams?.forEach(exam => {
+          examMap[exam.id] = exam;
+        });
+
+        examSubmissions.forEach(sub => {
+          const exam = examMap[sub.exam_id];
+          if (!exam || !exam.courses) return;
+
+          // FIXED: Handle grade points calculation correctly
+          let gradePoints = 0;
+          if (sub.grade_points !== null && sub.grade_points !== undefined) {
+            gradePoints = parseFloat(sub.grade_points);
+          } else if (sub.grade) {
+            gradePoints = getGradePoints(sub.grade);
+          } else {
+            const calculatedGrade = getGradeFromMarks(sub.total_marks_obtained);
+            gradePoints = getGradePoints(calculatedGrade);
+          }
+
+          const credits = exam.courses.credits || 3;
+          
+          // Always add credits and points, even for F grades
+          if (credits) {
+            totalPoints += (gradePoints || 0) * credits;
+            totalCredits += credits;
+          }
+        });
+      }
+
+      // ===== FINAL CGPA CALCULATION =====
+      const cgpa = totalCredits > 0 ? parseFloat((totalPoints / totalCredits).toFixed(2)) : 0.0;
+      console.log(`✅ Dashboard CGPA calculated: ${cgpa} (${totalPoints} points / ${totalCredits} credits)`);
+      return cgpa;
+
+    } catch (error) {
+      console.error('Error calculating CGPA:', error);
+      return 0.0;
+    }
+  }, []);
 
   // Determine program duration based on program type
   const getProgramDuration = (program) => {
@@ -150,256 +272,200 @@ const Dashboard = () => {
     return { years: 4, semesters: 8 };
   };
 
-// Main data fetching function for dashboard
-const fetchDashboardData = useCallback(async () => {
-  if (!user?.email) {
-    throw new Error('No user logged in');
-  }
-
-  // 1. Fetch student details
-  const { data: student, error: studentError } = await supabase
-    .from('students')
-    .select('*')
-    .eq('email', user.email)
-    .single();
-
-  if (studentError || !student) {
-    throw new Error('Student not found');
-  }
-
-  // Defaults
-  let attendanceArray = [1, 1, 0, 1, 1];
-  let semesterAttendanceRate = 0;
-  let localSemesterTotalDays = 0;
-  let localSemesterPresentDays = 0;
-  let pendingAssignmentsCount = 0;
-  let upcomingExamsCount = 0;
-  let cgpa = 0.0;
-
-  // 2. Fetch courses for GPA + active course filtering
-  const { data: studentCourses = [] } = await supabase
-    .from('student_courses')
-    .select(`
-      *,
-      courses (id, course_code, course_name, credits, year, semester)
-    `)
-    .eq('student_id', student.id);
-
-  // ---------- CGPA (same logic as Settings) ----------
-  let totalPoints = 0;
-  let totalCredits = 0;
-
-  // Option A: grades / marks in student_courses
-  const gradedFromCourses = studentCourses.filter(
-    c => (c.grade || c.marks) && (c.status === 'completed' || c.status === 'passed' || c.grade)
-  );
-
-  if (gradedFromCourses.length > 0) {
-    gradedFromCourses.forEach(sc => {
-      const grade = sc.grade || getGradeFromMarks(sc.marks);
-      const gradePoints = sc.grade_points || getGradePoints(grade);
-      const credits = sc.courses?.credits || sc.credits || 3;
-      if (gradePoints && credits) {
-        totalPoints += gradePoints * credits;
-        totalCredits += credits;
-      }
-    });
-  }
-
-  // Option B: fallback to graded exam submissions
-  if (totalCredits === 0) {
-    const { data: examSubmissions = [] } = await supabase
-      .from('exam_submissions')
-      .select('grade, grade_points, total_marks_obtained, exam_id')
-      .eq('student_id', student.id)
-      .eq('status', 'graded');
-
-    if (examSubmissions.length > 0) {
-      const examIds = examSubmissions.map(es => es.exam_id);
-      const { data: exams = [] } = await supabase
-        .from('examinations')
-        .select('id, course_id')
-        .in('id', examIds);
-
-      const examMap = {};
-      exams.forEach(e => { examMap[e.id] = e.course_id; });
-
-      const courseIds = exams.map(e => e.course_id).filter(Boolean);
-      const { data: courses = [] } = await supabase
-        .from('courses')
-        .select('id, credits')
-        .in('id', courseIds);
-
-      const creditMap = {};
-      courses.forEach(c => { creditMap[c.id] = c.credits || 3; });
-
-      examSubmissions.forEach(sub => {
-        const grade = sub.grade || getGradeFromMarks(sub.total_marks_obtained);
-        if (!grade) return;
-        const gradePoints = sub.grade_points || getGradePoints(grade);
-        const courseId = examMap[sub.exam_id];
-        const credits = creditMap[courseId] || 3;
-        if (gradePoints && credits) {
-          totalPoints += gradePoints * credits;
-          totalCredits += credits;
-        }
-      });
+  // Main data fetching function for dashboard
+  const fetchDashboardData = useCallback(async () => {
+    if (!user?.email) {
+      throw new Error('No user logged in');
     }
-  }
 
-  cgpa = totalCredits > 0 ? parseFloat((totalPoints / totalCredits).toFixed(2)) : 0.0;
+    // 1. Fetch student details
+    const { data: student, error: studentError } = await supabase
+      .from('students')
+      .select('*')
+      .eq('email', user.email)
+      .single();
 
-  // Active (non-completed) course IDs
-  const activeCourseIds = studentCourses
-    .filter(c => c.status !== 'completed' && c.status !== 'passed')
-    .map(sc => sc.course_id)
-    .filter(Boolean);
+    if (studentError || !student) {
+      throw new Error('Student not found');
+    }
 
-  // 3. Semester attendance (last ~4 months)
-  const semesterStart = new Date();
-  semesterStart.setMonth(semesterStart.getMonth() - 4);
-  semesterStart.setDate(1);
+    console.log('👤 Student found:', student.full_name);
 
-  const { data: semesterRecords = [] } = await supabase
-    .from('attendance_records')
-    .select('date, status')
-    .eq('student_id', student.id)
-    .gte('date', semesterStart.toISOString().split('T')[0]);
+    // Defaults
+    let attendanceArray = [1, 1, 0, 1, 1];
+    let semesterAttendanceRate = 0;
+    let localSemesterTotalDays = 0;
+    let localSemesterPresentDays = 0;
+    let pendingAssignmentsCount = 0;
+    let upcomingExamsCount = 0;
+    let cgpa = 0.0;
 
-  localSemesterTotalDays = semesterRecords.length;
-  localSemesterPresentDays = semesterRecords.filter(r => r.status === 'present').length;
-  semesterAttendanceRate = localSemesterTotalDays > 0
-    ? Math.round((localSemesterPresentDays / localSemesterTotalDays) * 100)
-    : 0;
-
-  // 4. Current week attendance for chart
-  const today = new Date();
-  const dayOfWeek = today.getDay();
-  const startOfWeek = new Date(today);
-  startOfWeek.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
-  startOfWeek.setHours(0, 0, 0, 0);
-
-  const endOfWeek = new Date(startOfWeek);
-  endOfWeek.setDate(startOfWeek.getDate() + 6);
-  endOfWeek.setHours(23, 59, 59, 999);
-
-  const { data: weekRecords = [] } = await supabase
-    .from('attendance_records')
-    .select('date, status')
-    .eq('student_id', student.id)
-    .gte('date', startOfWeek.toISOString().split('T')[0])
-    .lte('date', endOfWeek.toISOString().split('T')[0])
-    .order('date', { ascending: true });
-
-  const weekDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const attendanceMap = {};
-  weekRecords.forEach(record => {
-    const date = new Date(record.date);
-    const dayIndex = date.getDay();
-    const adjustedIndex = dayIndex === 0 ? 6 : dayIndex - 1;
-    attendanceMap[adjustedIndex] = record.status === 'present' ? 1 : 0;
-  });
-
-  attendanceArray = weekDays.map((_, index) => attendanceMap[index] ?? null);
-
-  // 5. Pending assignments (published + future due date, active courses only)
-  if (activeCourseIds.length > 0) {
-    const { data: assignments = [] } = await supabase
-      .from('assignments')
-      .select('id')
-      .in('course_id', activeCourseIds)
-      .eq('status', 'published')
-      .gt('due_date', new Date().toISOString());
-
-    pendingAssignmentsCount = assignments.length;
-  }
-
-  // 6. Upcoming exams – FIXED: match Examinations page statuses
-  if (activeCourseIds.length > 0) {
-    const { data: exams = [] } = await supabase
-      .from('examinations')
-      .select('id')
-      .in('course_id', activeCourseIds)
-      .in('status', ['scheduled', 'published', 'active'])
-      .gt('start_time', new Date().toISOString());
-
-    upcomingExamsCount = exams.length;
-  }
-
-  // 7. Financial summary
-  const { data: financial = [] } = await supabase
-    .from('financial_records')
-    .select('amount, balance_due, status')
-    .eq('student_id', student.id)
-    .eq('academic_year', student.academic_year);
-
-  const financialSummary = {
-    paid: financial
-      .filter(f => f.status === 'paid')
-      .reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0),
-    balance: financial
-      .filter(f => f.status === 'partial' || f.status === 'pending')
-      .reduce((sum, f) => sum + (parseFloat(f.balance_due || f.amount) || 0), 0)
-  };
-
-  // 8. Upcoming lectures
-  const currentDate = new Date();
-  const nextWeek = new Date(currentDate);
-  nextWeek.setDate(currentDate.getDate() + 7);
-  let formattedLectures = [];
-
-  if (activeCourseIds.length > 0) {
-    const { data: lectures = [] } = await supabase
-      .from('lectures')
+    // 2. Fetch courses for active course filtering
+    const { data: studentCourses = [] } = await supabase
+      .from('student_courses')
       .select(`
         *,
-        courses(course_code, course_name),
-        lecturers(full_name)
+        courses (id, course_code, course_name, credits, year, semester)
       `)
-      .in('course_id', activeCourseIds)
-      .gte('scheduled_date', today.toISOString().split('T')[0])
-      .lte('scheduled_date', nextWeek.toISOString().split('T')[0])
-      .in('status', ['scheduled', 'ongoing'])
-      .order('scheduled_date')
-      .order('start_time');
+      .eq('student_id', student.id);
 
-    formattedLectures = lectures.map(l => ({
-      id: l.id,
-      title: l.courses?.course_name || l.title || 'Lecture',
-      date: l.scheduled_date,
-      time: l.start_time || '09:00',
-      endTime: l.end_time || '11:00',
-      lecturer: l.lecturers?.full_name || 'Unknown',
-      duration: 120,
-      courseCode: l.courses?.course_code || 'N/A',
-      google_meet_link: l.google_meet_link,
-      status: l.status
-    }));
-  }
+    console.log(`📚 Found ${studentCourses.length} student courses`);
 
-  // Program progress
-  const programDuration = getProgramDuration(student.program);
-  const completedSemesters = ((student.year_of_study - 1) * 2) + (student.semester - 1);
-  const programProgress = Math.min(
-    Math.round((completedSemesters / programDuration.semesters) * 100),
-    100
-  );
+    // ---------- CGPA (EXACTLY LIKE RESULTS COMPONENT) ----------
+    cgpa = await calculateCGPA(student.id);
+    console.log(`🎯 Final Dashboard CGPA: ${cgpa}`);
 
-  return {
-    student,
-    studentCourses,
-    attendanceArray,
-    semesterAttendanceRate,
-    localSemesterTotalDays,
-    localSemesterPresentDays,
-    pendingAssignmentsCount,
-    upcomingExamsCount,
-    cgpa,
-    financialSummary,
-    formattedLectures,
-    programProgress
-  };
-}, [user?.email]);
+    // Active (non-completed) course IDs
+    const activeCourseIds = studentCourses
+      .filter(c => c.status !== 'completed' && c.status !== 'passed')
+      .map(sc => sc.course_id)
+      .filter(Boolean);
+
+    // 3. Semester attendance (last ~4 months)
+    const semesterStart = new Date();
+    semesterStart.setMonth(semesterStart.getMonth() - 4);
+    semesterStart.setDate(1);
+
+    const { data: semesterRecords = [] } = await supabase
+      .from('attendance_records')
+      .select('date, status')
+      .eq('student_id', student.id)
+      .gte('date', semesterStart.toISOString().split('T')[0]);
+
+    localSemesterTotalDays = semesterRecords.length;
+    localSemesterPresentDays = semesterRecords.filter(r => r.status === 'present').length;
+    semesterAttendanceRate = localSemesterTotalDays > 0
+      ? Math.round((localSemesterPresentDays / localSemesterTotalDays) * 100)
+      : 0;
+
+    // 4. Current week attendance for chart
+    const today = new Date();
+    const dayOfWeek = today.getDay();
+    const startOfWeek = new Date(today);
+    startOfWeek.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+    startOfWeek.setHours(0, 0, 0, 0);
+
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 6);
+    endOfWeek.setHours(23, 59, 59, 999);
+
+    const { data: weekRecords = [] } = await supabase
+      .from('attendance_records')
+      .select('date, status')
+      .eq('student_id', student.id)
+      .gte('date', startOfWeek.toISOString().split('T')[0])
+      .lte('date', endOfWeek.toISOString().split('T')[0])
+      .order('date', { ascending: true });
+
+    const weekDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const attendanceMap = {};
+    weekRecords.forEach(record => {
+      const date = new Date(record.date);
+      const dayIndex = date.getDay();
+      const adjustedIndex = dayIndex === 0 ? 6 : dayIndex - 1;
+      attendanceMap[adjustedIndex] = record.status === 'present' ? 1 : 0;
+    });
+
+    attendanceArray = weekDays.map((_, index) => attendanceMap[index] ?? null);
+
+    // 5. Pending assignments (published + future due date, active courses only)
+    if (activeCourseIds.length > 0) {
+      const { data: assignments = [] } = await supabase
+        .from('assignments')
+        .select('id')
+        .in('course_id', activeCourseIds)
+        .eq('status', 'published')
+        .gt('due_date', new Date().toISOString());
+
+      pendingAssignmentsCount = assignments.length;
+    }
+
+    // 6. Upcoming exams
+    if (activeCourseIds.length > 0) {
+      const { data: exams = [] } = await supabase
+        .from('examinations')
+        .select('id')
+        .in('course_id', activeCourseIds)
+        .in('status', ['scheduled', 'published', 'active'])
+        .gt('start_time', new Date().toISOString());
+
+      upcomingExamsCount = exams.length;
+    }
+
+    // 7. Financial summary
+    const { data: financial = [] } = await supabase
+      .from('financial_records')
+      .select('amount, balance_due, status')
+      .eq('student_id', student.id)
+      .eq('academic_year', student.academic_year);
+
+    const financialSummary = {
+      paid: financial
+        .filter(f => f.status === 'paid')
+        .reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0),
+      balance: financial
+        .filter(f => f.status === 'partial' || f.status === 'pending')
+        .reduce((sum, f) => sum + (parseFloat(f.balance_due || f.amount) || 0), 0)
+    };
+
+    // 8. Upcoming lectures
+    const currentDate = new Date();
+    const nextWeek = new Date(currentDate);
+    nextWeek.setDate(currentDate.getDate() + 7);
+    let formattedLectures = [];
+
+    if (activeCourseIds.length > 0) {
+      const { data: lectures = [] } = await supabase
+        .from('lectures')
+        .select(`
+          *,
+          courses(course_code, course_name),
+          lecturers(full_name)
+        `)
+        .in('course_id', activeCourseIds)
+        .gte('scheduled_date', today.toISOString().split('T')[0])
+        .lte('scheduled_date', nextWeek.toISOString().split('T')[0])
+        .in('status', ['scheduled', 'ongoing'])
+        .order('scheduled_date')
+        .order('start_time');
+
+      formattedLectures = lectures.map(l => ({
+        id: l.id,
+        title: l.courses?.course_name || l.title || 'Lecture',
+        date: l.scheduled_date,
+        time: l.start_time || '09:00',
+        endTime: l.end_time || '11:00',
+        lecturer: l.lecturers?.full_name || 'Unknown',
+        duration: 120,
+        courseCode: l.courses?.course_code || 'N/A',
+        google_meet_link: l.google_meet_link,
+        status: l.status
+      }));
+    }
+
+    // Program progress
+    const programDuration = getProgramDuration(student.program);
+    const completedSemesters = ((student.year_of_study - 1) * 2) + (student.semester - 1);
+    const programProgress = Math.min(
+      Math.round((completedSemesters / programDuration.semesters) * 100),
+      100
+    );
+
+    return {
+      student,
+      studentCourses,
+      attendanceArray,
+      semesterAttendanceRate,
+      localSemesterTotalDays,
+      localSemesterPresentDays,
+      pendingAssignmentsCount,
+      upcomingExamsCount,
+      cgpa,
+      financialSummary,
+      formattedLectures,
+      programProgress
+    };
+  }, [user?.email, calculateCGPA]);
 
   // Use cached data hook
   const { 
@@ -1516,6 +1582,13 @@ const fetchDashboardData = useCallback(async () => {
                 color: '#9b59b6' 
               }}>
                 {dashboardStats.cgpa.toFixed(2)}
+              </p>
+              <p style={{ 
+                margin: '5px 0 0 0', 
+                fontSize: 'clamp(0.7rem, 1.8vw, 0.8rem)', 
+                color: '#666' 
+              }}>
+                Cumulative Grade Point Average
               </p>
             </div>
             <div style={{

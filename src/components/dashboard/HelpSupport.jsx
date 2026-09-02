@@ -9,8 +9,12 @@ const HelpSupport = () => {
   const [newMessage, setNewMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [adminEmail, setAdminEmail] = useState(null);
+  const [hodEmail, setHodEmail] = useState(null);
+  const [hodName, setHodName] = useState('Head of Department');
+  const [departmentCode, setDepartmentCode] = useState('');
+  const [departmentName, setDepartmentName] = useState('');
   const [isMobile, setIsMobile] = useState(false);
+  const [error, setError] = useState(null);
   const chatEndRef = useRef(null);
   const channelRef = useRef(null);
 
@@ -25,35 +29,186 @@ const HelpSupport = () => {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Find admin
-  const fetchAdmin = useCallback(async () => {
+  // Find the student's HOD based on their department
+  const fetchHOD = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    
     try {
-      const { data, error } = await supabase
+      // Step 1: Get the student's department code
+      const { data: student, error: studentError } = await supabase
+        .from('students')
+        .select('department_code, department, program, student_id')
+        .eq('email', studentEmail)
+        .single();
+
+      if (studentError) {
+        console.error('Error fetching student:', studentError);
+        setError('Could not find your student profile. Please contact admin.');
+        setLoading(false);
+        return;
+      }
+
+      if (!student?.department_code) {
+        console.error('Student has no department code:', student);
+        setError('Your account is not assigned to any department. Please contact admin.');
+        setLoading(false);
+        return;
+      }
+
+      const deptCode = student.department_code;
+      setDepartmentCode(deptCode);
+      setDepartmentName(student.department || deptCode);
+
+      console.log(`🔍 Looking for HOD of department: ${deptCode}`);
+
+      // Step 2: Find the department to get HOD name and ID
+      const { data: department, error: deptError } = await supabase
+        .from('departments')
+        .select('id, department_code, department_name, head_of_department')
+        .eq('department_code', deptCode)
+        .single();
+
+      if (deptError) {
+        console.error('Error fetching department:', deptError);
+        setError('Could not find your department information. Please contact admin.');
+        setLoading(false);
+        return;
+      }
+
+      if (!department) {
+        setError(`Department "${deptCode}" not found in the system.`);
+        setLoading(false);
+        return;
+      }
+
+      console.log(`📋 Found department: ${department.department_name}`);
+
+      // Step 3: Find the HOD for this department
+      const { data: hodRoles, error: hodError } = await supabase
         .from('user_roles')
-        .select('email')
-        .eq('role', 'admin')
-        .limit(1)
-        .maybeSingle();
+        .select(`
+          id,
+          email,
+          role,
+          department_id,
+          profile_picture_url,
+          departments:department_id (
+            department_code,
+            department_name,
+            head_of_department
+          )
+        `)
+        .eq('role', 'hod')
+        .eq('department_id', department.id)
+        .limit(1);
 
-      if (error) throw error;
-      setAdminEmail(data?.email || 'admin@nleuniversity.ac.ug');
+      if (hodError) {
+        console.error('Error fetching HOD:', hodError);
+        setError('Could not find your HOD. Please contact admin.');
+        setLoading(false);
+        return;
+      }
+
+      if (!hodRoles || hodRoles.length === 0) {
+        console.warn(`⚠️ No HOD found for department: ${deptCode}`);
+        setError(`No HOD assigned to ${department.department_name} yet. Please contact admin.`);
+        setLoading(false);
+        return;
+      }
+
+      const hod = hodRoles[0];
+      const hodDisplayName = hod.departments?.head_of_department || hod.email?.split('@')[0] || 'HOD';
+
+      console.log(`✅ Found HOD: ${hodDisplayName} (${hod.email})`);
+
+      setHodEmail(hod.email);
+      setHodName(hodDisplayName);
+      
+      // Also try to get the HOD's name from the departments table
+      if (hod.departments?.head_of_department) {
+        setHodName(hod.departments.head_of_department);
+      }
+
     } catch (err) {
-      console.error('Error finding admin:', err);
-      setAdminEmail('admin@nleuniversity.ac.ug');
+      console.error('Error in fetchHOD:', err);
+      setError('An unexpected error occurred. Please try again later.');
+    } finally {
+      setLoading(false);
     }
-  }, []);
+  }, [studentEmail]);
 
-  // Load chat history
+  // Fallback: Try to find HOD using department_code directly from lecturer_departments
+  const fetchHODFallback = useCallback(async () => {
+    try {
+      console.log('🔄 Using fallback method to find HOD...');
+      
+      // Try to get student's department from any source
+      const { data: student, error: studentError } = await supabase
+        .from('students')
+        .select('department_code, department')
+        .eq('email', studentEmail)
+        .single();
+
+      if (studentError || !student?.department_code) {
+        setError('Unable to determine your department. Please contact admin.');
+        setLoading(false);
+        return;
+      }
+
+      const deptCode = student.department_code;
+      
+      // Find department
+      const { data: department, error: deptError } = await supabase
+        .from('departments')
+        .select('id, department_code, department_name, head_of_department')
+        .eq('department_code', deptCode)
+        .single();
+
+      if (deptError || !department) {
+        setError(`Department "${deptCode}" not found.`);
+        setLoading(false);
+        return;
+      }
+
+      // Find HOD for this department
+      const { data: hodRoles, error: hodError } = await supabase
+        .from('user_roles')
+        .select('id, email, role, department_id, profile_picture_url')
+        .eq('role', 'hod')
+        .eq('department_id', department.id)
+        .limit(1);
+
+      if (hodError || !hodRoles || hodRoles.length === 0) {
+        setError(`No HOD assigned to ${department.department_name}.`);
+        setLoading(false);
+        return;
+      }
+
+      const hod = hodRoles[0];
+      setHodEmail(hod.email);
+      setHodName(department.head_of_department || hod.email?.split('@')[0] || 'HOD');
+      setDepartmentCode(deptCode);
+      setDepartmentName(department.department_name);
+
+    } catch (err) {
+      console.error('Fallback error:', err);
+      setError('Unable to connect to support. Please try again later.');
+      setLoading(false);
+    }
+  }, [studentEmail]);
+
+  // Load chat history with the HOD
   const fetchMessages = useCallback(async () => {
-    if (!studentEmail || !adminEmail) return;
+    if (!studentEmail || !hodEmail) return;
 
     try {
       const { data, error } = await supabase
         .from('chat_messages')
         .select('*')
         .or(
-          `and(sender_email.eq.${studentEmail},receiver_email.eq.${adminEmail}),` +
-          `and(sender_email.eq.${adminEmail},receiver_email.eq.${studentEmail})`
+          `and(sender_email.eq.${studentEmail},receiver_email.eq.${hodEmail}),` +
+          `and(sender_email.eq.${hodEmail},receiver_email.eq.${studentEmail})`
         )
         .order('created_at', { ascending: true })
         .limit(200);
@@ -62,7 +217,7 @@ const HelpSupport = () => {
 
       setMessages(data || []);
 
-      // Mark unread messages from admin as read
+      // Mark unread messages from HOD as read
       const unread = (data || []).filter(
         (m) => m.receiver_email === studentEmail && !m.is_read
       );
@@ -78,11 +233,11 @@ const HelpSupport = () => {
     } finally {
       setLoading(false);
     }
-  }, [studentEmail, adminEmail]);
+  }, [studentEmail, hodEmail]);
 
   // Send message with optimistic update
   const sendMessage = async () => {
-    if (!newMessage.trim() || !adminEmail || sending) return;
+    if (!newMessage.trim() || !hodEmail || sending) return;
 
     const tempId = `temp-${Date.now()}`;
     const messageText = newMessage.trim();
@@ -92,8 +247,8 @@ const HelpSupport = () => {
       sender_email: studentEmail,
       sender_role: 'student',
       sender_name: studentName,
-      receiver_email: adminEmail,
-      receiver_role: 'admin',
+      receiver_email: hodEmail,
+      receiver_role: 'hod',
       message: messageText,
       is_read: false,
       created_at: new Date().toISOString(),
@@ -113,8 +268,8 @@ const HelpSupport = () => {
           sender_email: studentEmail,
           sender_role: 'student',
           sender_name: studentName,
-          receiver_email: adminEmail,
-          receiver_role: 'admin',
+          receiver_email: hodEmail,
+          receiver_role: 'hod',
           message: messageText,
           is_read: false,
         }])
@@ -139,42 +294,38 @@ const HelpSupport = () => {
 
   // ========== REAL-TIME + FALLBACK POLLING ==========
   useEffect(() => {
-    if (!studentEmail || !adminEmail) return;
+    if (!studentEmail || !hodEmail) return;
 
     // Clean previous channel
     if (channelRef.current) {
       supabase.removeChannel(channelRef.current);
     }
 
-    console.log('Setting up realtime for:', studentEmail, '↔', adminEmail);
+    console.log('🔵 Setting up realtime chat for:', studentEmail, '↔', hodEmail);
 
     const channel = supabase
       .channel(`help-support-${studentEmail}`)
       .on(
         'postgres_changes',
         {
-          event: '*', // INSERT + UPDATE
+          event: '*',
           schema: 'public',
           table: 'chat_messages',
         },
         (payload) => {
-          console.log('Realtime event:', payload.eventType, payload.new);
-
           const msg = payload.new;
           if (!msg) return;
 
           const isThisConversation =
-            (msg.sender_email === studentEmail && msg.receiver_email === adminEmail) ||
-            (msg.sender_email === adminEmail && msg.receiver_email === studentEmail);
+            (msg.sender_email === studentEmail && msg.receiver_email === hodEmail) ||
+            (msg.sender_email === hodEmail && msg.receiver_email === studentEmail);
 
           if (!isThisConversation) return;
 
           if (payload.eventType === 'INSERT') {
             setMessages((prev) => {
-              // Avoid duplicates
               if (prev.some((m) => m.id === msg.id)) return prev;
 
-              // Remove any temporary optimistic message with same text
               const cleaned = prev.filter(
                 (m) =>
                   !(
@@ -193,12 +344,12 @@ const HelpSupport = () => {
         }
       )
       .subscribe((status) => {
-        console.log('Realtime subscription status:', status);
+        console.log('🟢 Realtime subscription status:', status);
       });
 
     channelRef.current = channel;
 
-    // Fallback polling every 7 seconds (guarantees messages appear)
+    // Fallback polling every 7 seconds
     const pollInterval = setInterval(() => {
       fetchMessages();
     }, 7000);
@@ -209,19 +360,58 @@ const HelpSupport = () => {
       }
       clearInterval(pollInterval);
     };
-  }, [studentEmail, adminEmail, fetchMessages]);
+  }, [studentEmail, hodEmail, fetchMessages]);
 
   // Initial load
   useEffect(() => {
-    fetchAdmin();
-  }, [fetchAdmin]);
+    fetchHOD();
+  }, [fetchHOD]);
 
   useEffect(() => {
-    if (adminEmail) {
+    if (hodEmail) {
       setLoading(true);
       fetchMessages();
     }
-  }, [adminEmail, fetchMessages]);
+  }, [hodEmail, fetchMessages]);
+
+  // Render error state
+  if (error) {
+    return (
+      <div style={{ maxWidth: '900px', margin: '0 auto', padding: '20px' }}>
+        <div style={{
+          backgroundColor: '#fff3cd',
+          border: '1px solid #ffc107',
+          borderRadius: '12px',
+          padding: '30px',
+          textAlign: 'center'
+        }}>
+          <div style={{ fontSize: '48px', marginBottom: '16px' }}>⚠️</div>
+          <h3 style={{ color: '#856404', marginBottom: '12px' }}>Unable to Connect to Support</h3>
+          <p style={{ color: '#856404', marginBottom: '16px' }}>{error}</p>
+          <button
+            onClick={() => {
+              setError(null);
+              fetchHOD();
+            }}
+            style={{
+              padding: '10px 24px',
+              backgroundColor: '#ffc107',
+              border: 'none',
+              borderRadius: '8px',
+              fontWeight: 'bold',
+              cursor: 'pointer'
+            }}
+          >
+            🔄 Retry
+          </button>
+          <div style={{ marginTop: '16px', fontSize: '14px', color: '#856404' }}>
+            <p>You can also contact your department directly:</p>
+            <p style={{ fontWeight: 'bold' }}>Department: {departmentName || 'Unknown'}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ maxWidth: '900px', margin: '0 auto' }}>
@@ -244,8 +434,13 @@ const HelpSupport = () => {
             fontSize: 'clamp(0.85rem, 2vw, 0.95rem)',
           }}
         >
-          Chat directly with the System Administrator. Messages appear in real-time.
+          Chat directly with your <strong>Head of Department</strong>. Messages appear in real-time.
         </p>
+        {departmentName && (
+          <p style={{ fontSize: '0.85rem', color: '#1976d2', marginTop: '4px' }}>
+            📚 Department: <strong>{departmentName}</strong>
+          </p>
+        )}
       </div>
 
       {/* Chat Card */}
@@ -283,14 +478,14 @@ const HelpSupport = () => {
               fontSize: 'clamp(18px, 4vw, 22px)',
             }}
           >
-            👤
+            👨‍🏫
           </div>
           <div>
             <div style={{ fontWeight: 600, fontSize: 'clamp(0.95rem, 2.2vw, 1.05rem)' }}>
-              System Administrator
+              {hodName}
             </div>
             <div style={{ fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)', opacity: 0.85 }}>
-              {adminEmail ? '● Online • Real-time chat' : 'Connecting...'}
+              {hodEmail ? `● Online • ${departmentName || 'Your Department'}` : 'Connecting...'}
             </div>
           </div>
         </div>
@@ -318,8 +513,13 @@ const HelpSupport = () => {
               </div>
               <p style={{ margin: '0 0 6px 0' }}>No messages yet</p>
               <p style={{ margin: 0, fontSize: '0.9rem', color: '#999' }}>
-                Send a message to start chatting with the administrator
+                Send a message to start chatting with your Head of Department
               </p>
+              {departmentName && (
+                <p style={{ marginTop: '8px', fontSize: '0.8rem', color: '#1976d2' }}>
+                  📚 Department: {departmentName}
+                </p>
+              )}
             </div>
           ) : (
             messages.map((msg) => {
@@ -344,7 +544,7 @@ const HelpSupport = () => {
                   >
                     {!isMe && (
                       <div style={{ fontSize: '0.72rem', opacity: 0.7, marginBottom: 4 }}>
-                        Administrator
+                        {hodName}
                       </div>
                     )}
                     <div
@@ -397,8 +597,8 @@ const HelpSupport = () => {
                 sendMessage();
               }
             }}
-            placeholder="Type your message..."
-            disabled={sending || !adminEmail}
+            placeholder="Type your message to the HOD..."
+            disabled={sending || !hodEmail}
             style={{
               flex: 1,
               padding: '12px 18px',
@@ -410,7 +610,7 @@ const HelpSupport = () => {
           />
           <button
             onClick={sendMessage}
-            disabled={sending || !newMessage.trim() || !adminEmail}
+            disabled={sending || !newMessage.trim() || !hodEmail}
             style={{
               padding: '0 22px',
               borderRadius: '24px',
@@ -426,6 +626,24 @@ const HelpSupport = () => {
           </button>
         </div>
       </div>
+
+      {/* Department Info Footer */}
+      {departmentName && (
+        <div
+          style={{
+            marginTop: '16px',
+            padding: '12px 16px',
+            backgroundColor: '#e3f2fd',
+            borderRadius: '8px',
+            fontSize: '0.85rem',
+            color: '#1565c0',
+            textAlign: 'center',
+          }}
+        >
+          🔒 You are chatting with the <strong>Head of {departmentName}</strong>
+          {departmentCode && <span> • Department Code: <strong>{departmentCode}</strong></span>}
+        </div>
+      )}
     </div>
   );
 };

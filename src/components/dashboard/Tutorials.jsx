@@ -4,13 +4,11 @@ import { useStudentAuth } from '../../context/StudentAuthContext';
 import { useCachedData } from '../../hooks/useCachedData';
 import Modal from 'react-modal';
 
-// Set app element for modal accessibility
 if (typeof window !== 'undefined') {
   Modal.setAppElement('#root');
 }
 
 const Tutorials = () => {
-
   const [activeVideo, setActiveVideo] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isVideoLoading, setIsVideoLoading] = useState(false);
@@ -19,278 +17,233 @@ const Tutorials = () => {
   const [downloadFileName, setDownloadFileName] = useState('');
   const videoRef = useRef(null);
   const hoverVideoRefs = useRef({});
+  const lastSavedSecondRef = useRef(-1);
+  const hasResumedRef = useRef(false);
   const { user } = useStudentAuth();
-
   const [thumbnails, setThumbnails] = useState({});
-  
+
   const fetchTutorialsData = useCallback(async () => {
-  if (!user?.email) {
-    throw new Error('No user logged in');
-  }
-  
-  const { data: student, error: studentError } = await supabase
-    .from('students')
-    .select('id, program_code, academic_year, year_of_study, semester')
-    .eq('email', user.email)
-    .single();
-
-  if (studentError || !student) {
-    throw new Error('Unable to load your profile. Please contact admin.');
-  }
-
-  if (!student.program_code || !student.academic_year || !student.year_of_study || !student.semester) {
-    throw new Error('Profile incomplete: missing program, academic year, year, or semester.');
-  }
-
-  const {
-    id: studentId,
-    program_code: studentProgramCode,
-    academic_year: studentAcademicYear,
-    year_of_study: studentYear,
-    semester: studentSemester
-  } = student;
-
-  const academicParts = studentAcademicYear.trim().split('/');
-  const startYear = academicParts[0]?.toUpperCase() || '';
-  const endYear = academicParts[1]?.toUpperCase() || '';
-
-  const normProgram = studentProgramCode.toUpperCase().trim();
-  const cohortString = `YEAR${studentYear}_SEM${studentSemester}`.toUpperCase();
-
-  console.log('Student cohort:', {
-    programCode: studentProgramCode,
-    academicYear: studentAcademicYear,
-    cohort: cohortString,
-    uuid: studentId
-  });
-
-  // ⭐ STEP 1: Get ALL completed courses for this student
-  const { data: completedCourses, error: completedError } = await supabase
-    .from('student_courses')
-    .select('course_id')
-    .eq('student_id', studentId)
-    .eq('status', 'completed');
-
-  if (completedError) {
-    console.warn('Could not fetch completed courses:', completedError);
-  }
-
-  const completedCourseIds = new Set(completedCourses?.map(c => c.course_id) || []);
-  console.log(`📚 Student has ${completedCourseIds.size} completed courses`);
-
-  // ⭐ STEP 2: Get all courses that this student is enrolled in
-  const { data: enrolledCourses, error: enrolledError } = await supabase
-    .from('student_courses')
-    .select('course_id, courses(course_code)')
-    .eq('student_id', studentId);
-
-  if (enrolledError) {
-    console.warn('Could not fetch enrolled courses:', enrolledError);
-  }
-
-  const courseCodeMap = new Map();
-  enrolledCourses?.forEach(enrollment => {
-    if (enrollment.courses?.course_code) {
-      courseCodeMap.set(enrollment.course_id, enrollment.courses.course_code);
+    if (!user?.email) {
+      throw new Error('No user logged in');
     }
-  });
 
-  console.log(`📚 Student has ${courseCodeMap.size} enrolled courses`);
+    const { data: student, error: studentError } = await supabase
+      .from('students')
+      .select('id, program_code, academic_year, year_of_study, semester')
+      .eq('email', user.email)
+      .single();
 
-  // ⭐ STEP 3: Get ALL completed course codes
-  const completedCourseCodes = new Set();
-  completedCourses?.forEach(completion => {
-    const courseCode = courseCodeMap.get(completion.course_id);
-    if (courseCode) {
-      completedCourseCodes.add(courseCode.toUpperCase());
+    if (studentError || !student) {
+      throw new Error('Unable to load your profile. Please contact admin.');
     }
-  });
 
-  console.log('📚 Completed course codes:', [...completedCourseCodes]);
+    if (
+      !student.program_code ||
+      !student.academic_year ||
+      !student.year_of_study ||
+      !student.semester
+    ) {
+      throw new Error(
+        'Profile incomplete: missing program, academic year, year, or semester.'
+      );
+    }
 
-  // === RECURSIVE STORAGE SCAN ===
-  const scanFolder = async (prefix = '') => {
-    let allFiles = [];
+    const {
+      id: studentId,
+      program_code: studentProgramCode,
+      academic_year: studentAcademicYear,
+      year_of_study: studentYear,
+      semester: studentSemester,
+    } = student;
 
-    const listAndProcess = async (path = '') => {
-      const { data: items, error } = await supabase.storage
-        .from('Tutorials')
-        .list(path, {
-          limit: 1000,
-          offset: 0,
-          sortBy: { column: 'name', order: 'asc' }
-        });
+    const academicParts = studentAcademicYear.trim().split('/');
+    const startYear = academicParts[0]?.toUpperCase() || '';
+    const endYear = academicParts[1]?.toUpperCase() || '';
+    const normProgram = studentProgramCode.toUpperCase().trim();
+    const cohortString = `YEAR${studentYear}_SEM${studentSemester}`.toUpperCase();
 
-      if (error) {
-        console.error('Storage list error at path', path, error);
-        return;
+    const { data: completedCourses, error: completedError } = await supabase
+      .from('student_courses')
+      .select('course_id')
+      .eq('student_id', studentId)
+      .eq('status', 'completed');
+
+    if (completedError) {
+      console.warn('Could not fetch completed courses:', completedError);
+    }
+
+    const { data: enrolledCourses, error: enrolledError } = await supabase
+      .from('student_courses')
+      .select('course_id, courses(course_code)')
+      .eq('student_id', studentId);
+
+    if (enrolledError) {
+      console.warn('Could not fetch enrolled courses:', enrolledError);
+    }
+
+    const courseCodeMap = new Map();
+    enrolledCourses?.forEach((enrollment) => {
+      if (enrollment.courses?.course_code) {
+        courseCodeMap.set(enrollment.course_id, enrollment.courses.course_code);
       }
+    });
 
-      if (!items || items.length === 0) return;
+    const completedCourseCodes = new Set();
+    completedCourses?.forEach((completion) => {
+      const courseCode = courseCodeMap.get(completion.course_id);
+      if (courseCode) {
+        completedCourseCodes.add(courseCode.toUpperCase());
+      }
+    });
 
-      for (const item of items) {
-        const fullPath = path ? `${path}/${item.name}` : item.name;
+    const scanFolder = async (prefix = '') => {
+      const allFiles = [];
 
-        if (item.id === null || item.name.endsWith('/')) {
-          await listAndProcess(fullPath);
-        } else {
-          const { data: urlData } = supabase.storage
-            .from('Tutorials')
-            .getPublicUrl(fullPath);
-
-          allFiles.push({
-            name: item.name,
-            path: fullPath,
-            url: urlData.publicUrl,
-            created_at: item.created_at
+      const listAndProcess = async (path = '') => {
+        const { data: items, error } = await supabase.storage
+          .from('Tutorials')
+          .list(path, {
+            limit: 1000,
+            offset: 0,
+            sortBy: { column: 'name', order: 'asc' },
           });
+
+        if (error || !items || items.length === 0) return;
+
+        for (const item of items) {
+          const fullPath = path ? `${path}/${item.name}` : item.name;
+
+          if (item.id === null || item.name.endsWith('/')) {
+            await listAndProcess(fullPath);
+          } else {
+            const { data: urlData } = supabase.storage
+              .from('Tutorials')
+              .getPublicUrl(fullPath);
+
+            allFiles.push({
+              name: item.name,
+              path: fullPath,
+              url: urlData.publicUrl,
+              created_at: item.created_at,
+            });
+          }
         }
-      }
+      };
+
+      await listAndProcess(prefix);
+      return allFiles;
     };
 
-    await listAndProcess(prefix);
-    return allFiles;
-  };
+    const allFiles = await scanFolder();
 
-  const allFiles = await scanFolder();
-  console.log(`Found ${allFiles.length} ACTUAL FILES in Tutorials bucket:`, allFiles.map(f => f.path));
+    const matchingFiles = allFiles.filter((file) => {
+      const upperPath = file.path.toUpperCase();
+      const hasProgram = upperPath.includes(normProgram);
+      const hasCohort = upperPath.includes(cohortString);
+      const hasStartYear = startYear ? upperPath.includes(startYear) : true;
+      const hasEndYear = endYear ? upperPath.includes(endYear) : true;
+      return hasProgram && hasCohort && hasStartYear && hasEndYear;
+    });
 
-  // Filter files by program, cohort, and academic year
-  const matchingFiles = allFiles.filter(file => {
-    const upperPath = file.path.toUpperCase();
-
-    const hasProgram = upperPath.includes(normProgram);
-    const hasCohort = upperPath.includes(cohortString);
-    const hasStartYear = startYear ? upperPath.includes(startYear) : true;
-    const hasEndYear = endYear ? upperPath.includes(endYear) : true;
-
-    return hasProgram && hasCohort && hasStartYear && hasEndYear;
-  });
-
-  console.log(`Filtered to ${matchingFiles.length} matching tutorials`);
-
-  // Collect unique lecturer IDs from file paths
-  const lecturerIdSet = new Set();
-  matchingFiles.forEach(file => {
-    let parts = file.path.split('/');
-    if (parts[0] === 'tutorials') parts = parts.slice(1);
-    if (parts.length >= 1) {
-      lecturerIdSet.add(parts[0]);
-    }
-  });
-
-  const lecturerIds = Array.from(lecturerIdSet);
-
-  // Fetch real lecturer names
-  let lecturerMap = new Map();
-  if (lecturerIds.length > 0) {
-    const { data: lecturers, error: lecturerError } = await supabase
-      .from('lecturers')
-      .select('id, full_name')
-      .in('id', lecturerIds);
-
-    if (lecturerError) {
-      console.warn('Could not load lecturer names:', lecturerError);
-    } else {
-      lecturers.forEach(l => {
-        lecturerMap.set(l.id, l.full_name || 'Lecturer');
-      });
-    }
-  }
-
-  // ⭐ STEP 4: Create tutorial objects and FILTER OUT completed courses
-  const studentTutorials = matchingFiles
-    .map(file => {
+    const lecturerIdSet = new Set();
+    matchingFiles.forEach((file) => {
       let parts = file.path.split('/');
       if (parts[0] === 'tutorials') parts = parts.slice(1);
+      if (parts.length >= 1) lecturerIdSet.add(parts[0]);
+    });
 
-      // Lecturer name
-      const lecturerId = parts.length >= 1 ? parts[0] : null;
-      const lecturerName = lecturerMap.get(lecturerId) || 'Lecturer';
+    const lecturerIds = Array.from(lecturerIdSet);
+    const lecturerMap = new Map();
 
-      // Course code
-      let displayCourseCode = 'General';
-      let rawCourseCode = '';
-      if (parts.length >= 4) {
-        rawCourseCode = parts[2].toUpperCase();
-        // Format with space if needed
-        const match = rawCourseCode.match(/^([A-Z]+)(\d+)$/);
-        if (match) {
-          displayCourseCode = `${match[1]} ${match[2]}`;
-        } else {
-          displayCourseCode = rawCourseCode;
+    if (lecturerIds.length > 0) {
+      const { data: lecturers, error: lecturerError } = await supabase
+        .from('lecturers')
+        .select('id, full_name')
+        .in('id', lecturerIds);
+
+      if (!lecturerError && lecturers) {
+        lecturers.forEach((l) => {
+          lecturerMap.set(l.id, l.full_name || 'Lecturer');
+        });
+      }
+    }
+
+    const studentTutorials = matchingFiles
+      .map((file) => {
+        let parts = file.path.split('/');
+        if (parts[0] === 'tutorials') parts = parts.slice(1);
+
+        const lecturerId = parts.length >= 1 ? parts[0] : null;
+        const lecturerName = lecturerMap.get(lecturerId) || 'Lecturer';
+
+        let displayCourseCode = 'General';
+        let rawCourseCode = '';
+        if (parts.length >= 4) {
+          rawCourseCode = parts[2].toUpperCase();
+          const match = rawCourseCode.match(/^([A-Z]+)(\d+)$/);
+          displayCourseCode = match ? `${match[1]} ${match[2]}` : rawCourseCode;
         }
-      }
 
-      // ⭐ Check if this course is completed
-      const isCompleted = completedCourseCodes.has(rawCourseCode);
-      if (isCompleted) {
-        console.log(`⏭️ Skipping tutorial for completed course: ${rawCourseCode}`);
-        return null; // Skip this tutorial
-      }
+        if (completedCourseCodes.has(rawCourseCode)) {
+          return null;
+        }
 
-      // Clean title
-      let cleanTitle = file.name
-        .replace(/\.[^.]+$/, '')
-        .replace(/^\d{10,14}_[a-z0-9]{6,10}_/i, '')
-        .replace(/_+/g, ' ')
-        .trim();
+        let cleanTitle = file.name
+          .replace(/\.[^.]+$/, '')
+          .replace(/^\d{10,14}_[a-z0-9]{6,10}_/i, '')
+          .replace(/_+/g, ' ')
+          .trim();
 
-      cleanTitle = cleanTitle
-        .toLowerCase()
-        .replace(/\b\w/g, l => l.toUpperCase()) || 'Untitled Tutorial';
+        cleanTitle =
+          cleanTitle.toLowerCase().replace(/\b\w/g, (l) => l.toUpperCase()) ||
+          'Untitled Tutorial';
 
-      return {
-        id: `storage-${file.path.replace(/\//g, '-').replace(/\./g, '_')}`,
-        title: cleanTitle,
-        description: '',
-        videoSrc: file.url,
-        hasVideo: file.name.match(/\.(mp4|webm|ogg|mov)$/i) !== null,
-        lecturer: lecturerName,
-        courseCode: displayCourseCode,
-        courseName: displayCourseCode === 'General' ? 'General Tutorial' : displayCourseCode,
-        fileUrls: [],
-        viewCount: 0,
-        created_at: file.created_at,
-        isCompleted: isCompleted
-      };
-    })
-    .filter(tutorial => tutorial !== null); // Remove null entries (completed courses)
+        return {
+          id: `storage-${file.path.replace(/\//g, '-').replace(/\./g, '_')}`,
+          title: cleanTitle,
+          description: '',
+          videoSrc: file.url,
+          hasVideo: file.name.match(/\.(mp4|webm|ogg|mov)$/i) !== null,
+          lecturer: lecturerName,
+          courseCode: displayCourseCode,
+          courseName:
+            displayCourseCode === 'General' ? 'General Tutorial' : displayCourseCode,
+          fileUrls: [],
+          viewCount: 0,
+          created_at: file.created_at,
+          isCompleted: false,
+        };
+      })
+      .filter((t) => t !== null);
 
-  console.log(`📚 After removing completed courses: ${studentTutorials.length} tutorials remaining`);
+    studentTutorials.sort((a, b) => {
+      const dateDiff = new Date(b.created_at) - new Date(a.created_at);
+      return dateDiff !== 0 ? dateDiff : a.title.localeCompare(b.title);
+    });
 
-  // Sort: newest first, then alphabetical by title
-  studentTutorials.sort((a, b) => {
-    const dateDiff = new Date(b.created_at) - new Date(a.created_at);
-    return dateDiff !== 0 ? dateDiff : a.title.localeCompare(b.title);
-  });
+    return {
+      tutorials: studentTutorials,
+      error:
+        studentTutorials.length === 0
+          ? 'No tutorials available for your active courses. Tutorials for completed courses are hidden.'
+          : null,
+    };
+  }, [user]);
 
-  return {
-    tutorials: studentTutorials,
-    error: studentTutorials.length === 0 ? 'No tutorials available for your active courses. Tutorials for completed courses are hidden.' : null
-  };
-
-}, [user]);
-
-// Use cached data hook
-const { 
-  data: cachedTutorialData, 
-  loading, 
-  error,
-  refetch: refetchTutorials 
-} = useCachedData(
-  `tutorials-${user?.id || user?.email}`,
-  fetchTutorialsData,
-  {
+  const {
+    data: cachedTutorialData,
+    loading,
+    error,
+    refetch: refetchTutorials,
+  } = useCachedData(`tutorials-${user?.id || user?.email}`, fetchTutorialsData, {
     ttl: 15 * 60 * 1000,
     enabled: !!user?.email,
-    dependencies: [user?.email]
-  }
-);
+    dependencies: [user?.email],
+  });
 
-  // Define tutorials early (will be populated by cached data)
   const tutorials = cachedTutorialData?.tutorials || [];
 
+  // Thumbnails
   const generateThumbnail = (videoSrc) => {
     return new Promise((resolve) => {
       const video = document.createElement('video');
@@ -316,9 +269,7 @@ const {
         resolve(canvas.toDataURL('image/jpeg', 0.8));
       };
 
-      video.onerror = () => {
-        resolve(null);
-      };
+      video.onerror = () => resolve(null);
     });
   };
 
@@ -328,26 +279,19 @@ const {
         if (!thumbnails[tutorial.id] && tutorial.videoSrc) {
           const thumb = await generateThumbnail(tutorial.videoSrc);
           if (thumb) {
-            setThumbnails(prev => ({
-              ...prev,
-              [tutorial.id]: thumb
-            }));
+            setThumbnails((prev) => ({ ...prev, [tutorial.id]: thumb }));
           }
         }
       }
     };
-
-    if (tutorials.length > 0) {
-      loadThumbnails();
-    }
+    if (tutorials.length > 0) loadThumbnails();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tutorials]);
 
-  // Clean up hover videos on unmount
   useEffect(() => {
     const refs = hoverVideoRefs.current;
     return () => {
-      Object.values(refs).forEach(video => {
+      Object.values(refs).forEach((video) => {
         if (video) {
           video.pause();
           video.currentTime = 0;
@@ -357,30 +301,82 @@ const {
     };
   }, []);
 
-  // Hide download toast after 3 seconds
   useEffect(() => {
     if (showDownloadToast) {
-      const timer = setTimeout(() => {
-        setShowDownloadToast(false);
-      }, 3000);
+      const timer = setTimeout(() => setShowDownloadToast(false), 3000);
       return () => clearTimeout(timer);
     }
   }, [showDownloadToast]);
 
+  // ==================== VIDEO PROGRESS ====================
+  const saveVideoProgress = (videoId, currentTime, duration) => {
+    if (!videoId || !currentTime || currentTime < 3) return;
+    try {
+      localStorage.setItem(
+        `tutorial-progress-${videoId}`,
+        JSON.stringify({
+          currentTime,
+          duration: duration || 0,
+          updatedAt: Date.now(),
+        })
+      );
+    } catch (_) {}
+  };
 
-  const openVideoPlayer = async (tutorial) => {
+  const getVideoProgress = (videoId) => {
+    try {
+      const raw = localStorage.getItem(`tutorial-progress-${videoId}`);
+      if (!raw) return 0;
+      const data = JSON.parse(raw);
+      if (Date.now() - (data.updatedAt || 0) > 30 * 24 * 60 * 60 * 1000) return 0;
+      return Number(data.currentTime) || 0;
+    } catch (_) {
+      return 0;
+    }
+  };
+
+  const closeModal = () => {
+    if (videoRef.current && activeVideo) {
+      const t = videoRef.current.currentTime;
+      const d = videoRef.current.duration;
+      if (t > 3) {
+        saveVideoProgress(activeVideo.id, t, d);
+      }
+      videoRef.current.pause();
+    }
+    setIsModalOpen(false);
+    setActiveVideo(null);
+    setIsVideoLoading(false);
+    setVideoError(false);
+    lastSavedSecondRef.current = -1;
+    hasResumedRef.current = false;
+  };
+
+  const handleTimeUpdate = () => {
+    if (!videoRef.current || !activeVideo) return;
+    const t = videoRef.current.currentTime;
+    const sec = Math.floor(t);
+    if (sec > 0 && sec % 5 === 0 && sec !== lastSavedSecondRef.current) {
+      lastSavedSecondRef.current = sec;
+      saveVideoProgress(activeVideo.id, t, videoRef.current.duration);
+    }
+  };
+
+  const openVideoPlayer = (tutorial) => {
     if (!tutorial.videoSrc) {
       alert('Video source not available');
       return;
     }
 
-    // Stop any playing hover videos
-    Object.values(hoverVideoRefs.current).forEach(video => {
+    Object.values(hoverVideoRefs.current).forEach((video) => {
       if (video) {
         video.pause();
         video.currentTime = 0;
       }
     });
+
+    hasResumedRef.current = false;
+    lastSavedSecondRef.current = -1;
 
     setActiveVideo(tutorial);
     setIsModalOpen(true);
@@ -388,20 +384,27 @@ const {
     setVideoError(false);
   };
 
-  const closeModal = () => {
-    if (videoRef.current) {
-      videoRef.current.pause();
-      videoRef.current.currentTime = 0;
-    }
-    setIsModalOpen(false);
-    setActiveVideo(null);
-    setIsVideoLoading(false);
-    setVideoError(false);
-  };
-
+  // Resume only ONCE – prevents infinite seek loop
   const handleVideoLoaded = () => {
     setIsVideoLoading(false);
     setVideoError(false);
+
+    if (hasResumedRef.current) return;
+    if (!videoRef.current || !activeVideo) return;
+
+    const duration = videoRef.current.duration;
+    if (!duration || isNaN(duration) || !isFinite(duration)) return;
+
+    const savedTime = getVideoProgress(activeVideo.id);
+
+    if (savedTime > 3 && savedTime < duration - 5) {
+      hasResumedRef.current = true;
+      try {
+        videoRef.current.currentTime = savedTime;
+      } catch (_) {}
+    } else {
+      hasResumedRef.current = true;
+    }
   };
 
   const handleVideoError = () => {
@@ -409,59 +412,33 @@ const {
     setVideoError(true);
   };
 
-  const getDifficultyColor = (difficulty) => {
-    switch(difficulty?.toLowerCase()) {
-      case 'beginner': return '#28a745';
-      case 'advanced': return '#dc3545';
-      default: return '#007bff';
-    }
-  };
-
   const refreshTutorials = () => {
     refetchTutorials();
   };
 
-const downloadVideo = (videoUrl, videoTitle) => {
-  if (!videoUrl) {
-    alert('No download URL available');
-    return;
-  }
-
-  const safeTitle = videoTitle
-    .replace(/[^a-z0-9]/gi, '_')
-    .substring(0, 100)
-    .trim();
-  const fileName = safeTitle ? `${safeTitle}.mp4` : 'tutorial_video.mp4';
-
-  const downloadUrl = `${videoUrl}?download=${encodeURIComponent(fileName)}`;
-
-  const link = document.createElement('a');
-  link.href = downloadUrl;
-  link.download = fileName;
-  link.style.display = 'none';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-
-  setDownloadFileName(fileName);
-  setShowDownloadToast(true);
-
-  console.log('Direct download started:', fileName);
-};
-
-  const downloadFile = async (fileUrl, fileName) => {
-    try {
-      const link = document.createElement('a');
-      link.href = fileUrl;
-      link.download = fileName || 'tutorial-file';
-      link.target = '_blank';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } catch (error) {
-      console.error('Error downloading file:', error);
-      alert('Failed to download file');
+  const downloadVideo = (videoUrl, videoTitle) => {
+    if (!videoUrl) {
+      alert('No download URL available');
+      return;
     }
+
+    const safeTitle = videoTitle
+      .replace(/[^a-z0-9]/gi, '_')
+      .substring(0, 100)
+      .trim();
+    const fileName = safeTitle ? `${safeTitle}.mp4` : 'tutorial_video.mp4';
+    const downloadUrl = `${videoUrl}?download=${encodeURIComponent(fileName)}`;
+
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = fileName;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    setDownloadFileName(fileName);
+    setShowDownloadToast(true);
   };
 
   const handleThumbnailHover = (tutorialId, videoUrl, isHovering) => {
@@ -475,129 +452,36 @@ const downloadVideo = (videoUrl, videoTitle) => {
     }
 
     const video = hoverVideoRefs.current[tutorialId];
-    
+
     if (isHovering && videoUrl) {
-      if (video.src !== videoUrl) {
-        video.src = videoUrl;
-      }
-      video.play().catch(err => {
-        console.log('Auto-play prevented:', err);
-      });
+      if (video.src !== videoUrl) video.src = videoUrl;
+      video.play().catch(() => {});
     } else {
       video.pause();
       video.currentTime = 0;
     }
   };
 
-// Loading state
-if (loading) {
-  return (
-    <div className="tutorials-container">
-      <div className="tutorials-loading-state">
-        <div className="tutorials-spinner-container">
-          <div className="tutorials-spinner">
-            <div className="tutorials-spinner-circle"></div>
-            <div className="tutorials-spinner-circle"></div>
-            <div className="tutorials-spinner-circle"></div>
-            <div className="tutorials-spinner-circle"></div>
+  // ==================== LOADING ====================
+  if (loading) {
+    return (
+      <div className="tutorials-container">
+        <div className="tutorials-loading-state">
+          <div className="tutorials-spinner-container">
+            <div className="tutorials-spinner">
+              <div className="tutorials-spinner-circle"></div>
+              <div className="tutorials-spinner-circle"></div>
+              <div className="tutorials-spinner-circle"></div>
+              <div className="tutorials-spinner-circle"></div>
+            </div>
           </div>
+          <p className="tutorials-loading-text">Loading tutorials...</p>
         </div>
-        <p className="tutorials-loading-text">Loading tutorials...</p>
       </div>
-      <style jsx>{`
-        .tutorials-container {
-          padding: 24px;
-          min-height: calc(100vh - 80px);
-          background: #f8f9fa;
-        }
-        
-        .tutorials-loading-state {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          height: 70vh;
-          gap: 24px;
-        }
-        
-        .tutorials-spinner-container {
-          width: 80px;
-          height: 80px;
-          position: relative;
-        }
-        
-        .tutorials-spinner {
-          width: 100%;
-          height: 100%;
-          position: relative;
-          animation: tutorials-spinner-rotate 2s linear infinite;
-        }
-        
-        .tutorials-spinner-circle {
-          position: absolute;
-          width: 20px;
-          height: 20px;
-          background: #007bff;
-          border-radius: 50%;
-          animation: tutorials-spinner-bounce 1.5s ease-in-out infinite;
-        }
-        
-        .tutorials-spinner-circle:nth-child(1) {
-          top: 0;
-          left: 50%;
-          transform: translateX(-50%);
-          animation-delay: 0s;
-        }
-        
-        .tutorials-spinner-circle:nth-child(2) {
-          top: 50%;
-          right: 0;
-          transform: translateY(-50%);
-          animation-delay: 0.15s;
-        }
-        
-        .tutorials-spinner-circle:nth-child(3) {
-          bottom: 0;
-          left: 50%;
-          transform: translateX(-50%);
-          animation-delay: 0.3s;
-        }
-        
-        .tutorials-spinner-circle:nth-child(4) {
-          top: 50%;
-          left: 0;
-          transform: translateY(-50%);
-          animation-delay: 0.45s;
-        }
-        
-        .tutorials-loading-text {
-          font-size: 18px;
-          color: #666;
-          font-weight: 500;
-          margin: 0;
-        }
-        
-        @keyframes tutorials-spinner-rotate {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-        
-        @keyframes tutorials-spinner-bounce {
-          0%, 100% {
-            transform: translate(-50%, -50%) scale(1);
-            opacity: 1;
-          }
-          50% {
-            transform: translate(-50%, -50%) scale(0.5);
-            opacity: 0.5;
-          }
-        }
-      `}</style>
-    </div>
-  );
-}
+    );
+  }
 
-  // Error state
+  // ==================== ERROR ====================
   if (error) {
     return (
       <div className="tutorials-container">
@@ -622,6 +506,7 @@ if (loading) {
     );
   }
 
+  // ==================== MAIN ====================
   return (
     <div className="tutorials-container">
       <div className="tutorials-header">
@@ -630,7 +515,9 @@ if (loading) {
             <i className="fas fa-video"></i> Video Tutorials
           </h1>
           <p className="page-subtitle">
-            {tutorials.length} {tutorials.length === 1 ? 'tutorial' : 'tutorials'} available for active courses
+            {tutorials.length}{' '}
+            {tutorials.length === 1 ? 'tutorial' : 'tutorials'} available for active
+            courses
           </p>
         </div>
         <div className="header-right">
@@ -640,7 +527,6 @@ if (loading) {
         </div>
       </div>
 
-      {/* Tutorials Grid */}
       <div className="tutorials-grid">
         {tutorials.length === 0 ? (
           <div className="empty-state">
@@ -649,67 +535,53 @@ if (loading) {
             </div>
             <h3 className="empty-title">No Tutorials Found</h3>
             <p className="empty-message">
-              No tutorials available for your active courses. Tutorials for completed courses are hidden.
+              No tutorials available for your active courses. Tutorials for completed
+              courses are hidden.
             </p>
           </div>
         ) : (
-          tutorials.map(tutorial => (
+          tutorials.map((tutorial) => (
             <div key={tutorial.id} className="tutorial-card">
-              {/* Thumbnail with Video Preview */}
-              <div 
+              <div
                 className="tutorial-thumbnail"
-                onMouseEnter={() => handleThumbnailHover(tutorial.id, tutorial.videoSrc, true)}
-                onMouseLeave={() => handleThumbnailHover(tutorial.id, tutorial.videoSrc, false)}
+                onMouseEnter={() =>
+                  handleThumbnailHover(tutorial.id, tutorial.videoSrc, true)
+                }
+                onMouseLeave={() =>
+                  handleThumbnailHover(tutorial.id, tutorial.videoSrc, false)
+                }
                 onClick={() => openVideoPlayer(tutorial)}
               >
                 <div className="thumbnail-content">
-                  {/* Video Preview */}
-                  <div 
+                  <div
                     className="video-preview"
-                    ref={el => {
+                    ref={(el) => {
                       if (el && hoverVideoRefs.current[tutorial.id]) {
                         el.appendChild(hoverVideoRefs.current[tutorial.id]);
                       }
                     }}
                   />
-                  
-                  {/* Fallback image or first frame */}
-                  <div 
+                  <div
                     className="thumbnail-fallback"
-                   style={{
+                    style={{
                       backgroundImage: thumbnails[tutorial.id]
                         ? `url(${thumbnails[tutorial.id]})`
                         : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                       backgroundSize: 'cover',
-                      backgroundPosition: 'center'
+                      backgroundPosition: 'center',
                     }}
                   />
-                  
-                  <div className="difficulty-badge" style={{ display:'none',
-                    backgroundColor: getDifficultyColor(tutorial.difficulty)
-                  }}>
-                    {tutorial.difficulty?.toUpperCase()}
-                  </div>
-                  
-                  <div className="course-badge">
-                    {tutorial.courseCode}
-                  </div>
+                  <div className="course-badge">{tutorial.courseCode}</div>
                 </div>
               </div>
 
-              {/* Tutorial Info */}
               <div className="tutorial-content">
                 <div className="tutorial-header">
                   <h3 className="tutorial-title" title={tutorial.title}>
                     {tutorial.title}
                   </h3>
-                  {tutorial.duration > 0 && (
-                    <span className="duration-badge">
-                      <i className="far fa-clock"></i> {tutorial.duration} min
-                    </span>
-                  )}
                 </div>
-                
+
                 <div className="tutorial-details">
                   <div className="lecturer-info">
                     <i className="fas fa-chalkboard-teacher"></i>
@@ -721,16 +593,15 @@ if (loading) {
                   </div>
                 </div>
 
-                {/* Action Buttons */}
                 <div className="action-buttons">
-                  <button 
+                  <button
                     onClick={() => openVideoPlayer(tutorial)}
                     className="watch-button"
                     disabled={!tutorial.videoSrc}
                   >
                     <i className="fas fa-play"></i> Watch
                   </button>
-                  
+
                   <div className="secondary-actions">
                     {tutorial.videoSrc && (
                       <button
@@ -744,19 +615,6 @@ if (loading) {
                         <i className="fas fa-download"></i> Download
                       </button>
                     )}
-                    
-                    {tutorial.fileUrls && tutorial.fileUrls.length > 0 && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          downloadFile(tutorial.fileUrls[0], `${tutorial.title}_materials.zip`);
-                        }}
-                        className="materials-button"
-                        title="Download materials"
-                      >
-                        <i className="fas fa-file-download"></i>
-                      </button>
-                    )}
                   </div>
                 </div>
               </div>
@@ -765,7 +623,7 @@ if (loading) {
         )}
       </div>
 
-      {/* Video Player Modal */}
+      {/* Video Modal */}
       <Modal
         isOpen={isModalOpen}
         onRequestClose={closeModal}
@@ -776,7 +634,6 @@ if (loading) {
       >
         {activeVideo && (
           <div className="modal-container">
-            {/* Modal Header */}
             <div className="modal-header">
               <div className="modal-title-section">
                 <h2 className="modal-title">{activeVideo.title}</h2>
@@ -792,23 +649,20 @@ if (loading) {
               </div>
               <div className="modal-actions">
                 <button
-                  onClick={() => downloadVideo(activeVideo.videoSrc, activeVideo.title)}
+                  onClick={() =>
+                    downloadVideo(activeVideo.videoSrc, activeVideo.title)
+                  }
                   className="modal-download-btn"
                   title="Download video"
                 >
                   <i className="fas fa-download"></i> Download
                 </button>
-                <button
-                  onClick={closeModal}
-                  className="modal-close-btn"
-                  title="Close"
-                >
+                <button onClick={closeModal} className="modal-close-btn" title="Close">
                   <i className="fas fa-times"></i>
                 </button>
               </div>
             </div>
 
-            {/* Video Player */}
             <div className="video-container">
               {isVideoLoading && (
                 <div className="video-loading">
@@ -816,7 +670,7 @@ if (loading) {
                   <p>Loading video...</p>
                 </div>
               )}
-              
+
               {videoError ? (
                 <div className="video-error">
                   <div className="error-icon-large">
@@ -824,8 +678,10 @@ if (loading) {
                   </div>
                   <h3>Video Playback Error</h3>
                   <p>Unable to load the video. Please try downloading it instead.</p>
-                  <button 
-                    onClick={() => downloadVideo(activeVideo.videoSrc, activeVideo.title)}
+                  <button
+                    onClick={() =>
+                      downloadVideo(activeVideo.videoSrc, activeVideo.title)
+                    }
                     className="modal-download-btn"
                   >
                     <i className="fas fa-download"></i> Download Video
@@ -834,14 +690,15 @@ if (loading) {
               ) : (
                 <video
                   ref={videoRef}
+                  key={activeVideo.id}
                   src={activeVideo.videoSrc}
                   className="video-player"
                   controls
                   controlsList="nodownload"
-                  preload="metadata"
+                  preload="auto"
                   playsInline
-                  crossOrigin="anonymous"
-                  onLoadedData={handleVideoLoaded}
+                  onCanPlay={handleVideoLoaded}
+                  onTimeUpdate={handleTimeUpdate}
                   onError={handleVideoError}
                   autoPlay
                 >
@@ -850,49 +707,23 @@ if (loading) {
               )}
             </div>
 
-            {/* Video Description */}
             <div className="video-description">
               <div className="description-header">
                 <h4 className="description-title">
                   <i className="fas fa-info-circle"></i> Description from Lecturer
                 </h4>
-                <div className="description-badge">
-                  Tutorial Material
-                </div>
+                <div className="description-badge">Tutorial Material</div>
               </div>
-              
               <div className="description-content">
                 <p className="description-text">
                   {activeVideo.description || 'Tutorial material'}
                 </p>
               </div>
-
-              {/* Materials Section */}
-              {activeVideo.fileUrls && activeVideo.fileUrls.length > 0 && (
-                <div className="materials-section">
-                  <h5 className="materials-title">
-                    <i className="fas fa-file-download"></i> Download Materials
-                  </h5>
-                  <div className="materials-list">
-                    {activeVideo.fileUrls.map((fileUrl, index) => (
-                      <button
-                        key={index}
-                        onClick={() => downloadFile(fileUrl, `${activeVideo.title}_material_${index + 1}.zip`)}
-                        className="material-btn"
-                      >
-                        <i className="fas fa-download"></i>
-                        <span>Material {index + 1}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         )}
       </Modal>
 
-      {/* Download Toast Notification */}
       {showDownloadToast && (
         <div className="download-toast">
           <div className="toast-content">
@@ -902,7 +733,9 @@ if (loading) {
         </div>
       )}
 
-      <style jsx>{`
+      {/* Keep your existing <style jsx> block here */}
+
+        <style jsx>{`
         /* Base Container */
         .tutorials-container {
           padding: 24px;
@@ -1761,11 +1594,9 @@ if (loading) {
           display: flex !important;
         }
 
-        .video-player::-webkit-media-controls-panel {
-          background: linear-gradient(rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.5));
-          backdrop-filter: blur(10px);
-        }
-
+    .video-player::-webkit-media-controls-panel {
+  background: rgba(0, 0, 0, 0.7);
+}
         /* Responsive Design */
         @media (max-width: 768px) {
           .tutorials-container {
