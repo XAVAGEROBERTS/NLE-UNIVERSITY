@@ -1,3 +1,5 @@
+// Results.jsx - COMPLETE UPDATED VERSION
+// Only shows results from exams that have been final approved by Dean
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
@@ -18,6 +20,7 @@ const Results = () => {
   const [specificExam, setSpecificExam] = useState(null);
   const [examDetails, setExamDetails] = useState(null);
   const [examSubmission, setExamSubmission] = useState(null);
+  const [notApproved, setNotApproved] = useState(false);
   const { user } = useStudentAuth();
 
   useEffect(() => {
@@ -47,6 +50,28 @@ const Results = () => {
 
       if (studentError) throw studentError;
       setStudentInfo(student);
+
+      // ✅ CHECK IF EXAM IS DEAN-APPROVED
+      const { data: approval, error: approvalError } = await supabase
+        .from('exam_results_approvals')
+        .select('status')
+        .eq('exam_id', examId)
+        .eq('status', 'approved_by_dean')
+        .maybeSingle();
+
+      if (approvalError) throw approvalError;
+
+      if (!approval) {
+        // Exam is not Dean-approved yet
+        console.log('⚠️ Exam not yet approved by Dean');
+        setNotApproved(true);
+        setExamDetails(null);
+        setExamSubmission(null);
+        setSpecificExam(null);
+        return;
+      }
+
+      setNotApproved(false);
 
       // Fetch exam details
       const { data: exam, error: examError } = await supabase
@@ -88,6 +113,24 @@ const Results = () => {
 
   const fetchSpecificExamDetails = async (examId) => {
     try {
+      // ✅ CHECK IF EXAM IS DEAN-APPROVED
+      const { data: approval, error: approvalError } = await supabase
+        .from('exam_results_approvals')
+        .select('status')
+        .eq('exam_id', examId)
+        .eq('status', 'approved_by_dean')
+        .maybeSingle();
+
+      if (approvalError) throw approvalError;
+
+      if (!approval) {
+        setNotApproved(true);
+        setExamDetails(null);
+        return;
+      }
+
+      setNotApproved(false);
+
       const { data: exam, error: examError } = await supabase
         .from('examinations')
         .select(`
@@ -118,13 +161,36 @@ const Results = () => {
     if (studentError) throw new Error(`Student data error: ${studentError.message}`);
     if (!student) throw new Error('Student not found');
 
-    // Fetch exam submissions that are graded
+    // ✅ FIRST: Get exam IDs that are approved_by_dean
+    const { data: approvedExams, error: approvedError } = await supabase
+      .from('exam_results_approvals')
+      .select('exam_id')
+      .eq('status', 'approved_by_dean');
+
+    if (approvedError) {
+      console.warn('Error fetching approved exams:', approvedError);
+    }
+
+    const approvedExamIds = approvedExams?.map(a => a.exam_id) || [];
+    console.log('✅ Dean-approved exam IDs:', approvedExamIds);
+
+    // If no exams are approved, return empty results
+    if (approvedExamIds.length === 0) {
+      return {
+        student,
+        resultsData: {},
+        cgpa: 0.0
+      };
+    }
+
+    // Fetch exam submissions that are graded AND in approved exams
     const { data: examSubmissions, error: subError } = await supabase
       .from('exam_submissions')
       .select('*')
       .eq('student_id', student.id)
       .eq('status', 'graded')
-      .not('total_marks_obtained', 'is', null);
+      .not('total_marks_obtained', 'is', null)
+      .in('exam_id', approvedExamIds);
 
     if (subError) throw new Error(`Exam submissions error: ${subError.message}`);
 
@@ -184,7 +250,7 @@ const Results = () => {
           };
         }
 
-        // FIXED: Handle grade points calculation correctly
+        // Handle grade points calculation correctly
         let gradePoints = 0;
         if (sub.grade_points !== null && sub.grade_points !== undefined) {
           gradePoints = parseFloat(sub.grade_points);
@@ -225,7 +291,7 @@ const Results = () => {
           organizedExamResults[yearKey].semester2.push(result);
         }
 
-        // FIXED: Always add credits and points, even for F grades
+        // Always add credits and points, even for F grades
         if (exam.courses.credits) {
           organizedExamResults[yearKey].totalPoints += (gradePoints || 0) * exam.courses.credits;
           organizedExamResults[yearKey].totalCredits += exam.courses.credits;
@@ -316,7 +382,7 @@ const Results = () => {
     if (numericMarks >= 60) return 'C';
     if (numericMarks >= 55) return 'D+';
     if (numericMarks >= 50) return 'D';
-    return 'F';  // Below 50%
+    return 'F';
   };
 
   const getGradePoints = (grade) => {
@@ -366,7 +432,6 @@ const Results = () => {
     try {
       const doc = new jsPDF();
       
-      // Set document properties
       doc.setProperties({
         title: `Academic Transcript - ${studentInfo?.full_name}`,
         subject: 'Academic Results',
@@ -375,11 +440,9 @@ const Results = () => {
         creator: 'Examination System'
       });
 
-      // Add watermark
       doc.setFillColor(240, 240, 240);
       doc.rect(0, 0, doc.internal.pageSize.width, doc.internal.pageSize.height, 'F');
       
-      // Add header with institution info
       doc.setFontSize(20);
       doc.setTextColor(41, 128, 185);
       doc.text('NLE UNIVERSITY EXAMINATION SYSTEM', 105, 20, null, null, 'center');
@@ -392,7 +455,6 @@ const Results = () => {
       doc.setTextColor(127, 140, 141);
       doc.text('Issued Electronically', 105, 36, null, null, 'center');
       
-      // Add student info section
       doc.setFontSize(12);
       doc.setTextColor(44, 62, 80);
       
@@ -415,19 +477,16 @@ const Results = () => {
         margin: { left: 20, right: 20 }
       });
 
-      // Add results for each year
       let yPos = doc.lastAutoTable.finalY + 15;
       
       Object.keys(resultsData).sort().forEach(yearKey => {
         const yearData = resultsData[yearKey];
         
-        // Year header
         doc.setFontSize(14);
         doc.setTextColor(52, 152, 219);
         doc.text(`YEAR ${yearData.year} EXAM RESULTS`, 20, yPos);
         yPos += 10;
         
-        // Semester 1 results
         if (yearData.semester1.length > 0) {
           doc.setFontSize(12);
           doc.setTextColor(44, 62, 80);
@@ -457,7 +516,6 @@ const Results = () => {
           yPos = doc.lastAutoTable.finalY + 10;
         }
         
-        // Semester 2 results
         if (yearData.semester2.length > 0) {
           doc.setFontSize(12);
           doc.setTextColor(44, 62, 80);
@@ -487,20 +545,17 @@ const Results = () => {
           yPos = doc.lastAutoTable.finalY + 15;
         }
         
-        // Year summary
         doc.setFontSize(11);
         doc.setTextColor(127, 140, 141);
         doc.text(`Year ${yearData.year} GPA: ${yearData.gpa.toFixed(2)} | Total Credits: ${yearData.totalCredits}`, 20, yPos);
         yPos += 20;
         
-        // Add page if needed
         if (yPos > 250) {
           doc.addPage();
           yPos = 20;
         }
       });
 
-      // Add final summary
       doc.setFontSize(12);
       doc.setTextColor(39, 174, 96);
       doc.text('FINAL SUMMARY', 20, yPos);
@@ -528,7 +583,6 @@ const Results = () => {
         margin: { left: 20, right: 20 }
       });
 
-      // Add footer
       const pageCount = doc.internal.getNumberOfPages();
       for (let i = 1; i <= pageCount; i++) {
         doc.setPage(i);
@@ -538,7 +592,6 @@ const Results = () => {
         doc.text(`Page ${i} of ${pageCount}`, 105, doc.internal.pageSize.height - 5, null, null, 'center');
       }
 
-      // Save the PDF
       doc.save(`Transcript_${studentInfo?.student_id}_${new Date().toISOString().split('T')[0]}.pdf`);
       
     } catch (error) {
@@ -552,6 +605,21 @@ const Results = () => {
   };
 
   const renderSpecificExamResults = () => {
+    if (notApproved) {
+      return (
+        <div className="specific-exam-container">
+          <div className="empty-state">
+            <i className="fas fa-lock"></i>
+            <h3>Results Not Available</h3>
+            <p>This exam's results have not been approved by the Dean yet.</p>
+            <button className="btn btn-primary" onClick={() => navigate('/examinations')}>
+              <i className="fas fa-arrow-left"></i> Back to Examinations
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     if (!specificExam || !examDetails) return null;
 
     const submission = specificExam.submission || examSubmission;
@@ -562,7 +630,6 @@ const Results = () => {
 
     return (
       <div className="specific-exam-container">
-        {/* Header */}
         <div className="page-header">
           <div className="header-content">
             <h2 className="page-title">Exam Results</h2>
@@ -575,7 +642,6 @@ const Results = () => {
           </div>
         </div>
 
-        {/* Performance Summary */}
         <div className="performance-summary">
           <h3 className="section-title">
             <i className="fas fa-chart-line"></i> Exam Performance Summary
@@ -606,7 +672,6 @@ const Results = () => {
             </div>
           </div>
 
-          {/* Progress Bar */}
           <div className="progress-section">
             <div className="progress-header">
               <span className="progress-label">Performance</span>
@@ -626,7 +691,6 @@ const Results = () => {
           </div>
         </div>
 
-        {/* Exam Details */}
         <div className="exam-details">
           <h4 className="section-title">Exam Details</h4>
           
@@ -648,12 +712,6 @@ const Results = () => {
               <div className="detail-item">
                 <span className="detail-label">Date:</span>
                 <span className="detail-value">{new Date(examDetails.start_time).toLocaleDateString()}</span>
-              </div>
-              <div className="detail-item">
-                <span className="detail-label">Time:</span>
-                <span className="detail-value">
-                  {new Date(examDetails.start_time).toLocaleTimeString()} - {new Date(examDetails.end_time).toLocaleTimeString()}
-                </span>
               </div>
             </div>
             
@@ -677,12 +735,6 @@ const Results = () => {
                   {submission?.graded_at 
                     ? new Date(submission.graded_at).toLocaleString()
                     : 'N/A'}
-                </span>
-              </div>
-              <div className="detail-item">
-                <span className="detail-label">Status:</span>
-                <span className={`status-badge ${submission?.status === 'graded' ? 'graded' : 'pending'}`}>
-                  {submission?.status?.toUpperCase() || 'N/A'}
                 </span>
               </div>
             </div>
@@ -730,9 +782,26 @@ const Results = () => {
       );
     }
 
+    if (Object.keys(resultsData).length === 0) {
+      return (
+        <div className="empty-state">
+          <i className="fas fa-graduation-cap"></i>
+          <h3>No Examination Results Available</h3>
+          <p>Your examination results will appear here once they have been graded and approved by the Dean.</p>
+          <div className="empty-state-actions">
+            <button className="btn btn-primary" onClick={refreshResults}>
+              <i className="fas fa-sync-alt"></i> <span className="btn-text">Check Again</span>
+            </button>
+            <button className="btn btn-secondary" onClick={() => navigate('/examinations')}>
+              <i className="fas fa-clipboard-check"></i> <span className="btn-text">View Examinations</span>
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="general-results-container">
-        {/* Student Info & CGPA Card */}
         <div className="student-summary-card">
           <div className="student-infoResults">
             <div className="student-name">{studentInfo?.full_name || 'Student Name'}</div>
@@ -757,7 +826,6 @@ const Results = () => {
           </div>
         </div>
 
-        {/* Controls */}
         <div className="controls-row">
           <div className="year-selector">
             <label htmlFor="academic-year">Select Academic Year:</label>
@@ -772,9 +840,6 @@ const Results = () => {
                     Year {resultsData[yearKey].year}
                   </option>
                 ))}
-                {Object.keys(resultsData).length === 0 && (
-                  <option value="">No results available</option>
-                )}
               </select>
               <div className="select-arrow">
                 <i className="fas fa-chevron-down"></i>
@@ -787,7 +852,6 @@ const Results = () => {
           </button>
         </div>
 
-        {/* Year Summary */}
         {resultsData[activeYear] && (
           <div className="year-summary">
             <h4>Year {resultsData[activeYear].year} Academic Summary</h4>
@@ -951,22 +1015,6 @@ const Results = () => {
             </div>
           )}
         </div>
-
-        {Object.keys(resultsData).length === 0 && (
-          <div className="empty-state">
-            <i className="fas fa-graduation-cap"></i>
-            <h3>No Examination Results Available</h3>
-            <p>Your examination results will appear here once they have been graded and published.</p>
-            <div className="empty-state-actions">
-              <button className="btn btn-primary" onClick={refreshResults}>
-                <i className="fas fa-sync-alt"></i> <span className="btn-text">Check Again</span>
-              </button>
-              <button className="btn btn-secondary" onClick={() => navigate('/examinations')}>
-                <i className="fas fa-clipboard-check"></i> <span className="btn-text">View Examinations</span>
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     );
   };

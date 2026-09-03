@@ -1,4 +1,5 @@
-// src/components/dashboard/Dashboard.jsx - UPDATED with Results component CGPA logic
+// src/components/dashboard/Dashboard.jsx - COMPLETE UPDATED VERSION
+// CGPA only includes Dean-approved exam results
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useStudentAuth } from '../../context/StudentAuthContext';
 import { supabase } from '../../services/supabase';
@@ -64,7 +65,7 @@ const Dashboard = () => {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // ==================== GRADE HELPERS (EXACTLY LIKE RESULTS COMPONENT) ====================
+  // ==================== GRADE HELPERS ====================
   const getGradeFromMarks = (marks) => {
     if (!marks && marks !== 0) return 'N/A';
     const numericMarks = parseFloat(marks);
@@ -98,7 +99,7 @@ const Dashboard = () => {
     return points !== undefined ? points : 0.0;
   };
 
-  // ==================== CALCULATE CGPA (EXACTLY LIKE RESULTS COMPONENT) ====================
+  // ==================== CALCULATE CGPA (WITH DEAN APPROVAL CHECK) ====================
   const calculateCGPA = useCallback(async (studentId) => {
     if (!studentId) return 0.0;
 
@@ -106,6 +107,19 @@ const Dashboard = () => {
     let totalCredits = 0;
 
     try {
+      // ✅ FIRST: Get Dean-approved exam IDs
+      const { data: approvedExams, error: approvedError } = await supabase
+        .from('exam_results_approvals')
+        .select('exam_id')
+        .eq('status', 'approved_by_dean');
+
+      if (approvedError) {
+        console.warn('Error fetching approved exams:', approvedError);
+      }
+
+      const approvedExamIds = approvedExams?.map(a => a.exam_id) || [];
+      console.log('✅ Dashboard - Dean-approved exam IDs:', approvedExamIds);
+
       // 1. Fetch student courses that are completed with grades
       const { data: studentCourses, error: scError } = await supabase
         .from('student_courses')
@@ -133,33 +147,39 @@ const Dashboard = () => {
         console.error('Error fetching student courses:', scError);
       }
 
-      // 2. Fetch exam submissions that are graded
-      const { data: examSubmissions, error: subError } = await supabase
-        .from('exam_submissions')
-        .select(`
-          id,
-          exam_id,
-          total_marks_obtained,
-          grade,
-          grade_points,
-          percentage,
-          status
-        `)
-        .eq('student_id', studentId)
-        .eq('status', 'graded')
-        .not('total_marks_obtained', 'is', null);
+      // 2. Fetch exam submissions that are graded AND Dean-approved
+      let examSubmissions = [];
+      
+      if (approvedExamIds.length > 0) {
+        const { data: submissions, error: subError } = await supabase
+          .from('exam_submissions')
+          .select(`
+            id,
+            exam_id,
+            total_marks_obtained,
+            grade,
+            grade_points,
+            percentage,
+            status
+          `)
+          .eq('student_id', studentId)
+          .eq('status', 'graded')
+          .not('total_marks_obtained', 'is', null)
+          .in('exam_id', approvedExamIds); // ✅ Only Dean-approved exams
 
-      if (subError) {
-        console.error('Error fetching exam submissions:', subError);
+        if (subError) {
+          console.error('Error fetching exam submissions:', subError);
+        } else {
+          examSubmissions = submissions || [];
+        }
       }
 
-      // ===== PROCESS STUDENT COURSES (like Results component) =====
+      // ===== PROCESS STUDENT COURSES =====
       if (studentCourses && studentCourses.length > 0) {
         studentCourses.forEach(sc => {
           const grade = sc.grade || getGradeFromMarks(sc.marks);
           if (!grade) return;
           
-          // FIXED: Handle grade points calculation correctly
           let gradePoints = 0;
           if (sc.grade_points !== null && sc.grade_points !== undefined) {
             gradePoints = parseFloat(sc.grade_points);
@@ -179,8 +199,8 @@ const Dashboard = () => {
         });
       }
 
-      // ===== PROCESS EXAM SUBMISSIONS (like Results component) =====
-      if (examSubmissions && examSubmissions.length > 0) {
+      // ===== PROCESS EXAM SUBMISSIONS (Only Dean-approved) =====
+      if (examSubmissions.length > 0) {
         // Fetch exam details to get course credits
         const examIds = examSubmissions.map(sub => sub.exam_id);
         const { data: exams, error: examsError } = await supabase
@@ -213,7 +233,6 @@ const Dashboard = () => {
           const exam = examMap[sub.exam_id];
           if (!exam || !exam.courses) return;
 
-          // FIXED: Handle grade points calculation correctly
           let gradePoints = 0;
           if (sub.grade_points !== null && sub.grade_points !== undefined) {
             gradePoints = parseFloat(sub.grade_points);
@@ -226,7 +245,6 @@ const Dashboard = () => {
 
           const credits = exam.courses.credits || 3;
           
-          // Always add credits and points, even for F grades
           if (credits) {
             totalPoints += (gradePoints || 0) * credits;
             totalCredits += credits;
@@ -236,7 +254,7 @@ const Dashboard = () => {
 
       // ===== FINAL CGPA CALCULATION =====
       const cgpa = totalCredits > 0 ? parseFloat((totalPoints / totalCredits).toFixed(2)) : 0.0;
-      console.log(`✅ Dashboard CGPA calculated: ${cgpa} (${totalPoints} points / ${totalCredits} credits)`);
+      console.log(`✅ Dashboard CGPA: ${cgpa} (${totalPoints} points / ${totalCredits} credits) - Dean-approved only`);
       return cgpa;
 
     } catch (error) {
@@ -311,7 +329,7 @@ const Dashboard = () => {
 
     console.log(`📚 Found ${studentCourses.length} student courses`);
 
-    // ---------- CGPA (EXACTLY LIKE RESULTS COMPONENT) ----------
+    // ---------- CGPA (WITH DEAN APPROVAL CHECK) ----------
     cgpa = await calculateCGPA(student.id);
     console.log(`🎯 Final Dashboard CGPA: ${cgpa}`);
 
@@ -771,20 +789,10 @@ const Dashboard = () => {
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
           <div style={{ flex: 1 }}>
-            <h4 style={{ 
-              margin: '0 0 6px 0', 
-              fontSize: '16px',
-              color: '#333',
-              lineHeight: '1.3'
-            }}>
+            <h4 style={{ margin: '0 0 6px 0', fontSize: '16px', color: '#333', lineHeight: '1.3' }}>
               {lecture.title}
             </h4>
-            <p style={{ 
-              margin: '0',
-              fontSize: '14px',
-              color: '#666',
-              fontWeight: '500'
-            }}>
+            <p style={{ margin: '0', fontSize: '14px', color: '#666', fontWeight: '500' }}>
               {lecture.courseCode}
             </p>
           </div>
@@ -800,72 +808,25 @@ const Dashboard = () => {
           </div>
         </div>
         
-        <div style={{ 
-          display: 'grid', 
-          gridTemplateColumns: 'repeat(2, 1fr)', 
-          gap: '12px',
-          marginBottom: '16px'
-        }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', marginBottom: '16px' }}>
           <div>
-            <p style={{ 
-              margin: '0 0 4px 0',
-              fontSize: '12px',
-              color: '#999',
-              textTransform: 'uppercase'
-            }}>
-              Time
-            </p>
-            <p style={{ 
-              margin: '0',
-              fontSize: '14px',
-              fontWeight: '500',
-              color: '#333'
-            }}>
+            <p style={{ margin: '0 0 4px 0', fontSize: '12px', color: '#999', textTransform: 'uppercase' }}>Time</p>
+            <p style={{ margin: '0', fontSize: '14px', fontWeight: '500', color: '#333' }}>
               {formatTime(lecture.time)} - {formatTime(lecture.endTime)}
             </p>
           </div>
           <div>
-            <p style={{ 
-              margin: '0 0 4px 0',
-              fontSize: '12px',
-              color: '#999',
-              textTransform: 'uppercase'
-            }}>
-              Duration
-            </p>
-            <p style={{ 
-              margin: '0',
-              fontSize: '14px',
-              fontWeight: '500',
-              color: '#333'
-            }}>
+            <p style={{ margin: '0 0 4px 0', fontSize: '12px', color: '#999', textTransform: 'uppercase' }}>Duration</p>
+            <p style={{ margin: '0', fontSize: '14px', fontWeight: '500', color: '#333' }}>
               {lecture.duration} min
             </p>
           </div>
         </div>
         
-        <div style={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center',
-          paddingTop: '12px',
-          borderTop: '1px solid #eee'
-        }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '12px', borderTop: '1px solid #eee' }}>
           <div>
-            <p style={{ 
-              margin: '0 0 4px 0',
-              fontSize: '12px',
-              color: '#999'
-            }}>
-              Lecturer
-            </p>
-            <p style={{ 
-              margin: '0',
-              fontSize: '14px',
-              color: '#555'
-            }}>
-              {lecture.lecturer}
-            </p>
+            <p style={{ margin: '0 0 4px 0', fontSize: '12px', color: '#999' }}>Lecturer</p>
+            <p style={{ margin: '0', fontSize: '14px', color: '#555' }}>{lecture.lecturer}</p>
           </div>
           <button 
             onClick={() => addToCalendar(lecture)}
@@ -899,132 +860,33 @@ const Dashboard = () => {
       boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
       backgroundColor: 'white'
     }}>
-      <table style={{
-        width: '100%',
-        borderCollapse: 'collapse',
-        minWidth: '650px'
-      }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '650px' }}>
         <thead>
           <tr style={{ backgroundColor: '#f8f9fa' }}>
-            <th style={{ 
-              padding: 'clamp(12px, 2.5vw, 15px)', 
-              textAlign: 'left', 
-              borderBottom: '2px solid #dee2e6',
-              fontSize: 'clamp(0.85rem, 2vw, 0.95rem)',
-              whiteSpace: 'nowrap'
-            }}>Date</th>
-            <th style={{ 
-              padding: 'clamp(12px, 2.5vw, 15px)', 
-              textAlign: 'left', 
-              borderBottom: '2px solid #dee2e6',
-              fontSize: 'clamp(0.85rem, 2vw, 0.95rem)',
-              whiteSpace: 'nowrap'
-            }}>Time</th>
-            <th style={{ 
-              padding: 'clamp(12px, 2.5vw, 15px)', 
-              textAlign: 'left', 
-              borderBottom: '2px solid #dee2e6',
-              fontSize: 'clamp(0.85rem, 2vw, 0.95rem)',
-              whiteSpace: 'nowrap'
-            }}>Course</th>
-            <th style={{ 
-              padding: 'clamp(12px, 2.5vw, 15px)', 
-              textAlign: 'left', 
-              borderBottom: '2px solid #dee2e6',
-              fontSize: 'clamp(0.85rem, 2vw, 0.95rem)',
-              whiteSpace: 'nowrap'
-            }}>Lecturer</th>
-            <th style={{ 
-              padding: 'clamp(12px, 2.5vw, 15px)', 
-              textAlign: 'left', 
-              borderBottom: '2px solid #dee2e6',
-              fontSize: 'clamp(0.85rem, 2vw, 0.95rem)',
-              whiteSpace: 'nowrap'
-            }}>Duration</th>
-            <th style={{ 
-              padding: 'clamp(12px, 2.5vw, 15px)', 
-              textAlign: 'left', 
-              borderBottom: '2px solid #dee2e6',
-              fontSize: 'clamp(0.85rem, 2vw, 0.95rem)',
-              whiteSpace: 'nowrap'
-            }}>Action</th>
+            <th style={{ padding: 'clamp(12px, 2.5vw, 15px)', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontSize: 'clamp(0.85rem, 2vw, 0.95rem)', whiteSpace: 'nowrap' }}>Date</th>
+            <th style={{ padding: 'clamp(12px, 2.5vw, 15px)', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontSize: 'clamp(0.85rem, 2vw, 0.95rem)', whiteSpace: 'nowrap' }}>Time</th>
+            <th style={{ padding: 'clamp(12px, 2.5vw, 15px)', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontSize: 'clamp(0.85rem, 2vw, 0.95rem)', whiteSpace: 'nowrap' }}>Course</th>
+            <th style={{ padding: 'clamp(12px, 2.5vw, 15px)', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontSize: 'clamp(0.85rem, 2vw, 0.95rem)', whiteSpace: 'nowrap' }}>Lecturer</th>
+            <th style={{ padding: 'clamp(12px, 2.5vw, 15px)', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontSize: 'clamp(0.85rem, 2vw, 0.95rem)', whiteSpace: 'nowrap' }}>Duration</th>
+            <th style={{ padding: 'clamp(12px, 2.5vw, 15px)', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontSize: 'clamp(0.85rem, 2vw, 0.95rem)', whiteSpace: 'nowrap' }}>Action</th>
           </tr>
         </thead>
         <tbody>
           {upcomingLectures.map((lecture) => (
-            <tr 
-              key={lecture.id}
-              style={{ 
-                borderBottom: '1px solid #e9ecef',
-                backgroundColor: new Date(lecture.date) < new Date() ? '#fff9e6' : 'white'
-              }}
-            >
-              <td style={{ 
-                padding: 'clamp(12px, 2.5vw, 15px)',
-                fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
-              }}>
+            <tr key={lecture.id} style={{ borderBottom: '1px solid #e9ecef', backgroundColor: new Date(lecture.date) < new Date() ? '#fff9e6' : 'white' }}>
+              <td style={{ padding: 'clamp(12px, 2.5vw, 15px)', fontSize: 'clamp(0.85rem, 2vw, 0.95rem)' }}>
                 <div style={{ fontWeight: '500', whiteSpace: 'nowrap' }}>{formatDate(lecture.date)}</div>
-                {new Date(lecture.date) < new Date() && (
-                  <span style={{ fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)', color: '#e74c3c' }}>Today</span>
-                )}
               </td>
-              <td style={{ 
-                padding: 'clamp(12px, 2.5vw, 15px)',
-                fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
-              }}>
-                <div style={{ whiteSpace: 'nowrap' }}>{formatTime(lecture.time)}</div>
-                <div style={{ 
-                  fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)', 
-                  color: '#666',
-                  whiteSpace: 'nowrap'
-                }}>
-                  to {formatTime(lecture.endTime)}
-                </div>
+              <td style={{ padding: 'clamp(12px, 2.5vw, 15px)', fontSize: 'clamp(0.85rem, 2vw, 0.95rem)' }}>
+                <div style={{ whiteSpace: 'nowrap' }}>{formatTime(lecture.time)} - {formatTime(lecture.endTime)}</div>
               </td>
-              <td style={{ 
-                padding: 'clamp(12px, 2.5vw, 15px)',
-                fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
-              }}>
-                <div style={{ 
-                  fontWeight: '500',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  maxWidth: '150px'
-                }}>
-                  {lecture.title}
-                </div>
-                <div style={{ 
-                  fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)', 
-                  color: '#666' 
-                }}>
-                  {lecture.courseCode}
-                </div>
+              <td style={{ padding: 'clamp(12px, 2.5vw, 15px)', fontSize: 'clamp(0.85rem, 2vw, 0.95rem)' }}>
+                <div style={{ fontWeight: '500' }}>{lecture.title}</div>
+                <div style={{ fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)', color: '#666' }}>{lecture.courseCode}</div>
               </td>
-              <td style={{ 
-                padding: 'clamp(12px, 2.5vw, 15px)',
-                fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
-              }}>
-                <div style={{
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  maxWidth: '120px'
-                }}>
-                  {lecture.lecturer}
-                </div>
-              </td>
-              <td style={{ 
-                padding: 'clamp(12px, 2.5vw, 15px)',
-                fontSize: 'clamp(0.85rem, 2vw, 0.95rem)',
-                whiteSpace: 'nowrap'
-              }}>
-                {lecture.duration} min
-              </td>
-              <td style={{ 
-                padding: 'clamp(12px, 2.5vw, 15px)',
-                fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
-              }}>
+              <td style={{ padding: 'clamp(12px, 2.5vw, 15px)', fontSize: 'clamp(0.85rem, 2vw, 0.95rem)' }}>{lecture.lecturer}</td>
+              <td style={{ padding: 'clamp(12px, 2.5vw, 15px)', fontSize: 'clamp(0.85rem, 2vw, 0.95rem)', whiteSpace: 'nowrap' }}>{lecture.duration} min</td>
+              <td style={{ padding: 'clamp(12px, 2.5vw, 15px)' }}>
                 <button 
                   className="add-calendar"
                   onClick={() => addToCalendar(lecture)}
@@ -1038,7 +900,6 @@ const Dashboard = () => {
                     fontSize: 'clamp(0.8rem, 1.8vw, 0.9rem)',
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'center',
                     gap: '5px',
                     whiteSpace: 'nowrap'
                   }}
@@ -1053,7 +914,6 @@ const Dashboard = () => {
     </div>
   );
 
-  // Safe attendance stats calculation
   const attendanceStats = calculateAttendanceStats(
     attendanceData,
     dashboardStats.attendanceRate,
@@ -1061,606 +921,182 @@ const Dashboard = () => {
     semesterPresentDays
   );
 
-  const displayAttendanceSummary = loading 
-    ? 'Loading attendance data...' 
-    : attendanceStats.summary;
+  const displayAttendanceSummary = loading ? 'Loading attendance data...' : attendanceStats.summary;
     
   if (loading) {
     return (
-      <div className="dashboard-spinner" style={{ 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center',
-        height: '100vh',
-        flexDirection: 'column'
-      }}>
-        <div className="spinner" style={{
-          width: '50px',
-          height: '50px',
-          border: '4px solid #f3f3f3',
-          borderTop: '4px solid #3498db',
-          borderRadius: '50%',
-          animation: 'spin 1s linear infinite'
-        }}></div>
+      <div className="dashboard-spinner" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column' }}>
+        <div className="spinner" style={{ width: '50px', height: '50px', border: '4px solid #f3f3f3', borderTop: '4px solid #3498db', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
         <p style={{ marginTop: '20px', color: '#666' }}>Loading dashboard...</p>
       </div>
     );
   }
 
-  // Get student name from database or context
   const studentName = studentDetails?.full_name || user?.name || 'Student';
   const programDuration = getProgramDuration(studentDetails?.program);
 
   return (
     <div className="content" style={{ padding: 'clamp(10px, 3vw, 20px)' }}>
       {/* Dashboard Header */}
-      <div className="dashboard-header" style={{
-        marginBottom: 'clamp(20px, 4vw, 30px)',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start'
-      }}>
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '8px'
-        }}>
-          <h2 style={{ 
-            margin: '0',
-            fontSize: 'clamp(1.3rem, 4vw, 1.8rem)',
-            lineHeight: '1.2'
-          }}>
+      <div className="dashboard-header" style={{ marginBottom: 'clamp(20px, 4vw, 30px)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <h2 style={{ margin: '0', fontSize: 'clamp(1.3rem, 4vw, 1.8rem)', lineHeight: '1.2' }}>
             {getGreeting()}, {studentName}
           </h2>
-          <div className="date-display" style={{ 
-            color: '#666', 
-            fontSize: 'clamp(0.85rem, 2.5vw, 1rem)'
-          }}>
-            {new Date().toLocaleDateString('en-US', {
-              weekday: 'long',
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric'
-            })}
+          <div className="date-display" style={{ color: '#666', fontSize: 'clamp(0.85rem, 2.5vw, 1rem)' }}>
+            {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
           </div>
         </div>
         <button 
           onClick={() => refetchDashboard()}
-          style={{
-            backgroundColor: '#f8f9fa',
-            color: '#333',
-            border: '1px solid #dee2e6',
-            padding: '8px 12px',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontSize: '14px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            whiteSpace: 'nowrap'
-          }}
+          style={{ backgroundColor: '#f8f9fa', color: '#333', border: '1px solid #dee2e6', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}
         >
           <i className="fas fa-sync-alt"></i> Refresh
         </button>
       </div>
 
       {/* Dashboard Cards - Responsive Grid */}
-      <div className="dashboard-cards" style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 350px), 1fr))',
-        gap: 'clamp(15px, 3vw, 20px)',
-        marginBottom: 'clamp(20px, 4vw, 30px)'
-      }}>
+      <div className="dashboard-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 350px), 1fr))', gap: 'clamp(15px, 3vw, 20px)', marginBottom: 'clamp(20px, 4vw, 30px)' }}>
         {/* Program Progress Card */}
-        <div className="card" style={{
-          backgroundColor: 'white',
-          borderRadius: '12px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-          padding: 'clamp(15px, 3vw, 20px)',
-          display: 'flex',
-          flexDirection: 'column',
-          height: '100%'
-        }}>
-          <div className="card-header" style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            marginBottom: '15px'
-          }}>
-            <h3 className="card-title" style={{ 
-              margin: '0',
-              fontSize: 'clamp(1rem, 2.5vw, 1.2rem)',
-              color: '#333'
-            }}>
-              My Program
-            </h3>
-            <div className="card-icon primary" style={{
-              width: 'clamp(36px, 8vw, 44px)',
-              height: 'clamp(36px, 8vw, 44px)',
-              borderRadius: '50%',
-              backgroundColor: 'rgba(52, 152, 219, 0.1)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}>
+        <div className="card" style={{ backgroundColor: 'white', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)', padding: 'clamp(15px, 3vw, 20px)', display: 'flex', flexDirection: 'column', height: '100%' }}>
+          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '15px' }}>
+            <h3 className="card-title" style={{ margin: '0', fontSize: 'clamp(1rem, 2.5vw, 1.2rem)', color: '#333' }}>My Program</h3>
+            <div className="card-icon primary" style={{ width: 'clamp(36px, 8vw, 44px)', height: 'clamp(36px, 8vw, 44px)', borderRadius: '50%', backgroundColor: 'rgba(52, 152, 219, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <i className="fas fa-graduation-cap" style={{ color: '#3498db', fontSize: 'clamp(16px, 3vw, 20px)' }}></i>
             </div>
           </div>
           <div className="card-content" style={{ flex: '1' }}>
-            <h3 style={{ 
-              margin: '0 0 clamp(8px, 2vw, 12px) 0', 
-              fontSize: 'clamp(0.95rem, 2.2vw, 1.1rem)',
-              color: '#333',
-              lineHeight: '1.3'
-            }}>
+            <h3 style={{ margin: '0 0 clamp(8px, 2vw, 12px) 0', fontSize: 'clamp(0.95rem, 2.2vw, 1.1rem)', color: '#333', lineHeight: '1.3' }}>
               {studentDetails?.program || 'Bachelor of Science in Computer Engineering'}
             </h3>
-            <p style={{ 
-              margin: '4px 0',
-              fontSize: 'clamp(0.8rem, 2vw, 0.9rem)',
-              color: '#555'
-            }}>
-              Duration: {programDuration.years} years ({programDuration.semesters} semesters)
-            </p>
-            <p style={{ 
-              margin: '4px 0',
-              fontSize: 'clamp(0.8rem, 2vw, 0.9rem)',
-              color: '#555'
-            }}>
-              Intake: <span id="intakeType">{studentDetails?.intake || 'August'}</span>
-            </p>
-            <p style={{ 
-              margin: '4px 0',
-              fontSize: 'clamp(0.8rem, 2vw, 0.9rem)',
-              color: '#555'
-            }}>
-              Academic Year: <span id="academicYear">{studentDetails?.academic_year || '2024/2025'}</span>
-            </p>
+            <p style={{ margin: '4px 0', fontSize: 'clamp(0.8rem, 2vw, 0.9rem)', color: '#555' }}>Duration: {programDuration.years} years ({programDuration.semesters} semesters)</p>
+            <p style={{ margin: '4px 0', fontSize: 'clamp(0.8rem, 2vw, 0.9rem)', color: '#555' }}>Intake: <span id="intakeType">{studentDetails?.intake || 'August'}</span></p>
+            <p style={{ margin: '4px 0', fontSize: 'clamp(0.8rem, 2vw, 0.9rem)', color: '#555' }}>Academic Year: <span id="academicYear">{studentDetails?.academic_year || '2024/2025'}</span></p>
             <div className="course-progress" style={{ marginTop: 'clamp(12px, 2.5vw, 15px)' }}>
-              <p style={{ 
-                margin: '4px 0',
-                fontSize: 'clamp(0.85rem, 2vw, 0.95rem)',
-                color: '#555'
-              }}>
-                Progress: Year <span id="currentYear" style={{ fontWeight: '600' }}>{studentDetails?.year_of_study || 4}</span>, 
-                Semester <span id="currentSemester" style={{ fontWeight: '600' }}>{studentDetails?.semester || 2}</span> 
-                (<span id="progressPercentage" style={{ fontWeight: '600' }}>{dashboardStats.programProgress}</span>%)
+              <p style={{ margin: '4px 0', fontSize: 'clamp(0.85rem, 2vw, 0.95rem)', color: '#555' }}>
+                Progress: Year <span id="currentYear" style={{ fontWeight: '600' }}>{studentDetails?.year_of_study || 4}</span>, Semester <span id="currentSemester" style={{ fontWeight: '600' }}>{studentDetails?.semester || 2}</span> (<span id="progressPercentage" style={{ fontWeight: '600' }}>{dashboardStats.programProgress}</span>%)
               </p>
-              <div className="progress-bar" style={{
-                height: 'clamp(6px, 1.5vw, 8px)',
-                backgroundColor: '#e9ecef',
-                borderRadius: '4px',
-                overflow: 'hidden',
-                margin: 'clamp(8px, 2vw, 10px) 0'
-              }}>
-                <div 
-                  className="progress-fill" 
-                  id="progressFill" 
-                  style={{ 
-                    width: `${dashboardStats.programProgress}%`,
-                    height: '100%',
-                    backgroundColor: '#3498db',
-                    borderRadius: '4px',
-                    transition: 'width 0.3s ease'
-                  }}
-                ></div>
+              <div className="progress-bar" style={{ height: 'clamp(6px, 1.5vw, 8px)', backgroundColor: '#e9ecef', borderRadius: '4px', overflow: 'hidden', margin: 'clamp(8px, 2vw, 10px) 0' }}>
+                <div className="progress-fill" id="progressFill" style={{ width: `${dashboardStats.programProgress}%`, height: '100%', backgroundColor: '#3498db', borderRadius: '4px', transition: 'width 0.3s ease' }}></div>
               </div>
             </div>
           </div>
         </div>
 
         {/* Attendance Card */}
-        <div className="card" style={{
-          backgroundColor: 'white',
-          borderRadius: '12px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-          padding: 'clamp(15px, 3vw, 20px)',
-          display: 'flex',
-          flexDirection: 'column',
-          height: '100%'
-        }}>
-          <div className="card-header" style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            marginBottom: '15px',
-            flexWrap: 'wrap',
-            gap: '10px'
-          }}>
+        <div className="card" style={{ backgroundColor: 'white', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)', padding: 'clamp(15px, 3vw, 20px)', display: 'flex', flexDirection: 'column', height: '100%' }}>
+          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <h3 className="card-title" style={{ 
-                margin: '0',
-                fontSize: 'clamp(1rem, 2.5vw, 1.2rem)',
-                color: '#333'
-              }}>
-                Lecture Attendance
-              </h3>
-              <div className="card-icon success" style={{
-                width: 'clamp(36px, 8vw, 44px)',
-                height: 'clamp(36px, 8vw, 44px)',
-                borderRadius: '50%',
-                backgroundColor: 'rgba(46, 204, 113, 0.1)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}>
+              <h3 className="card-title" style={{ margin: '0', fontSize: 'clamp(1rem, 2.5vw, 1.2rem)', color: '#333' }}>Lecture Attendance</h3>
+              <div className="card-icon success" style={{ width: 'clamp(36px, 8vw, 44px)', height: 'clamp(36px, 8vw, 44px)', borderRadius: '50%', backgroundColor: 'rgba(46, 204, 113, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <i className="fas fa-user-check" style={{ color: '#2ecc71', fontSize: 'clamp(16px, 3vw, 20px)' }}></i>
               </div>
             </div>
           </div>
           <div className="card-content" style={{ flex: '1' }}>
-            <p id="attendanceSummary" style={{ 
-              marginBottom: 'clamp(12px, 2.5vw, 15px)', 
-              fontWeight: '500',
-              fontSize: 'clamp(0.85rem, 2vw, 0.95rem)',
-              lineHeight: '1.4',
-            }}>
+            <p id="attendanceSummary" style={{ marginBottom: 'clamp(12px, 2.5vw, 15px)', fontWeight: '500', fontSize: 'clamp(0.85rem, 2vw, 0.95rem)', lineHeight: '1.4' }}>
               {displayAttendanceSummary}
             </p>
             
             {chartError ? (
-              <div style={{
-                height: 'clamp(180px, 40vw, 200px)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: '#f8f9fa',
-                borderRadius: '8px',
-                color: '#dc3545',
-                flexDirection: 'column',
-                gap: '10px',
-                padding: '20px'
-              }}>
-                <p style={{ 
-                  textAlign: 'center',
-                  fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
-                }}>{chartError}</p>
-                <button 
-                  onClick={() => {
-                    setChartError(null);
-                    const chartCreated = initializeAttendanceChart();
-                    if (!chartCreated) {
-                      setChartError('Still having issues. Please refresh the page.');
-                    }
-                  }}
-                  style={{
-                    backgroundColor: '#007bff',
-                    color: 'white',
-                    border: 'none',
-                    padding: 'clamp(8px, 1.5vw, 10px) clamp(12px, 2vw, 16px)',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontSize: 'clamp(0.8rem, 1.8vw, 0.9rem)'
-                  }}
-                >
-                  Retry
-                </button>
+              <div style={{ height: 'clamp(180px, 40vw, 200px)', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8f9fa', borderRadius: '8px', color: '#dc3545', flexDirection: 'column', gap: '10px', padding: '20px' }}>
+                <p style={{ textAlign: 'center', fontSize: 'clamp(0.85rem, 2vw, 0.95rem)' }}>{chartError}</p>
+                <button onClick={() => { setChartError(null); const chartCreated = initializeAttendanceChart(); if (!chartCreated) { setChartError('Still having issues. Please refresh the page.'); } }} style={{ backgroundColor: '#007bff', color: 'white', border: 'none', padding: 'clamp(8px, 1.5vw, 10px) clamp(12px, 2vw, 16px)', borderRadius: '6px', cursor: 'pointer', fontSize: 'clamp(0.8rem, 1.8vw, 0.9rem)' }}>Retry</button>
               </div>
             ) : (
-              <div className="attendance-chart" style={{ 
-                height: 'clamp(180px, 40vw, 200px)', 
-                position: 'relative' 
-              }}>
-                <canvas 
-                  ref={chartCanvasRef}
-                  id="attendanceChart"
-                ></canvas>
+              <div className="attendance-chart" style={{ height: 'clamp(180px, 40vw, 200px)', position: 'relative' }}>
+                <canvas ref={chartCanvasRef} id="attendanceChart"></canvas>
               </div>
             )}
           </div>
         </div>
 
         {/* Calendar Card */}
-        <div className="card" style={{
-          backgroundColor: 'white',
-          borderRadius: '12px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-          padding: 'clamp(15px, 3vw, 20px)',
-          display: 'flex',
-          flexDirection: 'column',
-          height: '100%',
-          minHeight: '300px'
-        }}>
-          <div className="card-header" style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            marginBottom: '15px'
-          }}>
-            <h3 className="card-title" style={{ 
-              margin: '0',
-              fontSize: 'clamp(1rem, 2.5vw, 1.2rem)',
-              color: '#333'
-            }}>
-              Academic Calendar
-            </h3>
-            <div className="card-icon secondary" style={{
-              width: 'clamp(36px, 8vw, 44px)',
-              height: 'clamp(36px, 8vw, 44px)',
-              borderRadius: '50%',
-              backgroundColor: 'rgba(155, 89, 182, 0.1)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}>
+        <div className="card" style={{ backgroundColor: 'white', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)', padding: 'clamp(15px, 3vw, 20px)', display: 'flex', flexDirection: 'column', height: '100%', minHeight: '300px' }}>
+          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '15px' }}>
+            <h3 className="card-title" style={{ margin: '0', fontSize: 'clamp(1rem, 2.5vw, 1.2rem)', color: '#333' }}>Academic Calendar</h3>
+            <div className="card-icon secondary" style={{ width: 'clamp(36px, 8vw, 44px)', height: 'clamp(36px, 8vw, 44px)', borderRadius: '50%', backgroundColor: 'rgba(155, 89, 182, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <i className="fas fa-calendar-alt" style={{ color: '#9b59b6', fontSize: 'clamp(16px, 3vw, 20px)' }}></i>
             </div>
           </div>
-          <div 
-            className="card-content" 
-            id="calendarContainer"
-            ref={calendarContainerRef}
-            style={{ flex: '1', display: 'flex', flexDirection: 'column' }}
-          >
+          <div className="card-content" id="calendarContainer" ref={calendarContainerRef} style={{ flex: '1', display: 'flex', flexDirection: 'column' }}>
             {/* Calendar will be inserted here */}
           </div>
         </div>
       </div>
 
-      {/* Quick Stats Row - Responsive Grid */}
-      <div className="stats-row" style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))',
-        gap: 'clamp(12px, 2.5vw, 15px)',
-        marginTop: 'clamp(20px, 4vw, 30px)',
-        marginBottom: 'clamp(20px, 4vw, 30px)'
-      }}>
+      {/* Quick Stats Row */}
+      <div className="stats-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: 'clamp(12px, 2.5vw, 15px)', marginTop: 'clamp(20px, 4vw, 30px)', marginBottom: 'clamp(20px, 4vw, 30px)' }}>
         {/* Pending Assignments */}
-        <div className="stat-card" style={{
-          backgroundColor: 'white',
-          padding: 'clamp(15px, 3vw, 20px)',
-          borderRadius: '12px',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
-        }}>
+        <div className="stat-card" style={{ backgroundColor: 'white', padding: 'clamp(15px, 3vw, 20px)', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <h4 style={{ 
-                margin: '0 0 5px 0', 
-                color: '#666',
-                fontSize: 'clamp(0.9rem, 2.2vw, 1rem)'
-              }}>
-                Pending Assignments
-              </h4>
-              <p style={{ 
-                margin: 0, 
-                fontSize: 'clamp(1.5rem, 4vw, 1.8rem)', 
-                fontWeight: 'bold', 
-                color: '#e74c3c' 
-              }}>
-                {dashboardStats.pendingAssignments}
-              </p>
-              {dashboardStats.pendingAssignments > 0 && (
-                <p style={{ 
-                  margin: '5px 0 0 0', 
-                  fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)', 
-                  color: '#666' 
-                }}>
-                  Due soon
-                </p>
-              )}
+              <h4 style={{ margin: '0 0 5px 0', color: '#666', fontSize: 'clamp(0.9rem, 2.2vw, 1rem)' }}>Pending Assignments</h4>
+              <p style={{ margin: 0, fontSize: 'clamp(1.5rem, 4vw, 1.8rem)', fontWeight: 'bold', color: '#e74c3c' }}>{dashboardStats.pendingAssignments}</p>
             </div>
-            <div style={{
-              width: 'clamp(36px, 8vw, 44px)',
-              height: 'clamp(36px, 8vw, 44px)',
-              borderRadius: '50%',
-              backgroundColor: '#ffebee',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: '0'
-            }}>
-              <i className="fas fa-tasks" style={{ 
-                color: '#e74c3c', 
-                fontSize: 'clamp(16px, 3vw, 20px)' 
-              }}></i>
+            <div style={{ width: 'clamp(36px, 8vw, 44px)', height: 'clamp(36px, 8vw, 44px)', borderRadius: '50%', backgroundColor: '#ffebee', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: '0' }}>
+              <i className="fas fa-tasks" style={{ color: '#e74c3c', fontSize: 'clamp(16px, 3vw, 20px)' }}></i>
             </div>
           </div>
         </div>
 
         {/* Upcoming Exams */}
-        <div className="stat-card" style={{
-          backgroundColor: 'white',
-          padding: 'clamp(15px, 3vw, 20px)',
-          borderRadius: '12px',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
-        }}>
+        <div className="stat-card" style={{ backgroundColor: 'white', padding: 'clamp(15px, 3vw, 20px)', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <h4 style={{ 
-                margin: '0 0 5px 0', 
-                color: '#666',
-                fontSize: 'clamp(0.9rem, 2.2vw, 1rem)'
-              }}>
-                Upcoming Exams
-              </h4>
-              <p style={{ 
-                margin: 0, 
-                fontSize: 'clamp(1.5rem, 4vw, 1.8rem)', 
-                fontWeight: 'bold', 
-                color: '#3498db' 
-              }}>
-                {dashboardStats.upcomingExams}
-              </p>
-              {dashboardStats.upcomingExams > 0 && (
-                <p style={{ 
-                  margin: '5px 0 0 0', 
-                  fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)', 
-                  color: '#666' 
-                }}>
-                  This week
-                </p>
-              )}
+              <h4 style={{ margin: '0 0 5px 0', color: '#666', fontSize: 'clamp(0.9rem, 2.2vw, 1rem)' }}>Upcoming Exams</h4>
+              <p style={{ margin: 0, fontSize: 'clamp(1.5rem, 4vw, 1.8rem)', fontWeight: 'bold', color: '#3498db' }}>{dashboardStats.upcomingExams}</p>
             </div>
-            <div style={{
-              width: 'clamp(36px, 8vw, 44px)',
-              height: 'clamp(36px, 8vw, 44px)',
-              borderRadius: '50%',
-              backgroundColor: '#e3f2fd',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: '0'
-            }}>
-              <i className="fas fa-clipboard-list" style={{ 
-                color: '#3498db', 
-                fontSize: 'clamp(16px, 3vw, 20px)' 
-              }}></i>
+            <div style={{ width: 'clamp(36px, 8vw, 44px)', height: 'clamp(36px, 8vw, 44px)', borderRadius: '50%', backgroundColor: '#e3f2fd', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: '0' }}>
+              <i className="fas fa-clipboard-list" style={{ color: '#3498db', fontSize: 'clamp(16px, 3vw, 20px)' }}></i>
             </div>
           </div>
         </div>
 
         {/* Fees Paid */}
-        <div className="stat-card" style={{
-          backgroundColor: 'white',
-          padding: 'clamp(15px, 3vw, 20px)',
-          borderRadius: '12px',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
-        }}>
+        <div className="stat-card" style={{ backgroundColor: 'white', padding: 'clamp(15px, 3vw, 20px)', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <h4 style={{ 
-                margin: '0 0 5px 0', 
-                color: '#666',
-                fontSize: 'clamp(0.9rem, 2.2vw, 1rem)'
-              }}>
-                Fees Paid
-              </h4>
-              <p style={{ 
-                margin: 0, 
-                fontSize: 'clamp(1.5rem, 4vw, 1.8rem)', 
-                fontWeight: 'bold', 
-                color: '#27ae60' 
-              }}>
-                ${dashboardStats.financialPaid.toLocaleString()}
-              </p>
-              <p style={{ 
-                margin: '5px 0 0 0', 
-                fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)', 
-                color: '#666' 
-                }}>
-                Balance: ${dashboardStats.financialBalance.toLocaleString()}
-              </p>
+              <h4 style={{ margin: '0 0 5px 0', color: '#666', fontSize: 'clamp(0.9rem, 2.2vw, 1rem)' }}>Fees Paid</h4>
+              <p style={{ margin: 0, fontSize: 'clamp(1.5rem, 4vw, 1.8rem)', fontWeight: 'bold', color: '#27ae60' }}>${dashboardStats.financialPaid.toLocaleString()}</p>
+              <p style={{ margin: '5px 0 0 0', fontSize: 'clamp(0.75rem, 1.8vw, 0.85rem)', color: '#666' }}>Balance: ${dashboardStats.financialBalance.toLocaleString()}</p>
             </div>
-            <div style={{
-              width: 'clamp(36px, 8vw, 44px)',
-              height: 'clamp(36px, 8vw, 44px)',
-              borderRadius: '50%',
-              backgroundColor: '#e8f6ef',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: '0'
-            }}>
-              <i className="fas fa-money-bill-wave" style={{ 
-                color: '#27ae60', 
-                fontSize: 'clamp(16px, 3vw, 20px)' 
-              }}></i>
+            <div style={{ width: 'clamp(36px, 8vw, 44px)', height: 'clamp(36px, 8vw, 44px)', borderRadius: '50%', backgroundColor: '#e8f6ef', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: '0' }}>
+              <i className="fas fa-money-bill-wave" style={{ color: '#27ae60', fontSize: 'clamp(16px, 3vw, 20px)' }}></i>
             </div>
           </div>
         </div>
 
         {/* CGPA */}
-        <div className="stat-card" style={{
-          backgroundColor: 'white',
-          padding: 'clamp(15px, 3vw, 20px)',
-          borderRadius: '12px',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
-        }}>
+        <div className="stat-card" style={{ backgroundColor: 'white', padding: 'clamp(15px, 3vw, 20px)', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <h4 style={{ 
-                margin: '0 0 5px 0', 
-                color: '#666',
-                fontSize: 'clamp(0.9rem, 2.2vw, 1rem)'
-              }}>
-                CGPA
-              </h4>
-              <p style={{ 
-                margin: 0, 
-                fontSize: 'clamp(1.5rem, 4vw, 1.8rem)', 
-                fontWeight: 'bold', 
-                color: '#9b59b6' 
-              }}>
-                {dashboardStats.cgpa.toFixed(2)}
-              </p>
-              <p style={{ 
-                margin: '5px 0 0 0', 
-                fontSize: 'clamp(0.7rem, 1.8vw, 0.8rem)', 
-                color: '#666' 
-              }}>
-                Cumulative Grade Point Average
-              </p>
+              <h4 style={{ margin: '0 0 5px 0', color: '#666', fontSize: 'clamp(0.9rem, 2.2vw, 1rem)' }}>CGPA</h4>
+              <p style={{ margin: 0, fontSize: 'clamp(1.5rem, 4vw, 1.8rem)', fontWeight: 'bold', color: '#9b59b6' }}>{dashboardStats.cgpa.toFixed(2)}</p>
+              <p style={{ margin: '5px 0 0 0', fontSize: 'clamp(0.7rem, 1.8vw, 0.8rem)', color: '#666' }}>Cumulative Grade Point Average</p>
             </div>
-            <div style={{
-              width: 'clamp(36px, 8vw, 44px)',
-              height: 'clamp(36px, 8vw, 44px)',
-              borderRadius: '50%',
-              backgroundColor: '#f3e5f5',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: '0'
-            }}>
-              <i className="fas fa-chart-line" style={{ 
-                color: '#9b59b6', 
-                fontSize: 'clamp(16px, 3vw, 20px)' 
-              }}></i>
+            <div style={{ width: 'clamp(36px, 8vw, 44px)', height: 'clamp(36px, 8vw, 44px)', borderRadius: '50%', backgroundColor: '#f3e5f5', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: '0' }}>
+              <i className="fas fa-chart-line" style={{ color: '#9b59b6', fontSize: 'clamp(16px, 3vw, 20px)' }}></i>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Upcoming Lectures - Responsive View */}
-      <div className="upcoming-lectures" style={{ 
-        marginTop: 'clamp(20px, 4vw, 30px)',
-        overflow: 'hidden'
-      }}>
-        <div style={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center', 
-          marginBottom: 'clamp(12px, 2.5vw, 15px)',
-          flexWrap: 'wrap',
-          gap: '10px'
-        }}>
-          <h3 style={{ 
-            margin: 0,
-            fontSize: 'clamp(1.1rem, 2.8vw, 1.3rem)'
-          }}>
-            Upcoming Lectures This Week
-          </h3>
-          <span style={{ 
-            fontSize: 'clamp(0.85rem, 2vw, 0.95rem)', 
-            color: '#666',
-            whiteSpace: 'nowrap'
-          }}>
-            {upcomingLectures.length} lecture{upcomingLectures.length !== 1 ? 's' : ''} found
-          </span>
+      {/* Upcoming Lectures */}
+      <div className="upcoming-lectures" style={{ marginTop: 'clamp(20px, 4vw, 30px)', overflow: 'hidden' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'clamp(12px, 2.5vw, 15px)', flexWrap: 'wrap', gap: '10px' }}>
+          <h3 style={{ margin: 0, fontSize: 'clamp(1.1rem, 2.8vw, 1.3rem)' }}>Upcoming Lectures This Week</h3>
+          <span style={{ fontSize: 'clamp(0.85rem, 2vw, 0.95rem)', color: '#666', whiteSpace: 'nowrap' }}>{upcomingLectures.length} lecture{upcomingLectures.length !== 1 ? 's' : ''} found</span>
         </div>
         
         {upcomingLectures.length === 0 ? (
-          <div style={{ 
-            textAlign: 'center', 
-            padding: 'clamp(25px, 5vw, 40px)', 
-            backgroundColor: 'white',
-            borderRadius: '12px',
-            color: '#666',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
-          }}>
-            <i className="fas fa-calendar-times" style={{
-              fontSize: 'clamp(2rem, 5vw, 2.5rem)',
-              marginBottom: '15px',
-              color: '#dee2e6'
-            }}></i>
+          <div style={{ textAlign: 'center', padding: 'clamp(25px, 5vw, 40px)', backgroundColor: 'white', borderRadius: '12px', color: '#666', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
+            <i className="fas fa-calendar-times" style={{ fontSize: 'clamp(2rem, 5vw, 2.5rem)', marginBottom: '15px', color: '#dee2e6' }}></i>
             <p style={{ margin: '0 0 10px 0' }}>No upcoming lectures scheduled for this week.</p>
-            <p style={{ fontSize: 'clamp(0.85rem, 2vw, 0.95rem)', color: '#999' }}>
-              Check back later for updates
-            </p>
+            <p style={{ fontSize: 'clamp(0.85rem, 2vw, 0.95rem)', color: '#999' }}>Check back later for updates</p>
           </div>
         ) : isMobile ? (
-          <div className="mobile-lectures-container">
-            {renderMobileLectureCards()}
-          </div>
+          <div className="mobile-lectures-container">{renderMobileLectureCards()}</div>
         ) : (
           renderDesktopTable()
         )}
@@ -1690,88 +1126,36 @@ const Dashboard = () => {
         }
         
         @media (max-width: 768px) {
-          .dashboard-cards {
-            grid-template-columns: 1fr;
-          }
-          
-          .stats-row {
-            grid-template-columns: repeat(2, 1fr);
-          }
-          
-          .card-header {
-            flex-direction: column;
-            align-items: flex-start !important;
-            gap: 12px;
-          }
-          
-          .mobile-lecture-card:hover {
-            transform: translateY(-2px);
-            transition: transform 0.3s ease;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.12);
-          }
+          .dashboard-cards { grid-template-columns: 1fr; }
+          .stats-row { grid-template-columns: repeat(2, 1fr); }
+          .card-header { flex-direction: column; align-items: flex-start !important; gap: 12px; }
+          .mobile-lecture-card:hover { transform: translateY(-2px); transition: transform 0.3s ease; box-shadow: 0 4px 16px rgba(0,0,0,0.12); }
         }
         
         @media (max-width: 480px) {
-          .stats-row {
-            grid-template-columns: 1fr;
-          }
-          
-          .mobile-lecture-card {
-            padding: 14px;
-          }
+          .stats-row { grid-template-columns: 1fr; }
+          .mobile-lecture-card { padding: 14px; }
         }
         
         @media (max-width: 768px) {
-          table {
-            font-size: 14px;
-          }
-          
-          table td, table th {
-            padding: 10px 8px;
-          }
+          table { font-size: 14px; }
+          table td, table th { padding: 10px 8px; }
         }
         
         @media (hover: hover) {
-          .stat-card:hover {
-            transform: translateY(-2px);
-            transition: transform 0.3s ease;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.12);
-          }
-          
-          .card:hover {
-            transform: translateY(-2px);
-            transition: transform 0.3s ease;
-            box-shadow: 0 8px 25px rgba(0,0,0,0.12);
-          }
-          
-          .add-calendar:hover,
-          .mobile-lecture-card button:hover {
-            background-color: #007bff !important;
-            color: white !important;
-            border-color: #007bff !important;
-            transition: all 0.3s ease;
-          }
+          .stat-card:hover { transform: translateY(-2px); transition: transform 0.3s ease; box-shadow: 0 4px 16px rgba(0,0,0,0.12); }
+          .card:hover { transform: translateY(-2px); transition: transform 0.3s ease; box-shadow: 0 8px 25px rgba(0,0,0,0.12); }
+          .add-calendar:hover, .mobile-lecture-card button:hover { background-color: #007bff !important; color: white !important; border-color: #007bff !important; transition: all 0.3s ease; }
         }
         
-        button:focus {
-          outline: 2px solid #3498db;
-          outline-offset: 2px;
-        }
+        button:focus { outline: 2px solid #3498db; outline-offset: 2px; }
         
         @media (max-width: 768px) {
-          button, .add-calendar {
-            min-height: 44px;
-            min-width: 44px;
-          }
-          
-          table td {
-            padding: 12px 8px !important;
-          }
+          button, .add-calendar { min-height: 44px; min-width: 44px; }
+          table td { padding: 12px 8px !important; }
         }
         
-        .spinner {
-          animation: spin 1s linear infinite;
-        }
+        .spinner { animation: spin 1s linear infinite; }
       `}</style>
     </div>
   );

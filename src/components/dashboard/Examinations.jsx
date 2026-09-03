@@ -316,15 +316,22 @@ const Examinations = () => {
   }, [cachedExamData]);
 
   // ========== REFRESH FUNCTION ==========
-  const refreshExams = () => {
-    console.log('🔄 Refreshing examinations...');
-    // Clear the cache to force fresh data
-    if (user?.id) {
-      localStorage.removeItem(`examinations-${user.id}`);
-      localStorage.removeItem(`examinations-${user.email}`);
+// In Examinations.jsx, update the refreshExams function to clear cache properly:
+const refreshExams = () => {
+  console.log('🔄 Refreshing examinations...');
+  // Clear ALL cache keys
+  if (user?.id) {
+    localStorage.removeItem(`examinations-${user.id}`);
+    localStorage.removeItem(`examinations-${user.email}`);
+  }
+  // Also clear any other cached keys
+  Object.keys(localStorage).forEach(key => {
+    if (key.startsWith('examinations-')) {
+      localStorage.removeItem(key);
     }
-    refetchExams();
-  };
+  });
+  refetchExams();
+};
 
   // ========== CHECK FOR RETURN FROM EXAM ==========
   useEffect(() => {
