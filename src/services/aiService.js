@@ -83,6 +83,19 @@ const fetchStudentCoreData = async (studentId) => {
     let cgpa = 0, pendingAssignments = 0, upcomingExams = 0, totalPaid = 0, totalPending = 0;
     
     try {
+      // ✅ FIRST: Get Dean-approved exam IDs
+      const { data: approvedExams, error: approvedError } = await supabase
+        .from('exam_results_approvals')
+        .select('exam_id')
+        .eq('status', 'approved_by_dean');
+
+      if (approvedError) {
+        console.warn('⚠️ Could not fetch approved exams:', approvedError);
+      }
+
+      const approvedExamIds = approvedExams?.map(a => a.exam_id) || [];
+      console.log(`✅ AI Service - Dean-approved exam IDs: ${approvedExamIds.length}`);
+
       const { data: studentCourses } = await supabase
         .from('student_courses')
         .select('course_id, status, grade, grade_points, marks')
@@ -96,44 +109,112 @@ const fetchStudentCoreData = async (studentId) => {
 
         let totalPoints = 0;
         let totalCredits = 0;
-        const gradedCourses = studentCourses.filter(c => c.grade || c.marks);
-        
-        if (gradedCourses.length > 0) {
-          const courseIds = gradedCourses.map(c => c.course_id);
-          const { data: courses } = await supabase
-            .from('courses')
-            .select('id, credits')
-            .in('id', courseIds);
-          
-          const creditMap = {};
-          (courses || []).forEach(c => { creditMap[c.id] = c.credits || 3; });
-          
-          gradedCourses.forEach(sc => {
-            const grade = sc.grade || getGradeFromMarks(sc.marks);
-            const gp = sc.grade_points || getGradePoints(grade);
-            const credits = creditMap[sc.course_id] || 3;
-            if (gp && credits) {
-              totalPoints += gp * credits;
-              totalCredits += credits;
+
+        // ✅ ONLY use Dean-approved exam submissions for CGPA
+        if (approvedExamIds.length > 0) {
+          const { data: examSubmissions, error: subError } = await supabase
+            .from('exam_submissions')
+            .select('exam_id, total_marks_obtained, grade, grade_points, status')
+            .eq('student_id', studentId)
+            .eq('status', 'graded')
+            .not('total_marks_obtained', 'is', null)
+            .in('exam_id', approvedExamIds);
+
+          if (subError) {
+            console.warn('⚠️ Could not fetch exam submissions:', subError);
+          }
+
+          if (examSubmissions && examSubmissions.length > 0) {
+            // Fetch exam details to get course credits
+            const examIds = examSubmissions.map(s => s.exam_id);
+            const { data: exams, error: examsError } = await supabase
+              .from('examinations')
+              .select('id, course_id, total_marks')
+              .in('id', examIds);
+
+            if (examsError) {
+              console.warn('⚠️ Could not fetch exams:', examsError);
             }
-          });
-          cgpa = totalCredits > 0 ? parseFloat((totalPoints / totalCredits).toFixed(2)) : 0;
+
+            const examMap = {};
+            (exams || []).forEach(e => { examMap[e.id] = e; });
+
+            // Get course credits for these exams
+            const courseIds = (exams || []).map(e => e.course_id).filter(Boolean);
+            let creditMap = {};
+            if (courseIds.length > 0) {
+              const { data: coursesData } = await supabase
+                .from('courses')
+                .select('id, credits')
+                .in('id', courseIds);
+              (coursesData || []).forEach(c => { creditMap[c.id] = c.credits || 3; });
+            }
+
+            examSubmissions.forEach(sub => {
+              const exam = examMap[sub.exam_id];
+              if (!exam) return;
+              
+              const grade = sub.grade || getGradeFromMarks(sub.total_marks_obtained);
+              const gp = sub.grade_points || getGradePoints(grade);
+              const credits = creditMap[exam.course_id] || 3;
+              
+              if (gp && credits) {
+                totalPoints += gp * credits;
+                totalCredits += credits;
+              }
+            });
+
+            cgpa = totalCredits > 0 ? parseFloat((totalPoints / totalCredits).toFixed(2)) : 0;
+            console.log(`✅ AI Service CGPA from Dean-approved exams: ${cgpa} (${totalPoints}/${totalCredits})`);
+          }
+        }
+
+        // ✅ Fallback: Use student_courses grades only if no Dean-approved exams
+        if (totalCredits === 0) {
+          const gradedCourses = studentCourses.filter(c => c.grade || c.marks);
+          
+          if (gradedCourses.length > 0) {
+            const courseIds = gradedCourses.map(c => c.course_id);
+            const { data: courses } = await supabase
+              .from('courses')
+              .select('id, credits')
+              .in('id', courseIds);
+            
+            const creditMap = {};
+            (courses || []).forEach(c => { creditMap[c.id] = c.credits || 3; });
+            
+            gradedCourses.forEach(sc => {
+              const grade = sc.grade || getGradeFromMarks(sc.marks);
+              const gp = sc.grade_points || getGradePoints(grade);
+              const credits = creditMap[sc.course_id] || 3;
+              if (gp && credits) {
+                totalPoints += gp * credits;
+                totalCredits += credits;
+              }
+            });
+            cgpa = totalCredits > 0 ? parseFloat((totalPoints / totalCredits).toFixed(2)) : 0;
+            console.log(`✅ AI Service CGPA from course grades: ${cgpa}`);
+          }
         }
 
         if (activeCourseIds.length > 0) {
+          // ✅ Filter assignments with deleted_at check
           const { data: assignments } = await supabase
             .from('assignments')
             .select('id')
             .in('course_id', activeCourseIds)
             .eq('status', 'published')
+            .is('deleted_at', null)
             .gt('due_date', new Date().toISOString());
           pendingAssignments = (assignments || []).length;
 
+          // ✅ Filter exams with deleted_at check
           const { data: exams } = await supabase
             .from('examinations')
             .select('id')
             .in('course_id', activeCourseIds)
             .in('status', ['scheduled', 'published', 'active'])
+            .is('deleted_at', null)
             .gt('start_time', new Date().toISOString());
           upcomingExams = (exams || []).length;
         }
