@@ -6,13 +6,13 @@ const GROQ_API_URL = import.meta.env.VITE_GROQ_API_URL || 'https://api.groq.com/
 
 // ✅ CORRECT - Using your actual available models from the API
 const WORKING_MODELS = [
-  'groq/compound',                 // ✅ Best general model
-  'groq/compound-mini',            // ✅ Fast version
-  'openai/gpt-oss-120b',           // ✅ OpenAI compatible
-  'openai/gpt-oss-20b',            // ✅ Fast OpenAI compatible
-  'qwen/qwen3.6-27b',              // ✅ Qwen model
-  'qwen/qwen3.8-27b',              // ✅ Qwen model
-  'allam-2-7b',                    // ✅ Allam model
+  'groq/compound',
+  'groq/compound-mini',
+  'openai/gpt-oss-120b',
+  'openai/gpt-oss-20b',
+  'qwen/qwen3.6-27b',
+  'qwen/qwen3.8-27b',
+  'allam-2-7b',
 ];
 
 console.log('🚀 AI Service Loaded');
@@ -125,7 +125,6 @@ const fetchStudentCoreData = async (studentId) => {
           }
 
           if (examSubmissions && examSubmissions.length > 0) {
-            // Fetch exam details to get course credits
             const examIds = examSubmissions.map(s => s.exam_id);
             const { data: exams, error: examsError } = await supabase
               .from('examinations')
@@ -139,7 +138,6 @@ const fetchStudentCoreData = async (studentId) => {
             const examMap = {};
             (exams || []).forEach(e => { examMap[e.id] = e; });
 
-            // Get course credits for these exams
             const courseIds = (exams || []).map(e => e.course_id).filter(Boolean);
             let creditMap = {};
             if (courseIds.length > 0) {
@@ -198,7 +196,6 @@ const fetchStudentCoreData = async (studentId) => {
         }
 
         if (activeCourseIds.length > 0) {
-          // ✅ Filter assignments with deleted_at check
           const { data: assignments } = await supabase
             .from('assignments')
             .select('id')
@@ -208,7 +205,6 @@ const fetchStudentCoreData = async (studentId) => {
             .gt('due_date', new Date().toISOString());
           pendingAssignments = (assignments || []).length;
 
-          // ✅ Filter exams with deleted_at check
           const { data: exams } = await supabase
             .from('examinations')
             .select('id')
@@ -230,7 +226,7 @@ const fetchStudentCoreData = async (studentId) => {
   }
 };
 
-// ===================== FETCH TIMETABLE (FIXED) =====================
+// ===================== FETCH TIMETABLE =====================
 
 const fetchStudentTimetable = async (studentData) => {
   try {
@@ -246,7 +242,6 @@ const fetchStudentTimetable = async (studentData) => {
       return { slots: [], upcoming: [] };
     }
 
-    // 1. Find the correct program timetable for this cohort
     const { data: programTimetable, error: ptError } = await supabase
       .from('program_timetables')
       .select('id')
@@ -262,7 +257,6 @@ const fetchStudentTimetable = async (studentData) => {
       return { slots: [], upcoming: [] };
     }
 
-    // 2. Fetch the slots
     const { data: timetableSlots, error: slotsError } = await supabase
       .from('program_timetable_slots')
       .select(`
@@ -286,18 +280,15 @@ const fetchStudentTimetable = async (studentData) => {
       return { slots: [], upcoming: [] };
     }
 
-    // IMPORTANT: day_of_week is 1=Monday … 6=Saturday
     const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
     const slots = timetableSlots.map(slot => {
-      // Convert 1-based day_of_week → 0-based index for the array
       const dayIndex = (slot.day_of_week || 1) - 1;
-
       return {
         courseCode: slot.course_code || 'N/A',
         courseName: slot.course_name || 'Unknown Course',
         lecturer: slot.lecturers?.full_name || 'Not Assigned',
-        dayOfWeek: slot.day_of_week,          // keep original 1-6
+        dayOfWeek: slot.day_of_week,
         dayName: dayNames[dayIndex] || 'Unknown',
         startTime: slot.start_time,
         endTime: slot.end_time,
@@ -308,21 +299,15 @@ const fetchStudentTimetable = async (studentData) => {
       };
     });
 
-    // ---------- Upcoming lectures (next 7 days) ----------
     const today = new Date();
-    // Convert JS getDay() (0=Sun … 6=Sat) → our system (1=Mon … 6=Sat)
-    // Sunday (0) → treat as 7 so the math still works
     const todayDayOfWeek = today.getDay() === 0 ? 7 : today.getDay();
-
     const upcoming = [];
 
     slots.forEach(slot => {
       let daysToAdd = slot.dayOfWeek - todayDayOfWeek;
       if (daysToAdd < 0) daysToAdd += 7;
-
       const lectureDate = new Date(today);
       lectureDate.setDate(today.getDate() + daysToAdd);
-
       upcoming.push({
         ...slot,
         date: lectureDate.toISOString().split('T')[0],
@@ -331,7 +316,6 @@ const fetchStudentTimetable = async (studentData) => {
       });
     });
 
-    // Sort by date then start time
     upcoming.sort((a, b) => {
       if (a.date === b.date) {
         return (a.startTime || '').localeCompare(b.startTime || '');
@@ -339,10 +323,7 @@ const fetchStudentTimetable = async (studentData) => {
       return a.date.localeCompare(b.date);
     });
 
-    return {
-      slots,
-      upcoming: upcoming.slice(0, 15) // keep a reasonable number
-    };
+    return { slots, upcoming: upcoming.slice(0, 15) };
   } catch (err) {
     console.error('Error fetching timetable:', err);
     return { slots: [], upcoming: [] };
@@ -398,6 +379,80 @@ const fetchFinancialData = async (studentId) => {
   }
 };
 
+// ===================== FETCH EXAM RESULTS =====================
+
+const fetchExamResults = async (studentId) => {
+  try {
+    if (!studentId) return { submissions: [], gradedCount: 0, totalMarks: 0 };
+
+    // Get Dean-approved exam IDs
+    const { data: approvedExams } = await supabase
+      .from('exam_results_approvals')
+      .select('exam_id')
+      .eq('status', 'approved_by_dean');
+
+    const approvedExamIds = approvedExams?.map(a => a.exam_id) || [];
+
+    if (approvedExamIds.length === 0) {
+      return { submissions: [], gradedCount: 0, totalMarks: 0 };
+    }
+
+    const { data: submissions, error: subError } = await supabase
+      .from('exam_submissions')
+      .select(`
+        id,
+        exam_id,
+        total_marks_obtained,
+        grade,
+        grade_points,
+        percentage,
+        graded_at
+      `)
+      .eq('student_id', studentId)
+      .eq('status', 'graded')
+      .in('exam_id', approvedExamIds);
+
+    if (subError || !submissions || submissions.length === 0) {
+      return { submissions: [], gradedCount: 0, totalMarks: 0 };
+    }
+
+    const examIds = submissions.map(s => s.exam_id);
+    const { data: exams } = await supabase
+      .from('examinations')
+      .select(`
+        id,
+        title,
+        total_marks,
+        course_id,
+        courses(course_code, course_name)
+      `)
+      .in('id', examIds);
+
+    const examMap = {};
+    (exams || []).forEach(e => { examMap[e.id] = e; });
+
+    const detailedResults = submissions.map(sub => {
+      const exam = examMap[sub.exam_id];
+      return {
+        ...sub,
+        examTitle: exam?.title || 'Exam',
+        courseCode: exam?.courses?.course_code || 'N/A',
+        courseName: exam?.courses?.course_name || 'N/A',
+        totalMarks: exam?.total_marks || 100
+      };
+    });
+
+    return {
+      submissions: detailedResults,
+      gradedCount: detailedResults.length,
+      totalMarks: detailedResults.reduce((sum, r) => sum + (parseFloat(r.total_marks_obtained) || 0), 0)
+    };
+  } catch (err) {
+    console.error('Error fetching exam results:', err);
+    return { submissions: [], gradedCount: 0, totalMarks: 0 };
+  }
+};
+
 // ===================== CONTEXT BUILDER =====================
 
 const buildCompleteContext = async (studentStats, studentData, coreData) => {
@@ -406,16 +461,19 @@ const buildCompleteContext = async (studentStats, studentData, coreData) => {
   const pendingAssign = coreData?.pendingAssignments ?? 0;
   const upcoming = coreData?.upcomingExams ?? 0;
   
-  // Fetch financial data
   let financial = { totalPaid: 0, totalPending: 0, totalBalance: 0, fees: [] };
   if (studentData?.id) {
     financial = await fetchFinancialData(studentData.id);
   }
   
-  // Fetch timetable
   let timetable = { slots: [], upcoming: [] };
   if (studentData) {
     timetable = await fetchStudentTimetable(studentData);
+  }
+
+  let examResults = { submissions: [], gradedCount: 0, totalMarks: 0 };
+  if (studentData?.id) {
+    examResults = await fetchExamResults(studentData.id);
   }
 
   let context = 'Student Information:\n';
@@ -429,6 +487,17 @@ const buildCompleteContext = async (studentStats, studentData, coreData) => {
   context += `CGPA: ${cgpa}\n`;
   context += `Pending Assignments: ${pendingAssign}\n`;
   context += `Upcoming Exams: ${upcoming}\n\n`;
+  
+  context += 'Exam Results (Dean-approved only):\n';
+  context += `Total Graded Exams: ${examResults.gradedCount}\n`;
+  if (examResults.submissions.length > 0) {
+    examResults.submissions.forEach(r => {
+      context += `- ${r.courseCode} - ${r.examTitle}: ${r.total_marks_obtained}/${r.totalMarks} (${r.percentage || 0}%), Grade: ${r.grade || 'N/A'}\n`;
+    });
+  } else {
+    context += 'No exam results available yet.\n';
+  }
+  context += '\n';
   
   context += 'Financial Status:\n';
   context += `Total Paid: $${financial.totalPaid.toLocaleString()}\n`;
@@ -447,7 +516,6 @@ const buildCompleteContext = async (studentStats, studentData, coreData) => {
   
   context += 'Timetable:\n';
   if (timetable.slots && timetable.slots.length > 0) {
-    // Group by day
     const byDay = {};
     timetable.slots.forEach(s => {
       const day = s.dayName || 'Unknown';
@@ -485,18 +553,16 @@ const buildCompleteContext = async (studentStats, studentData, coreData) => {
 const formatAIResponse = (text) => {
   if (!text) return text;
   
-  // Remove markdown bold/italic symbols but keep the content
   let formatted = text
-    .replace(/\*\*/g, '')           // Remove bold markers
-    .replace(/\*/g, '')             // Remove italic markers
-    .replace(/__/g, '')             // Remove underscore bold
-    .replace(/_/g, '')              // Remove underscore italic
-    .replace(/`/g, '')              // Remove code blocks
-    .replace(/#{1,6}\s/g, '')       // Remove heading markers
-    .replace(/\n{3,}/g, '\n\n')     // Limit multiple newlines
+    .replace(/\*\*/g, '')
+    .replace(/\*/g, '')
+    .replace(/__/g, '')
+    .replace(/_/g, '')
+    .replace(/`/g, '')
+    .replace(/#{1,6}\s/g, '')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
   
-  // Convert numbered lists to clean format
   formatted = formatted.replace(/^(\d+)\.\s*/gm, '• ');
   
   return formatted;
@@ -514,40 +580,36 @@ export const generateAIResponseWithContext = async (
   
   console.log('📝 User query:', userQuery);
   
-  // Check for greetings FIRST
   if (isGreetingQuery(userQuery)) {
     console.log('✅ Greeting detected');
     return getGreetingResponse(studentName);
   }
 
-  // Check for API key
   if (!GROQ_API_KEY) {
     console.error('❌ GROQ API key is missing!');
     return 'AI service is not configured. Please contact support.';
   }
 
   try {
-    // Fetch student data
     let coreData = null;
     if (studentData?.id) {
       coreData = await fetchStudentCoreData(studentData.id);
     }
 
-    // Build context with all data (timetable, financial, etc.)
     const fullContext = await buildCompleteContext(studentStats, studentData, coreData);
 
     const systemPrompt = 
       'You are a helpful, intelligent academic assistant for a university student. ' +
       'You have access to the student\'s personal academic data including grades, CGPA, assignments, exams, financial records, and timetable.\n\n' +
       'IMPORTANT GUIDELINES:\n' +
-      '1. Never reveal that you are fetching data or accessing a database. The student should feel like you naturally know their information.\n' +
-      '2. Never use phrases like "Based on the data provided" or "According to your records" or "The system shows". Just state facts naturally.\n' +
-      '3. Always be helpful, warm, and encouraging in your responses.\n' +
-      '4. Format responses cleanly without using markdown symbols like ** or *. Use plain text with emojis and bullet points using • or -.\n' +
-      '5. For timetable questions, provide specific details about days, times, courses, and rooms.\n' +
-      '6. For financial questions, give clear breakdowns of payments and balances.\n' +
-      '7. Be conversational and proactive - offer to help with related topics.\n\n' +
-      'Student Data (use this naturally, don\'t mention you\'re accessing it):\n' +
+      '1. Never reveal that you are fetching data or accessing a database.\n' +
+      '2. Never use phrases like "Based on the data provided" or "According to your records".\n' +
+      '3. Always be helpful, warm, and encouraging.\n' +
+      '4. Format responses cleanly without markdown symbols.\n' +
+      '5. For exam results, always mention the specific scores and grades.\n' +
+      '6. For financial questions, give clear breakdowns.\n' +
+      '7. Be conversational and proactive.\n\n' +
+      'Student Data (use this naturally):\n' +
       fullContext;
 
     const messages = [
@@ -561,7 +623,6 @@ export const generateAIResponseWithContext = async (
 
     console.log('🔄 Calling Groq API...');
     
-    // Try each model
     for (const model of WORKING_MODELS) {
       try {
         console.log(`📡 Trying model: ${model}`);
@@ -602,7 +663,6 @@ export const generateAIResponseWithContext = async (
         
         let content = data?.choices?.[0]?.message?.content;
         if (content && content.trim()) {
-          // Format the response to remove markdown
           content = formatAIResponse(content);
           return content.trim();
         }
@@ -611,7 +671,6 @@ export const generateAIResponseWithContext = async (
       }
     }
 
-    // All models failed - use intelligent fallback
     console.warn('⚠️ All models failed, using intelligent fallback');
     return getIntelligentFallbackResponse(userQuery, studentName, studentData, coreData);
 
@@ -630,14 +689,15 @@ const getIntelligentFallbackResponse = async (query, studentName, studentData, c
   const pendingAssign = coreData?.pendingAssignments ?? 0;
   const upcoming = coreData?.upcomingExams ?? 0;
   
-  // Try to fetch data for better fallback
   let financial = { totalPaid: 0, totalPending: 0, totalBalance: 0, fees: [] };
   let timetable = { slots: [], upcoming: [] };
+  let examResults = { submissions: [], gradedCount: 0, totalMarks: 0 };
   
   if (studentData?.id) {
     try {
       financial = await fetchFinancialData(studentData.id);
       timetable = await fetchStudentTimetable(studentData);
+      examResults = await fetchExamResults(studentData.id);
     } catch (e) {
       console.warn('Fallback data fetch error:', e);
     }
@@ -705,19 +765,41 @@ const getIntelligentFallbackResponse = async (query, studentName, studentData, c
     return response;
   }
   
+  // Exam results questions
+  if (q.includes('exam') || q.includes('test') || q.includes('result')) {
+    if (examResults.gradedCount > 0) {
+      let response = `📊 Here are your exam results, ${firstName}:\n\n`;
+      response += `• Total Graded Exams: ${examResults.gradedCount}\n`;
+      response += `• Total Marks: ${examResults.totalMarks}\n\n`;
+      
+      examResults.submissions.forEach(r => {
+        const gradeEmoji = r.grade === 'A+' || r.grade === 'A' ? '🏆' : 
+                           r.grade === 'B+' || r.grade === 'B' ? '👍' : 
+                           r.grade === 'C+' || r.grade === 'C' ? '📊' : '📈';
+        response += `${gradeEmoji} ${r.courseCode} - ${r.examTitle}\n`;
+        response += `   Score: ${r.total_marks_obtained}/${r.totalMarks} (${r.percentage || 0}%)\n`;
+        response += `   Grade: ${r.grade || 'N/A'}\n\n`;
+      });
+      
+      return response;
+    } else {
+      return `📋 You don't have any exam results yet, ${firstName}. Your exams will show here once they've been graded and approved by the Dean. Keep studying! 💪`;
+    }
+  }
+  
   // CGPA/GPA questions
-  if (q.includes('cgpa') || q.includes('gpa') || q.includes('grade')) {
-    return `📊 Your current CGPA is ${cgpa}, ${firstName}. You have ${pendingAssign} pending assignment${pendingAssign !== 1 ? 's' : ''} and ${upcoming} upcoming exam${upcoming !== 1 ? 's' : ''}. Keep up the good work! 💪`;
+  if (q.includes('cgpa') || q.includes('gpa')) {
+    let response = `📊 Your current CGPA is ${cgpa}, ${firstName}.\n\n`;
+    if (examResults.gradedCount > 0) {
+      response += `Based on ${examResults.gradedCount} Dean-approved exam${examResults.gradedCount !== 1 ? 's' : ''}.\n`;
+    }
+    response += `You have ${pendingAssign} pending assignment${pendingAssign !== 1 ? 's' : ''} and ${upcoming} upcoming exam${upcoming !== 1 ? 's' : ''}.\n\nKeep up the good work! 💪`;
+    return response;
   }
   
   // Assignment questions
   if (q.includes('assignment') || q.includes('homework') || q.includes('project')) {
     return `📝 You have ${pendingAssign} pending assignment${pendingAssign !== 1 ? 's' : ''}, ${firstName}. Would you like help with study tips or time management strategies?`;
-  }
-  
-  // Exam questions
-  if (q.includes('exam') || q.includes('test')) {
-    return `📋 You have ${upcoming} upcoming exam${upcoming !== 1 ? 's' : ''}, ${firstName}. Would you like some exam preparation tips?`;
   }
   
   // Study tips
@@ -726,7 +808,14 @@ const getIntelligentFallbackResponse = async (query, studentName, studentData, c
   }
   
   // Default - show summary naturally
-  return `Hi ${firstName}! Here's a quick overview of your academic status:\n\n• CGPA: ${cgpa}\n• Pending Assignments: ${pendingAssign}\n• Upcoming Exams: ${upcoming}\n\nI can help you with your timetable, fees, study tips, and more. What would you like to know? 😊`;
+  let response = `Hi ${firstName}! Here's a quick overview of your academic status:\n\n• CGPA: ${cgpa}\n• Pending Assignments: ${pendingAssign}\n• Upcoming Exams: ${upcoming}\n`;
+  
+  if (examResults.gradedCount > 0) {
+    response += `• Graded Exams: ${examResults.gradedCount}\n`;
+  }
+  
+  response += `\nI can help you with your timetable, fees, exam results, study tips, and more. What would you like to know? 😊`;
+  return response;
 };
 
 export default {
