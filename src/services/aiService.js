@@ -1,10 +1,9 @@
-// src/services/aiService.js
+// src/services/aiService.js - COMPLETE WITH ATTENDANCE SUPPORT
 import { supabase } from './supabase';
 
 const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || '';
 const GROQ_API_URL = import.meta.env.VITE_GROQ_API_URL || 'https://api.groq.com/openai/v1/chat/completions';
 
-// ✅ CORRECT - Using your actual available models from the API
 const WORKING_MODELS = [
   'groq/compound',
   'groq/compound-mini',
@@ -76,6 +75,138 @@ const getGradeFromMarks = (marks) => {
   return 'F';
 };
 
+// ===================== FETCH ATTENDANCE DATA =====================
+
+const fetchAttendanceData = async (studentId) => {
+  try {
+    if (!studentId) return { total: 0, present: 0, absent: 0, late: 0, rate: 0, byCourse: {}, recent: [] };
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
+
+    const { data: attendanceRecords, error: attError } = await supabase
+      .from('attendance_records')
+      .select(`
+        id,
+        date,
+        status,
+        course_id,
+        courses(course_code, course_name)
+      `)
+      .eq('student_id', studentId)
+      .gte('date', thirtyDaysAgoStr)
+      .order('date', { ascending: false });
+
+    if (attError) {
+      console.warn('⚠️ Could not fetch attendance:', attError);
+      return { total: 0, present: 0, absent: 0, late: 0, rate: 0, byCourse: {}, recent: [] };
+    }
+
+    if (!attendanceRecords || attendanceRecords.length === 0) {
+      return { total: 0, present: 0, absent: 0, late: 0, rate: 0, byCourse: {}, recent: [] };
+    }
+
+    const total = attendanceRecords.length;
+    const present = attendanceRecords.filter(r => r.status === 'present').length;
+    const absent = attendanceRecords.filter(r => r.status === 'absent').length;
+    const late = attendanceRecords.filter(r => r.status === 'late').length;
+    const rate = total > 0 ? Math.round((present / total) * 100) : 0;
+
+    const byCourse = {};
+    attendanceRecords.forEach(record => {
+      const courseName = record.courses?.course_name || 'General';
+      const courseCode = record.courses?.course_code || 'N/A';
+      const key = `${courseCode} - ${courseName}`;
+      
+      if (!byCourse[key]) {
+        byCourse[key] = { present: 0, absent: 0, late: 0, total: 0 };
+      }
+      
+      byCourse[key][record.status]++;
+      byCourse[key].total++;
+    });
+
+    return { total, present, absent, late, rate, byCourse, recent: attendanceRecords.slice(0, 10) };
+  } catch (err) {
+    console.error('Error fetching attendance:', err);
+    return { total: 0, present: 0, absent: 0, late: 0, rate: 0, byCourse: {}, recent: [] };
+  }
+};
+
+// ===================== FETCH EXAM RESULTS =====================
+
+const fetchExamResults = async (studentId) => {
+  try {
+    if (!studentId) return { submissions: [], gradedCount: 0, totalMarks: 0 };
+
+    const { data: approvedExams } = await supabase
+      .from('exam_results_approvals')
+      .select('exam_id')
+      .eq('status', 'approved_by_dean');
+
+    const approvedExamIds = approvedExams?.map(a => a.exam_id) || [];
+
+    if (approvedExamIds.length === 0) {
+      return { submissions: [], gradedCount: 0, totalMarks: 0 };
+    }
+
+    const { data: submissions, error: subError } = await supabase
+      .from('exam_submissions')
+      .select(`
+        id,
+        exam_id,
+        total_marks_obtained,
+        grade,
+        grade_points,
+        percentage,
+        graded_at
+      `)
+      .eq('student_id', studentId)
+      .eq('status', 'graded')
+      .in('exam_id', approvedExamIds);
+
+    if (subError || !submissions || submissions.length === 0) {
+      return { submissions: [], gradedCount: 0, totalMarks: 0 };
+    }
+
+    const examIds = submissions.map(s => s.exam_id);
+    const { data: exams } = await supabase
+      .from('examinations')
+      .select(`
+        id,
+        title,
+        total_marks,
+        course_id,
+        courses(course_code, course_name)
+      `)
+      .in('id', examIds);
+
+    const examMap = {};
+    (exams || []).forEach(e => { examMap[e.id] = e; });
+
+    const detailedResults = submissions.map(sub => {
+      const exam = examMap[sub.exam_id];
+      return {
+        ...sub,
+        examTitle: exam?.title || 'Exam',
+        courseCode: exam?.courses?.course_code || 'N/A',
+        courseName: exam?.courses?.course_name || 'N/A',
+        totalMarks: exam?.total_marks || 100
+      };
+    });
+
+    return {
+      submissions: detailedResults,
+      gradedCount: detailedResults.length,
+      totalMarks: detailedResults.reduce((sum, r) => sum + (parseFloat(r.total_marks_obtained) || 0), 0)
+    };
+  } catch (err) {
+    console.error('Error fetching exam results:', err);
+    return { submissions: [], gradedCount: 0, totalMarks: 0 };
+  }
+};
+
 // ===================== FETCH STUDENT CORE DATA =====================
 
 const fetchStudentCoreData = async (studentId) => {
@@ -83,7 +214,6 @@ const fetchStudentCoreData = async (studentId) => {
     let cgpa = 0, pendingAssignments = 0, upcomingExams = 0, totalPaid = 0, totalPending = 0;
     
     try {
-      // ✅ FIRST: Get Dean-approved exam IDs
       const { data: approvedExams, error: approvedError } = await supabase
         .from('exam_results_approvals')
         .select('exam_id')
@@ -110,7 +240,6 @@ const fetchStudentCoreData = async (studentId) => {
         let totalPoints = 0;
         let totalCredits = 0;
 
-        // ✅ ONLY use Dean-approved exam submissions for CGPA
         if (approvedExamIds.length > 0) {
           const { data: examSubmissions, error: subError } = await supabase
             .from('exam_submissions')
@@ -163,11 +292,10 @@ const fetchStudentCoreData = async (studentId) => {
             });
 
             cgpa = totalCredits > 0 ? parseFloat((totalPoints / totalCredits).toFixed(2)) : 0;
-            console.log(`✅ AI Service CGPA from Dean-approved exams: ${cgpa} (${totalPoints}/${totalCredits})`);
+            console.log(`✅ AI Service CGPA from Dean-approved exams: ${cgpa}`);
           }
         }
 
-        // ✅ Fallback: Use student_courses grades only if no Dean-approved exams
         if (totalCredits === 0) {
           const gradedCourses = studentCourses.filter(c => c.grade || c.marks);
           
@@ -191,7 +319,6 @@ const fetchStudentCoreData = async (studentId) => {
               }
             });
             cgpa = totalCredits > 0 ? parseFloat((totalPoints / totalCredits).toFixed(2)) : 0;
-            console.log(`✅ AI Service CGPA from course grades: ${cgpa}`);
           }
         }
 
@@ -238,7 +365,6 @@ const fetchStudentTimetable = async (studentData) => {
     const yearOfStudy = studentData.year_of_study || studentData.yearOfStudy;
 
     if (!programId || !academicYear || semester == null || yearOfStudy == null) {
-      console.warn('⚠️ Missing program/year/semester data for timetable');
       return { slots: [], upcoming: [] };
     }
 
@@ -253,7 +379,6 @@ const fetchStudentTimetable = async (studentData) => {
       .maybeSingle();
 
     if (ptError || !programTimetable) {
-      console.warn('⚠️ No active program timetable found for this student cohort');
       return { slots: [], upcoming: [] };
     }
 
@@ -379,80 +504,6 @@ const fetchFinancialData = async (studentId) => {
   }
 };
 
-// ===================== FETCH EXAM RESULTS =====================
-
-const fetchExamResults = async (studentId) => {
-  try {
-    if (!studentId) return { submissions: [], gradedCount: 0, totalMarks: 0 };
-
-    // Get Dean-approved exam IDs
-    const { data: approvedExams } = await supabase
-      .from('exam_results_approvals')
-      .select('exam_id')
-      .eq('status', 'approved_by_dean');
-
-    const approvedExamIds = approvedExams?.map(a => a.exam_id) || [];
-
-    if (approvedExamIds.length === 0) {
-      return { submissions: [], gradedCount: 0, totalMarks: 0 };
-    }
-
-    const { data: submissions, error: subError } = await supabase
-      .from('exam_submissions')
-      .select(`
-        id,
-        exam_id,
-        total_marks_obtained,
-        grade,
-        grade_points,
-        percentage,
-        graded_at
-      `)
-      .eq('student_id', studentId)
-      .eq('status', 'graded')
-      .in('exam_id', approvedExamIds);
-
-    if (subError || !submissions || submissions.length === 0) {
-      return { submissions: [], gradedCount: 0, totalMarks: 0 };
-    }
-
-    const examIds = submissions.map(s => s.exam_id);
-    const { data: exams } = await supabase
-      .from('examinations')
-      .select(`
-        id,
-        title,
-        total_marks,
-        course_id,
-        courses(course_code, course_name)
-      `)
-      .in('id', examIds);
-
-    const examMap = {};
-    (exams || []).forEach(e => { examMap[e.id] = e; });
-
-    const detailedResults = submissions.map(sub => {
-      const exam = examMap[sub.exam_id];
-      return {
-        ...sub,
-        examTitle: exam?.title || 'Exam',
-        courseCode: exam?.courses?.course_code || 'N/A',
-        courseName: exam?.courses?.course_name || 'N/A',
-        totalMarks: exam?.total_marks || 100
-      };
-    });
-
-    return {
-      submissions: detailedResults,
-      gradedCount: detailedResults.length,
-      totalMarks: detailedResults.reduce((sum, r) => sum + (parseFloat(r.total_marks_obtained) || 0), 0)
-    };
-  } catch (err) {
-    console.error('Error fetching exam results:', err);
-    return { submissions: [], gradedCount: 0, totalMarks: 0 };
-  }
-};
-
 // ===================== CONTEXT BUILDER =====================
 
 const buildCompleteContext = async (studentStats, studentData, coreData) => {
@@ -476,6 +527,11 @@ const buildCompleteContext = async (studentStats, studentData, coreData) => {
     examResults = await fetchExamResults(studentData.id);
   }
 
+  let attendance = { total: 0, present: 0, absent: 0, late: 0, rate: 0, byCourse: {}, recent: [] };
+  if (studentData?.id) {
+    attendance = await fetchAttendanceData(studentData.id);
+  }
+
   let context = 'Student Information:\n';
   context += `Name: ${name}\n`;
   context += `Student ID: ${studentData?.student_id || 'N/A'}\n`;
@@ -496,6 +552,22 @@ const buildCompleteContext = async (studentStats, studentData, coreData) => {
     });
   } else {
     context += 'No exam results available yet.\n';
+  }
+  context += '\n';
+  
+  context += 'Attendance (last 30 days):\n';
+  context += `Total Records: ${attendance.total}\n`;
+  context += `Present: ${attendance.present}\n`;
+  context += `Absent: ${attendance.absent}\n`;
+  context += `Late: ${attendance.late}\n`;
+  context += `Attendance Rate: ${attendance.rate}%\n`;
+  
+  if (Object.keys(attendance.byCourse).length > 0) {
+    context += 'Attendance by Course:\n';
+    Object.entries(attendance.byCourse).slice(0, 5).forEach(([course, data]) => {
+      const courseRate = data.total > 0 ? Math.round((data.present / data.total) * 100) : 0;
+      context += `- ${course}: ${data.present}/${data.total} present (${courseRate}%)\n`;
+    });
   }
   context += '\n';
   
@@ -600,15 +672,25 @@ export const generateAIResponseWithContext = async (
 
     const systemPrompt = 
       'You are a helpful, intelligent academic assistant for a university student. ' +
-      'You have access to the student\'s personal academic data including grades, CGPA, assignments, exams, financial records, and timetable.\n\n' +
+      'You have access to the student\'s personal academic data including grades, CGPA, assignments, exams, financial records, attendance, and timetable.\n\n' +
       'IMPORTANT GUIDELINES:\n' +
       '1. Never reveal that you are fetching data or accessing a database.\n' +
       '2. Never use phrases like "Based on the data provided" or "According to your records".\n' +
       '3. Always be helpful, warm, and encouraging.\n' +
       '4. Format responses cleanly without markdown symbols.\n' +
       '5. For exam results, always mention the specific scores and grades.\n' +
-      '6. For financial questions, give clear breakdowns.\n' +
-      '7. Be conversational and proactive.\n\n' +
+      '6. For attendance questions, provide the attendance rate and breakdown.\n' +
+      '7. For financial questions, give clear breakdowns.\n' +
+      '8. Be conversational and proactive.\n' +
+      '9. CRITICAL GPA RULES - YOU MUST FOLLOW THESE EXACTLY:\n' +
+      '   - NEVER recalculate CGPA or GPA yourself. Use the exact CGPA value from the student data.\n' +
+      '   - The university uses a 5-point GPA scale, NOT a 4-point scale.\n' +
+      '   - Grade points: A+=5.0, A=5.0, B+=4.5, B=4.0, C+=3.5, C=3.0, D+=2.5, D=2.0, F=0.0.\n' +
+      '   - A B+ grade equals 4.5 grade points.\n' +
+      '   - Do NOT convert percentages to GPA using multiplication.\n' +
+      '   - Do NOT say "3.12" or any other calculated GPA value.\n' +
+      '   - Always report the CGPA exactly as shown in the student data.\n' +
+      '   - The CGPA in the data is already correctly calculated using the 5-point scale.\n\n' +
       'Student Data (use this naturally):\n' +
       fullContext;
 
@@ -692,12 +774,14 @@ const getIntelligentFallbackResponse = async (query, studentName, studentData, c
   let financial = { totalPaid: 0, totalPending: 0, totalBalance: 0, fees: [] };
   let timetable = { slots: [], upcoming: [] };
   let examResults = { submissions: [], gradedCount: 0, totalMarks: 0 };
+  let attendance = { total: 0, present: 0, absent: 0, late: 0, rate: 0, byCourse: {}, recent: [] };
   
   if (studentData?.id) {
     try {
       financial = await fetchFinancialData(studentData.id);
       timetable = await fetchStudentTimetable(studentData);
       examResults = await fetchExamResults(studentData.id);
+      attendance = await fetchAttendanceData(studentData.id);
     } catch (e) {
       console.warn('Fallback data fetch error:', e);
     }
@@ -736,7 +820,7 @@ const getIntelligentFallbackResponse = async (query, studentName, studentData, c
       
       return response;
     } else {
-      return `📅 You don't have any classes scheduled for this semester, ${firstName}. Please check with your department for your timetable.`;
+      return `📅 You don't have any classes scheduled for this semester, ${firstName}.`;
     }
   }
   
@@ -744,7 +828,6 @@ const getIntelligentFallbackResponse = async (query, studentName, studentData, c
   if (q.includes('fee') || q.includes('payment') || q.includes('balance') || q.includes('owe') || q.includes('pay')) {
     const totalPaid = financial.totalPaid || 0;
     const totalPending = financial.totalPending || 0;
-    const totalBalance = financial.totalBalance || 0;
     
     let response = `💰 Here's your financial summary, ${firstName}:\n\n`;
     response += `• Total Paid: $${totalPaid.toLocaleString()}\n`;
@@ -763,6 +846,30 @@ const getIntelligentFallbackResponse = async (query, studentName, studentData, c
     }
     
     return response;
+  }
+  
+  // Attendance questions
+  if (q.includes('attendance') || q.includes('present') || q.includes('absent') || q.includes('missed')) {
+    if (attendance.total > 0) {
+      let response = `📊 Here's your attendance summary for the last 30 days, ${firstName}:\n\n`;
+      response += `• Total Records: ${attendance.total}\n`;
+      response += `• Present: ${attendance.present}\n`;
+      response += `• Absent: ${attendance.absent}\n`;
+      response += `• Late: ${attendance.late}\n`;
+      response += `• Attendance Rate: ${attendance.rate}%\n\n`;
+      
+      if (Object.keys(attendance.byCourse).length > 0) {
+        response += `📚 Attendance by Course:\n`;
+        Object.entries(attendance.byCourse).slice(0, 5).forEach(([course, data]) => {
+          const courseRate = data.total > 0 ? Math.round((data.present / data.total) * 100) : 0;
+          response += `  • ${course}: ${data.present}/${data.total} present (${courseRate}%)\n`;
+        });
+      }
+      
+      return response;
+    } else {
+      return `📊 You don't have any attendance records in the last 30 days, ${firstName}. Make sure to attend your classes regularly! 💪`;
+    }
   }
   
   // Exam results questions
@@ -814,7 +921,11 @@ const getIntelligentFallbackResponse = async (query, studentName, studentData, c
     response += `• Graded Exams: ${examResults.gradedCount}\n`;
   }
   
-  response += `\nI can help you with your timetable, fees, exam results, study tips, and more. What would you like to know? 😊`;
+  if (attendance.total > 0) {
+    response += `• Attendance Rate: ${attendance.rate}%\n`;
+  }
+  
+  response += `\nI can help you with your timetable, fees, exam results, attendance, study tips, and more. What would you like to know? 😊`;
   return response;
 };
 
