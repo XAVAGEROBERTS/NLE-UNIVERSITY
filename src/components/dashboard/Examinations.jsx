@@ -80,15 +80,17 @@ const Examinations = () => {
     }
 
     // Fetch exams
-    let query = supabase
-      .from('examinations')
-      .select(`
-        *,
-        courses (id, course_code, course_name, credits)
-      `)
-      .in('course_id', courseIds)
-      .in('status', ['scheduled', 'published', 'active', 'completed'])
-      .order('start_time', { ascending: true });
+    // Fetch exams
+let query = supabase
+  .from('examinations')
+  .select(`
+    *,
+    courses (id, course_code, course_name, credits)
+  `)
+  .in('course_id', courseIds)
+  .in('status', ['scheduled', 'published', 'active', 'completed'])
+  .is('deleted_at', null)  // ← ADD THIS LINE
+  .order('start_time', { ascending: true });
 
     // Apply cohort targeting
     const cleanAY = (student.academic_year || '2025/2029').trim().replace(/\s/g, '');
@@ -125,7 +127,7 @@ const Examinations = () => {
     
     if (examsError) throw new Error(`Exams error: ${examsError.message}`);
 
-    // Fetch submissions with no cache
+       // Fetch submissions with no cache
     const { data: submissionsData, error: submissionsError } = await supabase
       .from('exam_submissions')
       .select('*')
@@ -137,8 +139,36 @@ const Examinations = () => {
 
     console.log(`📝 Found ${submissionsData?.length || 0} submissions`);
 
-    // Process exams
-    const processedExams = examsData ? examsData.map(exam => {
+    // Fetch exam results approvals (only dean approved)
+    const { data: approvalData, error: approvalError } = await supabase
+      .from('exam_results_approvals')
+      .select('exam_id, status')
+      .in('exam_id', examsData?.map(e => e.id) || [])
+      .eq('status', 'approved_by_dean');
+
+    if (approvalError) {
+      console.warn('Approval fetch error:', approvalError);
+    }
+
+    console.log(`✅ Found ${approvalData?.length || 0} dean-approved exams`);
+
+    // Process exams (filter out graded exams not approved by dean)
+    const processedExams = examsData ? examsData
+      .filter(exam => {
+        // If exam has a submission that is graded, check approval
+        const submission = submissionsData?.find(sub => sub.exam_id === exam.id);
+        const isGraded = submission?.status === 'graded' || submission?.graded_at !== null;
+        
+        if (isGraded) {
+          // Only show graded exams if approved by dean
+          const isApproved = approvalData?.some(a => a.exam_id === exam.id);
+          return isApproved;
+        }
+        
+        // For non-graded exams, show them
+        return true;
+      })
+      .map(exam => {
       const studentSubmission = submissionsData?.find(sub => sub.exam_id === exam.id);
       const now = new Date();
       const startTime = new Date(exam.start_time);
@@ -1370,20 +1400,108 @@ const refreshExams = () => {
   // ========== LOADING STATE ==========
   if (loading || isRefreshing) {
     return (
-      <div className="examinations-container">
-        <div className="examinations-header">
-          <h2>
-            <i className="fas fa-clipboard-check"></i>
-            Examinations
-          </h2>
-          <div className="examinations-loading">
-            {isRefreshing ? 'Refreshing...' : 'Loading examinations...'}
+      <div style={{ padding: '24px', minHeight: '100vh', background: '#f8f9fa', display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px', marginTop: '10vh' }}>
+          <div style={{ position: 'relative', width: '100px', height: '100px' }}>
+            {/* Outer glow */}
+            <div style={{
+              position: 'absolute',
+              top: '-8px',
+              left: '-8px',
+              width: '116px',
+              height: '116px',
+              borderRadius: '50%',
+              background: 'radial-gradient(circle, rgba(239,68,68,0.15) 0%, rgba(220,38,38,0.05) 50%, transparent 70%)',
+              animation: 'examsPulse 2s ease-in-out infinite'
+            }}></div>
+            
+            {/* Outer ring */}
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100px',
+              height: '100px',
+              borderRadius: '50%',
+              border: '3px solid transparent',
+              borderTop: '3px solid #ef4444',
+              borderRight: '3px solid #dc2626',
+              animation: 'examsSpin 1.5s linear infinite'
+            }}></div>
+            
+            {/* Inner ring */}
+            <div style={{
+              position: 'absolute',
+              top: '12px',
+              left: '12px',
+              width: '76px',
+              height: '76px',
+              borderRadius: '50%',
+              border: '3px solid transparent',
+              borderBottom: '3px solid #f59e0b',
+              borderLeft: '3px solid #3b82f6',
+              animation: 'examsSpinReverse 2s linear infinite'
+            }}></div>
+            
+            {/* Center icon */}
+            <div style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: '48px',
+              height: '48px',
+              borderRadius: '50%',
+              background: 'linear-gradient(135deg, #ef4444, #dc2626)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 0 20px rgba(239,68,68,0.5), 0 0 40px rgba(220,38,38,0.3)',
+              animation: 'examsBounce 1.5s ease-in-out infinite'
+            }}>
+              <i className="fas fa-clipboard-check" style={{ color: 'white', fontSize: '16px' }}></i>
+            </div>
+          </div>
+          
+          <div style={{ textAlign: 'center' }}>
+            <p style={{ fontSize: '18px', color: '#1e293b', margin: 0, fontWeight: 600, letterSpacing: '0.5px' }}>
+              {isRefreshing ? 'Refreshing Examinations' : 'Loading Examinations'}
+            </p>
+            <p style={{ fontSize: '13px', color: '#64748b', margin: '6px 0 0 0' }}>
+              {isRefreshing ? 'Updating exam status...' : 'Fetching your exams...'}
+            </p>
+          </div>
+          
+          {/* Dots */}
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ef4444', animation: 'examsDots 1.2s ease-in-out infinite' }}></div>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#dc2626', animation: 'examsDots 1.2s ease-in-out 0.2s infinite' }}></div>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#f59e0b', animation: 'examsDots 1.2s ease-in-out 0.4s infinite' }}></div>
           </div>
         </div>
-        <div className="examinations-loading-spinner">
-          <div className="loading-spinner"></div>
-          <p>{isRefreshing ? 'Updating exam status...' : 'Fetching your exams'}</p>
-        </div>
+        
+        <style>{`
+          @keyframes examsSpin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+          @keyframes examsSpinReverse {
+            0% { transform: rotate(360deg); }
+            100% { transform: rotate(0deg); }
+          }
+          @keyframes examsPulse {
+            0%, 100% { opacity: 0.6; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.05); }
+          }
+          @keyframes examsBounce {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-50%, -50%) scale(1.08); }
+          }
+          @keyframes examsDots {
+            0%, 100% { opacity: 0.3; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.5); }
+          }
+        `}</style>
       </div>
     );
   }
@@ -1436,21 +1554,16 @@ const refreshExams = () => {
               </div>
             </div>
             <div className="examinations-header-buttons">
-              <button 
+                         <button 
                 onClick={refreshExams}
-                className="examinations-refresh-btn"
+                className="examinations-refresh-mini-btn"
                 disabled={checkingClearance}
+                title="Refresh examinations"
               >
                 {checkingClearance ? (
-                  <>
-                    <i className="fas fa-spinner fa-spin"></i>
-                    Checking...
-                  </>
+                  <i className="fas fa-spinner fa-spin"></i>
                 ) : (
-                  <>
-                    <i className="fas fa-sync-alt"></i>
-                    Refresh
-                  </>
+                  <i className="fas fa-sync-alt"></i>
                 )}
               </button>
               {hasScheduledExams && (

@@ -280,7 +280,7 @@ const CourseUnits = () => {
       totalSemesters,
       currentYearKey
     };
-  }, [user?.email]);
+  }, [user]);
 
   // Use cached data hook
   const { 
@@ -429,16 +429,108 @@ const CourseUnits = () => {
 
   if (loading) {
     return (
-      <div className="course-units-page">
-        <div className="cu-dashboard-header">
-          <h2 className="cu-header-title">Course Units</h2>
-          <div className="cu-loading-text">
-            Loading courses...
+      <div style={{ padding: '24px', minHeight: '100vh', background: '#f8f9fa', display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px', marginTop: '10vh' }}>
+          <div style={{ position: 'relative', width: '100px', height: '100px' }}>
+            {/* Outer glow */}
+            <div style={{
+              position: 'absolute',
+              top: '-8px',
+              left: '-8px',
+              width: '116px',
+              height: '116px',
+              borderRadius: '50%',
+              background: 'radial-gradient(circle, rgba(76,175,80,0.15) 0%, rgba(56,142,60,0.05) 50%, transparent 70%)',
+              animation: 'courseUnitsPulse 2s ease-in-out infinite'
+            }}></div>
+            
+            {/* Outer ring */}
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100px',
+              height: '100px',
+              borderRadius: '50%',
+              border: '3px solid transparent',
+              borderTop: '3px solid #4caf50',
+              borderRight: '3px solid #388e3c',
+              animation: 'courseUnitsSpin 1.5s linear infinite'
+            }}></div>
+            
+            {/* Inner ring */}
+            <div style={{
+              position: 'absolute',
+              top: '12px',
+              left: '12px',
+              width: '76px',
+              height: '76px',
+              borderRadius: '50%',
+              border: '3px solid transparent',
+              borderBottom: '3px solid #2196f3',
+              borderLeft: '3px solid #ff9800',
+              animation: 'courseUnitsSpinReverse 2s linear infinite'
+            }}></div>
+            
+            {/* Center icon */}
+            <div style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: '48px',
+              height: '48px',
+              borderRadius: '50%',
+              background: 'linear-gradient(135deg, #4caf50, #388e3c)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 0 20px rgba(76,175,80,0.5), 0 0 40px rgba(56,142,60,0.3)',
+              animation: 'courseUnitsBounce 1.5s ease-in-out infinite'
+            }}>
+              <i className="fas fa-book" style={{ color: 'white', fontSize: '16px' }}></i>
+            </div>
+          </div>
+          
+          <div style={{ textAlign: 'center' }}>
+            <p style={{ fontSize: '18px', color: '#1e293b', margin: 0, fontWeight: 600, letterSpacing: '0.5px' }}>
+              Loading Course Units
+            </p>
+            <p style={{ fontSize: '13px', color: '#64748b', margin: '6px 0 0 0' }}>
+              Fetching your program courses...
+            </p>
+          </div>
+          
+          {/* Dots */}
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#4caf50', animation: 'courseUnitsDots 1.2s ease-in-out infinite' }}></div>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#388e3c', animation: 'courseUnitsDots 1.2s ease-in-out 0.2s infinite' }}></div>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#2196f3', animation: 'courseUnitsDots 1.2s ease-in-out 0.4s infinite' }}></div>
           </div>
         </div>
-        <div className="cu-loading-spinner">
-          <div className="cu-spinner"></div>
-        </div>
+        
+        <style>{`
+          @keyframes courseUnitsSpin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+          @keyframes courseUnitsSpinReverse {
+            0% { transform: rotate(360deg); }
+            100% { transform: rotate(0deg); }
+          }
+          @keyframes courseUnitsPulse {
+            0%, 100% { opacity: 0.6; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.05); }
+          }
+          @keyframes courseUnitsBounce {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-50%, -50%) scale(1.08); }
+          }
+          @keyframes courseUnitsDots {
+            0%, 100% { opacity: 0.3; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.5); }
+          }
+        `}</style>
       </div>
     );
   }
@@ -487,23 +579,23 @@ const CourseUnits = () => {
             <h2 className="cu-header-title">
               Course Units
             </h2>
-            <button 
-              onClick={() => refetchCourseData()}
-              style={{
-                backgroundColor: '#f8f9fa',
-                color: '#333',
-                border: '1px solid #dee2e6',
-                padding: '8px 12px',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                whiteSpace: 'nowrap'
+                       <button 
+              onClick={() => {
+                if (user?.id) {
+                  localStorage.removeItem(`course-units-${user.id}`);
+                  localStorage.removeItem(`course-units-${user.email}`);
+                }
+                Object.keys(localStorage).forEach(key => {
+                  if (key.startsWith('course-units-')) {
+                    localStorage.removeItem(key);
+                  }
+                });
+                refetchCourseData();
               }}
+              className="cu-refresh-mini-btn"
+              title="Refresh course units"
             >
-              <i className="fas fa-sync-alt"></i> Refresh
+              <i className="fas fa-sync-alt"></i>
             </button>
           </div>
           {studentInfo && (

@@ -1717,37 +1717,106 @@ isFetchingRef.current = true;
   // Loading state
   if (isLoadingInitial) {
     return (
-      <div style={{
-        maxWidth: '1200px',
-        margin: '0 auto',
-        padding: '2rem',
-        textAlign: 'center',
-        minHeight: '100vh',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: '#f5f7fa'
-      }}>
-        <div style={{
-          width: '60px',
-          height: '60px',
-          border: '4px solid #f3f3f3',
-          borderTop: '4px solid #3498db',
-          borderRadius: '50%',
-          animation: 'spin 1s linear infinite',
-          marginBottom: '1.5rem'
-        }}></div>
-        <h3 style={{ color: '#2c3e50', marginBottom: '0.5rem', fontSize: isMobile ? '1.2rem' : '1.5rem' }}>
-          Loading your personal AI assistant...
-        </h3>
-        <p style={{ color: '#7f8c8d', fontSize: isMobile ? '0.9rem' : '1rem' }}>
-          Fetching your academic data
-        </p>
+      <div style={{ padding: '24px', minHeight: '100vh', background: '#f8f9fa', display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px', marginTop: '10vh' }}>
+          <div style={{ position: 'relative', width: '100px', height: '100px' }}>
+            {/* Outer glow */}
+            <div style={{
+              position: 'absolute',
+              top: '-8px',
+              left: '-8px',
+              width: '116px',
+              height: '116px',
+              borderRadius: '50%',
+              background: 'radial-gradient(circle, rgba(67,97,238,0.15) 0%, rgba(58,12,163,0.05) 50%, transparent 70%)',
+              animation: 'chatbotPulse 2s ease-in-out infinite'
+            }}></div>
+            
+            {/* Outer ring */}
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100px',
+              height: '100px',
+              borderRadius: '50%',
+              border: '3px solid transparent',
+              borderTop: '3px solid #4361ee',
+              borderRight: '3px solid #3a0ca3',
+              animation: 'chatbotSpin 1.5s linear infinite'
+            }}></div>
+            
+            {/* Inner ring */}
+            <div style={{
+              position: 'absolute',
+              top: '12px',
+              left: '12px',
+              width: '76px',
+              height: '76px',
+              borderRadius: '50%',
+              border: '3px solid transparent',
+              borderBottom: '3px solid #7209b7',
+              borderLeft: '3px solid #4cc9f0',
+              animation: 'chatbotSpinReverse 2s linear infinite'
+            }}></div>
+            
+            {/* Center icon */}
+            <div style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: '48px',
+              height: '48px',
+              borderRadius: '50%',
+              background: 'linear-gradient(135deg, #4361ee, #3a0ca3)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 0 20px rgba(67,97,238,0.5), 0 0 40px rgba(58,12,163,0.3)',
+              animation: 'chatbotBounce 1.5s ease-in-out infinite'
+            }}>
+              <span style={{ fontSize: '20px' }}>🤖</span>
+            </div>
+          </div>
+          
+          <div style={{ textAlign: 'center' }}>
+            <p style={{ fontSize: '18px', color: '#1e293b', margin: 0, fontWeight: 600, letterSpacing: '0.5px' }}>
+              Loading AI Assistant
+            </p>
+            <p style={{ fontSize: '13px', color: '#64748b', margin: '6px 0 0 0' }}>
+              Fetching your academic data...
+            </p>
+          </div>
+          
+          {/* Dots */}
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#4361ee', animation: 'chatbotDots 1.2s ease-in-out infinite' }}></div>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#3a0ca3', animation: 'chatbotDots 1.2s ease-in-out 0.2s infinite' }}></div>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#7209b7', animation: 'chatbotDots 1.2s ease-in-out 0.4s infinite' }}></div>
+          </div>
+        </div>
+        
         <style>{`
-          @keyframes spin {
+          @keyframes chatbotSpin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
+          }
+          @keyframes chatbotSpinReverse {
+            0% { transform: rotate(360deg); }
+            100% { transform: rotate(0deg); }
+          }
+          @keyframes chatbotPulse {
+            0%, 100% { opacity: 0.6; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.05); }
+          }
+          @keyframes chatbotBounce {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-50%, -50%) scale(1.08); }
+          }
+          @keyframes chatbotDots {
+            0%, 100% { opacity: 0.3; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.5); }
           }
         `}</style>
       </div>
@@ -1961,16 +2030,39 @@ isFetchingRef.current = true;
               {!isMobile && 'Clear Chat'}
             </button>
             <button
-  onClick={() => {
-    const cacheKey = 'chatbot-data-' + (user?.id || user?.email);
-    dataCache.delete?.(cacheKey); // or dataCache.set(cacheKey, null)
-    loadedHistoryRef.current = false;
-    fetchAllStudentData(true); // force refresh
-  }}
-  style={{ /* same style as Clear Chat */ }}
->
-  🔄 Refresh
-</button>
+              onClick={() => {
+                const cacheKey = 'chatbot-data-' + (user?.id || user?.email);
+                dataCache.delete?.(cacheKey);
+                loadedHistoryRef.current = false;
+                fetchAllStudentData(true);
+              }}
+              style={{
+                width: '28px',
+                height: '28px',
+                backgroundColor: '#3b82f6',
+                color: 'white',
+                border: 'none',
+                borderRadius: '50%',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+                fontSize: '11px',
+                flexShrink: 0
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = '#2563eb';
+                e.currentTarget.style.transform = 'rotate(90deg)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = '#3b82f6';
+                e.currentTarget.style.transform = 'rotate(0deg)';
+              }}
+              title="Refresh assistant data"
+            >
+              <i className="fas fa-sync-alt"></i>
+            </button>
           </div>
         </div>
 

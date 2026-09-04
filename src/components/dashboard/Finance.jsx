@@ -686,20 +686,108 @@ const Finance = () => {
 
   if (loading) {
     return (
-      <div className="finance-container">
-        <div className="finance-header">
-          <div>
-            <h2>
-              <i className="fas fa-file-invoice-dollar" style={{ color: '#28a745' }}></i>
-              Financial Statements
-            </h2>
-            <div>Loading financial data...</div>
+      <div style={{ padding: '24px', minHeight: '100vh', background: '#f8f9fa', display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px', marginTop: '10vh' }}>
+          <div style={{ position: 'relative', width: '100px', height: '100px' }}>
+            {/* Outer glow */}
+            <div style={{
+              position: 'absolute',
+              top: '-8px',
+              left: '-8px',
+              width: '116px',
+              height: '116px',
+              borderRadius: '50%',
+              background: 'radial-gradient(circle, rgba(16,185,129,0.15) 0%, rgba(5,150,105,0.05) 50%, transparent 70%)',
+              animation: 'financePulse 2s ease-in-out infinite'
+            }}></div>
+            
+            {/* Outer ring */}
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100px',
+              height: '100px',
+              borderRadius: '50%',
+              border: '3px solid transparent',
+              borderTop: '3px solid #10b981',
+              borderRight: '3px solid #059669',
+              animation: 'financeSpin 1.5s linear infinite'
+            }}></div>
+            
+            {/* Inner ring */}
+            <div style={{
+              position: 'absolute',
+              top: '12px',
+              left: '12px',
+              width: '76px',
+              height: '76px',
+              borderRadius: '50%',
+              border: '3px solid transparent',
+              borderBottom: '3px solid #f59e0b',
+              borderLeft: '3px solid #3b82f6',
+              animation: 'financeSpinReverse 2s linear infinite'
+            }}></div>
+            
+            {/* Center icon */}
+            <div style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: '48px',
+              height: '48px',
+              borderRadius: '50%',
+              background: 'linear-gradient(135deg, #10b981, #059669)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 0 20px rgba(16,185,129,0.5), 0 0 40px rgba(5,150,105,0.3)',
+              animation: 'financeBounce 1.5s ease-in-out infinite'
+            }}>
+              <i className="fas fa-dollar-sign" style={{ color: 'white', fontSize: '18px' }}></i>
+            </div>
+          </div>
+          
+          <div style={{ textAlign: 'center' }}>
+            <p style={{ fontSize: '18px', color: '#1e293b', margin: 0, fontWeight: 600, letterSpacing: '0.5px' }}>
+              Loading Financial Data
+            </p>
+            <p style={{ fontSize: '13px', color: '#64748b', margin: '6px 0 0 0' }}>
+              Fetching your fees and payment history...
+            </p>
+          </div>
+          
+          {/* Dots */}
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981', animation: 'financeDots 1.2s ease-in-out infinite' }}></div>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#059669', animation: 'financeDots 1.2s ease-in-out 0.2s infinite' }}></div>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#f59e0b', animation: 'financeDots 1.2s ease-in-out 0.4s infinite' }}></div>
           </div>
         </div>
-        <div className="finance-loading-spinner">
-          <div className="finance-spinner"></div>
-          <p>Fetching your financial information...</p>
-        </div>
+        
+        <style>{`
+          @keyframes financeSpin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+          @keyframes financeSpinReverse {
+            0% { transform: rotate(360deg); }
+            100% { transform: rotate(0deg); }
+          }
+          @keyframes financePulse {
+            0%, 100% { opacity: 0.6; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.05); }
+          }
+          @keyframes financeBounce {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-50%, -50%) scale(1.08); }
+          }
+          @keyframes financeDots {
+            0%, 100% { opacity: 0.3; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.5); }
+          }
+        `}</style>
       </div>
     );
   }
@@ -767,12 +855,23 @@ const Finance = () => {
             <i className="fas fa-download"></i>
             Download Statement
           </button>
-          <button 
-            onClick={refreshFinancialData}
-            className="refresh-button"
+                <button 
+            onClick={() => {
+              if (user?.id) {
+                localStorage.removeItem(`finance-${user.id}`);
+                localStorage.removeItem(`finance-${user.email}`);
+              }
+              Object.keys(localStorage).forEach(key => {
+                if (key.startsWith('finance-')) {
+                  localStorage.removeItem(key);
+                }
+              });
+              refreshFinancialData();
+            }}
+            className="finance-refresh-mini-btn"
+            title="Refresh financial data"
           >
             <i className="fas fa-sync-alt"></i>
-            Refresh Data
           </button>
         </div>
       </div>

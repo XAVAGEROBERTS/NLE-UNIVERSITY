@@ -73,22 +73,23 @@ const fetchCourseworkData = useCallback(async () => {
     return { studentId: student.id, assignments: [] };
   }
 
-  // 3. Get assignments for non-completed courses
-  const { data: assignmentsData, error: assignmentsError } = await supabase
-    .from('assignments')
-    .select(`
-      *,
-      courses!inner (
-        id, course_code, course_name, department_code, year, semester
-      ),
-      lecturers (full_name)
-    `)
-    .eq('courses.department_code', student.department_code)
-    .eq('courses.year', student.year_of_study)
-    .eq('courses.semester', student.semester)
-    .in('status', ['published', 'closed', 'graded'])
-    .in('course_id', nonCompletedCourseIds)
-    .order('created_at', { ascending: false });
+ // 3. Get assignments for non-completed courses (exclude deleted)
+const { data: assignmentsData, error: assignmentsError } = await supabase
+  .from('assignments')
+  .select(`
+    *,
+    courses!inner (
+      id, course_code, course_name, department_code, year, semester
+    ),
+    lecturers (full_name)
+  `)
+  .eq('courses.department_code', student.department_code)
+  .eq('courses.year', student.year_of_study)
+  .eq('courses.semester', student.semester)
+  .in('status', ['published', 'closed', 'graded'])
+  .in('course_id', nonCompletedCourseIds)
+  .is('deleted_at', null)  // ← ADD THIS LINE
+  .order('created_at', { ascending: false });
 
   if (assignmentsError) {
     console.error('Error fetching assignments:', assignmentsError);
@@ -844,12 +845,108 @@ const fetchCourseworkData = useCallback(async () => {
   // =================== LOADING STATE ===================
   if (accessLoading) {
     return (
-      <div className="coursework-page">
-        <div className="cw-header">
-          <h2>Course Work</h2>
-          <div className="cw-date-display">Checking assignment access...</div>
+      <div style={{ padding: '24px', minHeight: '100vh', background: '#f8f9fa', display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px', marginTop: '10vh' }}>
+          <div style={{ position: 'relative', width: '100px', height: '100px' }}>
+            {/* Outer glow */}
+            <div style={{
+              position: 'absolute',
+              top: '-8px',
+              left: '-8px',
+              width: '116px',
+              height: '116px',
+              borderRadius: '50%',
+              background: 'radial-gradient(circle, rgba(59,130,246,0.15) 0%, rgba(37,99,235,0.05) 50%, transparent 70%)',
+              animation: 'accessPulse 2s ease-in-out infinite'
+            }}></div>
+            
+            {/* Outer ring */}
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100px',
+              height: '100px',
+              borderRadius: '50%',
+              border: '3px solid transparent',
+              borderTop: '3px solid #3b82f6',
+              borderRight: '3px solid #2563eb',
+              animation: 'accessSpin 1.5s linear infinite'
+            }}></div>
+            
+            {/* Inner ring */}
+            <div style={{
+              position: 'absolute',
+              top: '12px',
+              left: '12px',
+              width: '76px',
+              height: '76px',
+              borderRadius: '50%',
+              border: '3px solid transparent',
+              borderBottom: '3px solid #10b981',
+              borderLeft: '3px solid #8b5cf6',
+              animation: 'accessSpinReverse 2s linear infinite'
+            }}></div>
+            
+            {/* Center icon */}
+            <div style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: '48px',
+              height: '48px',
+              borderRadius: '50%',
+              background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 0 20px rgba(59,130,246,0.5), 0 0 40px rgba(37,99,235,0.3)',
+              animation: 'accessBounce 1.5s ease-in-out infinite'
+            }}>
+              <i className="fas fa-shield-alt" style={{ color: 'white', fontSize: '16px' }}></i>
+            </div>
+          </div>
+          
+          <div style={{ textAlign: 'center' }}>
+            <p style={{ fontSize: '18px', color: '#1e293b', margin: 0, fontWeight: 600, letterSpacing: '0.5px' }}>
+              Checking Access
+            </p>
+            <p style={{ fontSize: '13px', color: '#64748b', margin: '6px 0 0 0' }}>
+              Verifying assignment access...
+            </p>
+          </div>
+          
+          {/* Dots */}
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#3b82f6', animation: 'accessDots 1.2s ease-in-out infinite' }}></div>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#2563eb', animation: 'accessDots 1.2s ease-in-out 0.2s infinite' }}></div>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981', animation: 'accessDots 1.2s ease-in-out 0.4s infinite' }}></div>
+          </div>
         </div>
-        <div className="coursework-loading-spinner"></div>
+        
+        <style>{`
+          @keyframes accessSpin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+          @keyframes accessSpinReverse {
+            0% { transform: rotate(360deg); }
+            100% { transform: rotate(0deg); }
+          }
+          @keyframes accessPulse {
+            0%, 100% { opacity: 0.6; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.05); }
+          }
+          @keyframes accessBounce {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-50%, -50%) scale(1.08); }
+          }
+          @keyframes accessDots {
+            0%, 100% { opacity: 0.3; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.5); }
+          }
+        `}</style>
       </div>
     );
   }
@@ -1031,12 +1128,108 @@ const fetchCourseworkData = useCallback(async () => {
   // If loading and no cached data, show loading
   if (dataLoading && !cachedCourseworkData) {
     return (
-      <div className="coursework-page">
-        <div className="cw-header">
-          <h2>Course Work</h2>
-          <div className="cw-date-display">Loading assignments...</div>
+      <div style={{ padding: '24px', minHeight: '100vh', background: '#f8f9fa', display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px', marginTop: '10vh' }}>
+          <div style={{ position: 'relative', width: '100px', height: '100px' }}>
+            {/* Outer glow */}
+            <div style={{
+              position: 'absolute',
+              top: '-8px',
+              left: '-8px',
+              width: '116px',
+              height: '116px',
+              borderRadius: '50%',
+              background: 'radial-gradient(circle, rgba(59,130,246,0.15) 0%, rgba(37,99,235,0.05) 50%, transparent 70%)',
+              animation: 'courseworkPulse 2s ease-in-out infinite'
+            }}></div>
+            
+            {/* Outer ring */}
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100px',
+              height: '100px',
+              borderRadius: '50%',
+              border: '3px solid transparent',
+              borderTop: '3px solid #3b82f6',
+              borderRight: '3px solid #2563eb',
+              animation: 'courseworkSpin 1.5s linear infinite'
+            }}></div>
+            
+            {/* Inner ring */}
+            <div style={{
+              position: 'absolute',
+              top: '12px',
+              left: '12px',
+              width: '76px',
+              height: '76px',
+              borderRadius: '50%',
+              border: '3px solid transparent',
+              borderBottom: '3px solid #10b981',
+              borderLeft: '3px solid #8b5cf6',
+              animation: 'courseworkSpinReverse 2s linear infinite'
+            }}></div>
+            
+            {/* Center icon */}
+            <div style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: '48px',
+              height: '48px',
+              borderRadius: '50%',
+              background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 0 20px rgba(59,130,246,0.5), 0 0 40px rgba(37,99,235,0.3)',
+              animation: 'courseworkBounce 1.5s ease-in-out infinite'
+            }}>
+              <i className="fas fa-book-open" style={{ color: 'white', fontSize: '16px' }}></i>
+            </div>
+          </div>
+          
+          <div style={{ textAlign: 'center' }}>
+            <p style={{ fontSize: '18px', color: '#1e293b', margin: 0, fontWeight: 600, letterSpacing: '0.5px' }}>
+              Loading Course Work
+            </p>
+            <p style={{ fontSize: '13px', color: '#64748b', margin: '6px 0 0 0' }}>
+              Fetching your assignments...
+            </p>
+          </div>
+          
+          {/* Dots */}
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#3b82f6', animation: 'courseworkDots 1.2s ease-in-out infinite' }}></div>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#2563eb', animation: 'courseworkDots 1.2s ease-in-out 0.2s infinite' }}></div>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981', animation: 'courseworkDots 1.2s ease-in-out 0.4s infinite' }}></div>
+          </div>
         </div>
-        <div className="coursework-loading-spinner"></div>
+        
+        <style>{`
+          @keyframes courseworkSpin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+          @keyframes courseworkSpinReverse {
+            0% { transform: rotate(360deg); }
+            100% { transform: rotate(0deg); }
+          }
+          @keyframes courseworkPulse {
+            0%, 100% { opacity: 0.6; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.05); }
+          }
+          @keyframes courseworkBounce {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-50%, -50%) scale(1.08); }
+          }
+          @keyframes courseworkDots {
+            0%, 100% { opacity: 0.3; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.5); }
+          }
+        `}</style>
       </div>
     );
   }
@@ -1061,13 +1254,31 @@ const fetchCourseworkData = useCallback(async () => {
 
   return (
     <div className="coursework-page">
-      <div className="cw-header">
+            <div className="cw-header">
         <h2>Course Work</h2>
         <div className="cw-date-display">
           {assignments.length} assignment{assignments.length !== 1 ? 's' : ''} available
           <span className="access-badge">
             <i className="fas fa-check-circle"></i> Access Granted
           </span>
+          <button 
+            onClick={() => {
+              if (user?.id) {
+                dataCache.clear(`coursework-${user.id}`);
+                dataCache.clear(`coursework-${user.email}`);
+              }
+              Object.keys(localStorage).forEach(key => {
+                if (key.startsWith('coursework-')) {
+                  localStorage.removeItem(key);
+                }
+              });
+              refetchAssignments();
+            }}
+            className="cw-refresh-mini-btn"
+            title="Refresh assignments"
+          >
+            <i className="fas fa-sync-alt"></i>
+          </button>
         </div>
       </div>
 
@@ -1300,6 +1511,30 @@ const fetchCourseworkData = useCallback(async () => {
           font-weight: 500;
           display: flex;
           align-items: center;
+        }
+                  .cw-refresh-mini-btn {
+          margin-left: 8px;
+          width: 28px;
+          height: 28px;
+          background: #3b82f6;
+          color: white;
+          border: none;
+          border-radius: 50%;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.2s ease;
+          font-size: 11px;
+        }
+
+        .cw-refresh-mini-btn:hover {
+          background: #2563eb;
+          transform: rotate(90deg);
+        }
+
+        .cw-refresh-mini-btn:active {
+          transform: rotate(180deg) scale(0.9);
         }
 
         .cw-grid {
@@ -1627,20 +1862,6 @@ const fetchCourseworkData = useCallback(async () => {
           box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
         }
 
-        .coursework-loading-spinner {
-          width: 50px;
-          height: 50px;
-          border: 4px solid #f1f5f9;
-          border-top: 4px solid #3b82f6;
-          border-radius: 50%;
-          animation: coursework-spin 1s linear infinite;
-          margin: 40px auto;
-        }
-
-        @keyframes coursework-spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
 
         /* =================== MODAL STYLES =================== */
         .coursework-modal-overlay {

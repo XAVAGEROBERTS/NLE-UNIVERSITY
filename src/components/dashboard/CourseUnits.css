@@ -86,30 +86,6 @@
   border-color: #4299e1;
 }
 
-/* Loading States */
-.cu-loading-spinner {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 4rem 2rem;
-  text-align: center;
-}
-
-.cu-spinner {
-  width: 3rem;
-  height: 3rem;
-  border: 3px solid #e2e8f0;
-  border-top-color: #4299e1;
-  border-radius: 50%;
-  animation: cu-spin 1s linear infinite;
-  margin-bottom: 1rem;
-}
-
-.cu-loading-text {
-  color: #718096;
-  font-size: 0.875rem;
-}
 
 /* Error States */
 .cu-error-container {
@@ -644,11 +620,6 @@
   }
 }
 
-/* Animation */
-@keyframes cu-spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
 
 /* Hover Effects */
 @media (hover: hover) {
@@ -687,4 +658,28 @@
   .cu-semester-header {
     break-after: avoid;
   }
+}
+.cu-refresh-mini-btn {
+  margin-left: 8px;
+  width: 28px;
+  height: 28px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  font-size: 11px;
+}
+
+.cu-refresh-mini-btn:hover {
+  background: #2563eb;
+  transform: rotate(90deg);
+}
+
+.cu-refresh-mini-btn:active {
+  transform: rotate(180deg) scale(0.9);
 }

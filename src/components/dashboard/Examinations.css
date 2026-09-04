@@ -442,29 +442,6 @@
   line-height: 1.5;
 }
 
-/* Loading Spinner */
-.examinations-loading-spinner {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  height: 300px;
-  gap: 20px;
-}
-
-.loading-spinner {
-  width: 50px;
-  height: 50px;
-  border: 5px solid #f3f3f3;
-  border-top: 5px solid #3498db;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-.examinations-loading-spinner p {
-  color: #666;
-  font-size: 16px;
-}
 
 /* Error Container */
 .examinations-error-container {
@@ -1325,11 +1302,6 @@
   color: white;
 }
 
-/* Animations */
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
 
 @keyframes slideIn {
   from {
@@ -1541,4 +1513,33 @@
 
 .clearance-action-hint strong {
   color: #1e293b;
+}
+.examinations-refresh-mini-btn {
+  width: 28px;
+  height: 28px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  font-size: 11px;
+}
+
+.examinations-refresh-mini-btn:hover {
+  background: #2563eb;
+  transform: rotate(90deg);
+}
+
+.examinations-refresh-mini-btn:active {
+  transform: rotate(180deg) scale(0.9);
+}
+
+.examinations-refresh-mini-btn:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+  transform: none;
 }

@@ -169,11 +169,108 @@ const Timetable = () => {
   // ---------- Loading / Error ----------
   if (loading) {
     return (
-      <div className="content" style={{ padding: 16 }}>
-        <h2>My Time Table</h2>
-        <div style={{ display: 'flex', justifyContent: 'center', height: 200, alignItems: 'center' }}>
-          <div className="timetable-spinner" />
+      <div style={{ padding: '24px', minHeight: '100vh', background: '#f8f9fa', display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px', marginTop: '10vh' }}>
+          <div style={{ position: 'relative', width: '100px', height: '100px' }}>
+            {/* Outer glow */}
+            <div style={{
+              position: 'absolute',
+              top: '-8px',
+              left: '-8px',
+              width: '116px',
+              height: '116px',
+              borderRadius: '50%',
+              background: 'radial-gradient(circle, rgba(30,136,229,0.15) 0%, rgba(25,118,210,0.05) 50%, transparent 70%)',
+              animation: 'timetablePulse 2s ease-in-out infinite'
+            }}></div>
+            
+            {/* Outer ring */}
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100px',
+              height: '100px',
+              borderRadius: '50%',
+              border: '3px solid transparent',
+              borderTop: '3px solid #1e88e5',
+              borderRight: '3px solid #1976d2',
+              animation: 'timetableSpin 1.5s linear infinite'
+            }}></div>
+            
+            {/* Inner ring */}
+            <div style={{
+              position: 'absolute',
+              top: '12px',
+              left: '12px',
+              width: '76px',
+              height: '76px',
+              borderRadius: '50%',
+              border: '3px solid transparent',
+              borderBottom: '3px solid #43a047',
+              borderLeft: '3px solid #fb8c00',
+              animation: 'timetableSpinReverse 2s linear infinite'
+            }}></div>
+            
+            {/* Center icon */}
+            <div style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: '48px',
+              height: '48px',
+              borderRadius: '50%',
+              background: 'linear-gradient(135deg, #1e88e5, #1976d2)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 0 20px rgba(30,136,229,0.5), 0 0 40px rgba(25,118,210,0.3)',
+              animation: 'timetableBounce 1.5s ease-in-out infinite'
+            }}>
+              <i className="fas fa-calendar-alt" style={{ color: 'white', fontSize: '16px' }}></i>
+            </div>
+          </div>
+          
+          <div style={{ textAlign: 'center' }}>
+            <p style={{ fontSize: '18px', color: '#1e293b', margin: 0, fontWeight: 600, letterSpacing: '0.5px' }}>
+              Loading Timetable
+            </p>
+            <p style={{ fontSize: '13px', color: '#64748b', margin: '6px 0 0 0' }}>
+              Fetching your schedule...
+            </p>
+          </div>
+          
+          {/* Dots */}
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#1e88e5', animation: 'timetableDots 1.2s ease-in-out infinite' }}></div>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#1976d2', animation: 'timetableDots 1.2s ease-in-out 0.2s infinite' }}></div>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#43a047', animation: 'timetableDots 1.2s ease-in-out 0.4s infinite' }}></div>
+          </div>
         </div>
+        
+        <style>{`
+          @keyframes timetableSpin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+          @keyframes timetableSpinReverse {
+            0% { transform: rotate(360deg); }
+            100% { transform: rotate(0deg); }
+          }
+          @keyframes timetablePulse {
+            0%, 100% { opacity: 0.6; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.05); }
+          }
+          @keyframes timetableBounce {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-50%, -50%) scale(1.08); }
+          }
+          @keyframes timetableDots {
+            0%, 100% { opacity: 0.3; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.5); }
+          }
+        `}</style>
       </div>
     );
   }
@@ -206,17 +303,44 @@ const Timetable = () => {
             Week of {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
           </div>
         </div>
-        <button
-          onClick={() => refetch()}
-          style={{
-            background: '#f8f9fa',
-            border: '1px solid #dee2e6',
-            padding: '8px 14px',
-            borderRadius: 6,
-            cursor: 'pointer',
+             <button
+          onClick={() => {
+            if (user?.id) {
+              localStorage.removeItem(`timetable-grid-${user.id}`);
+              localStorage.removeItem(`timetable-grid-${user.email}`);
+            }
+            Object.keys(localStorage).forEach(key => {
+              if (key.startsWith('timetable-grid-')) {
+                localStorage.removeItem(key);
+              }
+            });
+            refetch();
           }}
+          style={{
+            width: '28px',
+            height: '28px',
+            backgroundColor: '#3b82f6',
+            color: 'white',
+            border: 'none',
+            borderRadius: '50%',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transition: 'all 0.2s ease',
+            fontSize: '11px'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = '#2563eb';
+            e.currentTarget.style.transform = 'rotate(90deg)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = '#3b82f6';
+            e.currentTarget.style.transform = 'rotate(0deg)';
+          }}
+          title="Refresh timetable"
         >
-          <i className="fas fa-sync-alt"></i> Refresh
+          <i className="fas fa-sync-alt"></i>
         </button>
       </div>
 
@@ -332,20 +456,6 @@ const Timetable = () => {
         </div>
       )}
 
-      <style>{`
-        .timetable-spinner {
-          width: 40px; height: 40px;
-          border: 3px solid #f3f3f3;
-          border-top: 3px solid #3498db;
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-        .table-container::-webkit-scrollbar { height: 8px; }
-        .table-container::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 4px; }
-      `}</style>
     </div>
   );
 };

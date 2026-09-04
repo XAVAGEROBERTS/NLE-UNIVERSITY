@@ -546,8 +546,106 @@ const HelpSupport = () => {
             }}
           >
             {loading ? (
-              <div style={{ textAlign: 'center', margin: 'auto', color: '#888' }}>
-                Loading conversation...
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', margin: 'auto', gap: '16px', padding: '40px' }}>
+                <div style={{ position: 'relative', width: '80px', height: '80px' }}>
+                  {/* Outer glow */}
+                  <div style={{
+                    position: 'absolute',
+                    top: '-6px',
+                    left: '-6px',
+                    width: '92px',
+                    height: '92px',
+                    borderRadius: '50%',
+                    background: 'radial-gradient(circle, rgba(26,35,126,0.15) 0%, rgba(40,53,147,0.05) 50%, transparent 70%)',
+                    animation: 'helpPulse 2s ease-in-out infinite'
+                  }}></div>
+                  
+                  {/* Outer ring */}
+                  <div style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '80px',
+                    height: '80px',
+                    borderRadius: '50%',
+                    border: '3px solid transparent',
+                    borderTop: '3px solid #1a237e',
+                    borderRight: '3px solid #283593',
+                    animation: 'helpSpin 1.5s linear infinite'
+                  }}></div>
+                  
+                  {/* Inner ring */}
+                  <div style={{
+                    position: 'absolute',
+                    top: '10px',
+                    left: '10px',
+                    width: '60px',
+                    height: '60px',
+                    borderRadius: '50%',
+                    border: '3px solid transparent',
+                    borderBottom: '3px solid #3949ab',
+                    borderLeft: '3px solid #5c6bc0',
+                    animation: 'helpSpinReverse 2s linear infinite'
+                  }}></div>
+                  
+                  {/* Center icon */}
+                  <div style={{
+                    position: 'absolute',
+                    top: '50%',
+                    left: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '50%',
+                    background: 'linear-gradient(135deg, #1a237e, #283593)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 0 16px rgba(26,35,126,0.5), 0 0 32px rgba(40,53,147,0.3)',
+                    animation: 'helpBounce 1.5s ease-in-out infinite'
+                  }}>
+                    <span style={{ fontSize: '16px' }}>💬</span>
+                  </div>
+                </div>
+                
+                <div style={{ textAlign: 'center' }}>
+                  <p style={{ fontSize: '16px', color: '#1e293b', margin: 0, fontWeight: 600 }}>
+                    Loading Conversation
+                  </p>
+                  <p style={{ fontSize: '13px', color: '#64748b', margin: '4px 0 0 0' }}>
+                    Fetching your messages...
+                  </p>
+                </div>
+                
+                {/* Dots */}
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                  <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#1a237e', animation: 'helpDots 1.2s ease-in-out infinite' }}></div>
+                  <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#283593', animation: 'helpDots 1.2s ease-in-out 0.2s infinite' }}></div>
+                  <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#3949ab', animation: 'helpDots 1.2s ease-in-out 0.4s infinite' }}></div>
+                </div>
+                
+                <style>{`
+                  @keyframes helpSpin {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
+                  }
+                  @keyframes helpSpinReverse {
+                    0% { transform: rotate(360deg); }
+                    100% { transform: rotate(0deg); }
+                  }
+                  @keyframes helpPulse {
+                    0%, 100% { opacity: 0.6; transform: scale(1); }
+                    50% { opacity: 1; transform: scale(1.05); }
+                  }
+                  @keyframes helpBounce {
+                    0%, 100% { transform: translate(-50%, -50%) scale(1); }
+                    50% { transform: translate(-50%, -50%) scale(1.08); }
+                  }
+                  @keyframes helpDots {
+                    0%, 100% { opacity: 0.3; transform: scale(1); }
+                    50% { opacity: 1; transform: scale(1.5); }
+                  }
+                `}</style>
               </div>
             ) : messages.length === 0 ? (
               <div style={{ textAlign: 'center', margin: 'auto', color: '#888' }}>

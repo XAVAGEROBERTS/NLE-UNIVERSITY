@@ -763,9 +763,108 @@ const Results = () => {
   const renderGeneralResults = () => {
     if (loading) {
       return (
-        <div className="loading-container">
-          <div className="results-spinner"></div>
-          <p className="loading-text">Loading results...</p>
+        <div style={{ padding: '24px', minHeight: '100vh', background: '#f8f9fa', display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px', marginTop: '10vh' }}>
+            <div style={{ position: 'relative', width: '100px', height: '100px' }}>
+              {/* Outer glow */}
+              <div style={{
+                position: 'absolute',
+                top: '-8px',
+                left: '-8px',
+                width: '116px',
+                height: '116px',
+                borderRadius: '50%',
+                background: 'radial-gradient(circle, rgba(139,92,246,0.15) 0%, rgba(109,40,217,0.05) 50%, transparent 70%)',
+                animation: 'resultsPulse 2s ease-in-out infinite'
+              }}></div>
+              
+              {/* Outer ring */}
+              <div style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100px',
+                height: '100px',
+                borderRadius: '50%',
+                border: '3px solid transparent',
+                borderTop: '3px solid #8b5cf6',
+                borderRight: '3px solid #6d28d9',
+                animation: 'resultsSpin 1.5s linear infinite'
+              }}></div>
+              
+              {/* Inner ring */}
+              <div style={{
+                position: 'absolute',
+                top: '12px',
+                left: '12px',
+                width: '76px',
+                height: '76px',
+                borderRadius: '50%',
+                border: '3px solid transparent',
+                borderBottom: '3px solid #ec4899',
+                borderLeft: '3px solid #3b82f6',
+                animation: 'resultsSpinReverse 2s linear infinite'
+              }}></div>
+              
+              {/* Center icon */}
+              <div style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                width: '48px',
+                height: '48px',
+                borderRadius: '50%',
+                background: 'linear-gradient(135deg, #8b5cf6, #6d28d9)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 0 20px rgba(139,92,246,0.5), 0 0 40px rgba(109,40,217,0.3)',
+                animation: 'resultsBounce 1.5s ease-in-out infinite'
+              }}>
+                <i className="fas fa-chart-line" style={{ color: 'white', fontSize: '16px' }}></i>
+              </div>
+            </div>
+            
+            <div style={{ textAlign: 'center' }}>
+              <p style={{ fontSize: '18px', color: '#1e293b', margin: 0, fontWeight: 600, letterSpacing: '0.5px' }}>
+                Loading Results
+              </p>
+              <p style={{ fontSize: '13px', color: '#64748b', margin: '6px 0 0 0' }}>
+                Preparing your examination results...
+              </p>
+            </div>
+            
+            {/* Dots */}
+            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+              <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#8b5cf6', animation: 'resultsDots 1.2s ease-in-out infinite' }}></div>
+              <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#6d28d9', animation: 'resultsDots 1.2s ease-in-out 0.2s infinite' }}></div>
+              <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ec4899', animation: 'resultsDots 1.2s ease-in-out 0.4s infinite' }}></div>
+            </div>
+          </div>
+          
+          <style>{`
+            @keyframes resultsSpin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+            @keyframes resultsSpinReverse {
+              0% { transform: rotate(360deg); }
+              100% { transform: rotate(0deg); }
+            }
+            @keyframes resultsPulse {
+              0%, 100% { opacity: 0.6; transform: scale(1); }
+              50% { opacity: 1; transform: scale(1.05); }
+            }
+            @keyframes resultsBounce {
+              0%, 100% { transform: translate(-50%, -50%) scale(1); }
+              50% { transform: translate(-50%, -50%) scale(1.08); }
+            }
+            @keyframes resultsDots {
+              0%, 100% { opacity: 0.3; transform: scale(1); }
+              50% { opacity: 1; transform: scale(1.5); }
+            }
+          `}</style>
         </div>
       );
     }
@@ -1031,9 +1130,24 @@ const Results = () => {
             {studentInfo?.academic_year || 'Academic Year: 2024-2025'}
           </p>
         </div>
-        {!specificExam && (
-          <button className="btn btn-success" onClick={refreshResults}>
-            <i className="fas fa-sync-alt"></i> <span className="btn-text">Refresh</span>
+         {!specificExam && (
+          <button 
+            className="results-refresh-mini-btn" 
+            onClick={() => {
+              if (user?.id) {
+                localStorage.removeItem(`results-${user.id}`);
+                localStorage.removeItem(`results-${user.email}`);
+              }
+              Object.keys(localStorage).forEach(key => {
+                if (key.startsWith('results-')) {
+                  localStorage.removeItem(key);
+                }
+              });
+              refreshResults();
+            }}
+            title="Refresh results"
+          >
+            <i className="fas fa-sync-alt"></i>
           </button>
         )}
       </div>

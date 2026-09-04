@@ -925,9 +925,108 @@ const Dashboard = () => {
     
   if (loading) {
     return (
-      <div className="dashboard-spinner" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column' }}>
-        <div className="spinner" style={{ width: '50px', height: '50px', border: '4px solid #f3f3f3', borderTop: '4px solid #3498db', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
-        <p style={{ marginTop: '20px', color: '#666' }}>Loading dashboard...</p>
+      <div style={{ padding: '24px', minHeight: '100vh', background: '#f8f9fa', display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px', marginTop: '10vh' }}>
+          <div style={{ position: 'relative', width: '100px', height: '100px' }}>
+            {/* Outer glow */}
+            <div style={{
+              position: 'absolute',
+              top: '-8px',
+              left: '-8px',
+              width: '116px',
+              height: '116px',
+              borderRadius: '50%',
+              background: 'radial-gradient(circle, rgba(52,152,219,0.15) 0%, rgba(41,128,185,0.05) 50%, transparent 70%)',
+              animation: 'dashboardPulse 2s ease-in-out infinite'
+            }}></div>
+            
+            {/* Outer ring */}
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100px',
+              height: '100px',
+              borderRadius: '50%',
+              border: '3px solid transparent',
+              borderTop: '3px solid #3498db',
+              borderRight: '3px solid #2980b9',
+              animation: 'dashboardSpin 1.5s linear infinite'
+            }}></div>
+            
+            {/* Inner ring */}
+            <div style={{
+              position: 'absolute',
+              top: '12px',
+              left: '12px',
+              width: '76px',
+              height: '76px',
+              borderRadius: '50%',
+              border: '3px solid transparent',
+              borderBottom: '3px solid #2ecc71',
+              borderLeft: '3px solid #9b59b6',
+              animation: 'dashboardSpinReverse 2s linear infinite'
+            }}></div>
+            
+            {/* Center icon */}
+            <div style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: '48px',
+              height: '48px',
+              borderRadius: '50%',
+              background: 'linear-gradient(135deg, #3498db, #2980b9)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 0 20px rgba(52,152,219,0.5), 0 0 40px rgba(41,128,185,0.3)',
+              animation: 'dashboardBounce 1.5s ease-in-out infinite'
+            }}>
+              <i className="fas fa-home" style={{ color: 'white', fontSize: '16px' }}></i>
+            </div>
+          </div>
+          
+          <div style={{ textAlign: 'center' }}>
+            <p style={{ fontSize: '18px', color: '#1e293b', margin: 0, fontWeight: 600, letterSpacing: '0.5px' }}>
+              Loading Dashboard
+            </p>
+            <p style={{ fontSize: '13px', color: '#64748b', margin: '6px 0 0 0' }}>
+              Preparing your overview...
+            </p>
+          </div>
+          
+          {/* Dots */}
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#3498db', animation: 'dashboardDots 1.2s ease-in-out infinite' }}></div>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#2980b9', animation: 'dashboardDots 1.2s ease-in-out 0.2s infinite' }}></div>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#2ecc71', animation: 'dashboardDots 1.2s ease-in-out 0.4s infinite' }}></div>
+          </div>
+        </div>
+        
+        <style>{`
+          @keyframes dashboardSpin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+          @keyframes dashboardSpinReverse {
+            0% { transform: rotate(360deg); }
+            100% { transform: rotate(0deg); }
+          }
+          @keyframes dashboardPulse {
+            0%, 100% { opacity: 0.6; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.05); }
+          }
+          @keyframes dashboardBounce {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-50%, -50%) scale(1.08); }
+          }
+          @keyframes dashboardDots {
+            0%, 100% { opacity: 0.3; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.5); }
+          }
+        `}</style>
       </div>
     );
   }
@@ -948,10 +1047,43 @@ const Dashboard = () => {
           </div>
         </div>
         <button 
-          onClick={() => refetchDashboard()}
-          style={{ backgroundColor: '#f8f9fa', color: '#333', border: '1px solid #dee2e6', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}
+          onClick={() => {
+            if (user?.id) {
+              localStorage.removeItem(`dashboard-${user.id}`);
+              localStorage.removeItem(`dashboard-${user.email}`);
+            }
+            Object.keys(localStorage).forEach(key => {
+              if (key.startsWith('dashboard-')) {
+                localStorage.removeItem(key);
+              }
+            });
+            refetchDashboard();
+          }}
+          style={{
+            width: '28px',
+            height: '28px',
+            backgroundColor: '#3b82f6',
+            color: 'white',
+            border: 'none',
+            borderRadius: '50%',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transition: 'all 0.2s ease',
+            fontSize: '11px'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = '#2563eb';
+            e.currentTarget.style.transform = 'rotate(90deg)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = '#3b82f6';
+            e.currentTarget.style.transform = 'rotate(0deg)';
+          }}
+          title="Refresh dashboard"
         >
-          <i className="fas fa-sync-alt"></i> Refresh
+          <i className="fas fa-sync-alt"></i>
         </button>
       </div>
 

@@ -575,13 +575,111 @@ const Notes = () => {
   // Loading state
   if (loading) {
     return (
-      <div className="notes-loading">
-        <div className="spinner"></div>
-        <p>Loading notes...</p>
+      <div className="notes-loading" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', minHeight: '100vh', background: '#f8f9fa', padding: '24px', gap: '24px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px', marginTop: '10vh' }}>
+          <div style={{ position: 'relative', width: '100px', height: '100px' }}>
+            {/* Outer glow */}
+            <div style={{
+              position: 'absolute',
+              top: '-8px',
+              left: '-8px',
+              width: '116px',
+              height: '116px',
+              borderRadius: '50%',
+              background: 'radial-gradient(circle, rgba(99,102,241,0.15) 0%, rgba(139,92,246,0.05) 50%, transparent 70%)',
+              animation: 'notesPulse 2s ease-in-out infinite'
+            }}></div>
+            
+            {/* Outer ring */}
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100px',
+              height: '100px',
+              borderRadius: '50%',
+              border: '3px solid transparent',
+              borderTop: '3px solid #6366f1',
+              borderRight: '3px solid #8b5cf6',
+              animation: 'notesSpin 1.5s linear infinite'
+            }}></div>
+            
+            {/* Inner ring */}
+            <div style={{
+              position: 'absolute',
+              top: '12px',
+              left: '12px',
+              width: '76px',
+              height: '76px',
+              borderRadius: '50%',
+              border: '3px solid transparent',
+              borderBottom: '3px solid #ec4899',
+              borderLeft: '3px solid #06b6d4',
+              animation: 'notesSpinReverse 2s linear infinite'
+            }}></div>
+            
+            {/* Center icon */}
+            <div style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: '48px',
+              height: '48px',
+              borderRadius: '50%',
+              background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 0 20px rgba(99,102,241,0.5), 0 0 40px rgba(139,92,246,0.3)',
+              animation: 'notesBounce 1.5s ease-in-out infinite'
+            }}>
+              <i className="fas fa-book" style={{ color: 'white', fontSize: '16px' }}></i>
+            </div>
+          </div>
+          
+          <div style={{ textAlign: 'center' }}>
+            <p style={{ fontSize: '18px', color: '#1e293b', margin: 0, fontWeight: 600, letterSpacing: '0.5px' }}>
+              Loading Notes
+            </p>
+            <p style={{ fontSize: '13px', color: '#64748b', margin: '6px 0 0 0' }}>
+              Preparing your study materials...
+            </p>
+          </div>
+          
+          {/* Dots */}
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#6366f1', animation: 'notesDots 1.2s ease-in-out infinite' }}></div>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#8b5cf6', animation: 'notesDots 1.2s ease-in-out 0.2s infinite' }}></div>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ec4899', animation: 'notesDots 1.2s ease-in-out 0.4s infinite' }}></div>
+          </div>
+        </div>
+        
+        <style>{`
+          @keyframes notesSpin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+          @keyframes notesSpinReverse {
+            0% { transform: rotate(360deg); }
+            100% { transform: rotate(0deg); }
+          }
+          @keyframes notesPulse {
+            0%, 100% { opacity: 0.6; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.05); }
+          }
+          @keyframes notesBounce {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-50%, -50%) scale(1.08); }
+          }
+          @keyframes notesDots {
+            0%, 100% { opacity: 0.3; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.5); }
+          }
+        `}</style>
       </div>
     );
   }
-
   // Error state
   if (error) {
     return (
@@ -623,8 +721,23 @@ const Notes = () => {
           <span className="search-icon">🔍</span>
         </div>
 
-        <button onClick={refetchNotes} className="refresh-btn" title="Refresh notes">
-          🔄
+        <button 
+          onClick={() => {
+            if (user?.id) {
+              localStorage.removeItem(`notes-${user.id}`);
+              localStorage.removeItem(`notes-${user.email}`);
+            }
+            Object.keys(localStorage).forEach(key => {
+              if (key.startsWith('notes-')) {
+                localStorage.removeItem(key);
+              }
+            });
+            refetchNotes();
+          }}
+          className="notes-refresh-mini-btn"
+          title="Refresh notes"
+        >
+          <i className="fas fa-sync-alt"></i>
         </button>
       </div>
 

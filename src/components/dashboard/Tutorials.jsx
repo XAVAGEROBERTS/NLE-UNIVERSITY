@@ -461,26 +461,118 @@ const Tutorials = () => {
       video.currentTime = 0;
     }
   };
-
   // ==================== LOADING ====================
   if (loading) {
     return (
-      <div className="tutorials-container">
-        <div className="tutorials-loading-state">
-          <div className="tutorials-spinner-container">
-            <div className="tutorials-spinner">
-              <div className="tutorials-spinner-circle"></div>
-              <div className="tutorials-spinner-circle"></div>
-              <div className="tutorials-spinner-circle"></div>
-              <div className="tutorials-spinner-circle"></div>
+      <div className="tutorials-container" style={{ padding: '24px', minHeight: '100vh', background: '#f8f9fa', display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '24px', marginTop: '10vh' }}>
+          <div style={{ position: 'relative', width: '100px', height: '100px' }}>
+            {/* Outer glow ring */}
+            <div style={{
+              position: 'absolute',
+              top: '-8px',
+              left: '-8px',
+              width: '116px',
+              height: '116px',
+              borderRadius: '50%',
+              background: 'radial-gradient(circle, rgba(99,102,241,0.15) 0%, rgba(139,92,246,0.05) 50%, transparent 70%)',
+              animation: 'tutorialsPulse 2s ease-in-out infinite'
+            }}></div>
+            
+            {/* Outer spinning ring */}
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100px',
+              height: '100px',
+              borderRadius: '50%',
+              border: '3px solid transparent',
+              borderTop: '3px solid #6366f1',
+              borderRight: '3px solid #8b5cf6',
+              animation: 'tutorialsSpin 1.5s linear infinite'
+            }}></div>
+            
+            {/* Inner counter-spinning ring */}
+            <div style={{
+              position: 'absolute',
+              top: '12px',
+              left: '12px',
+              width: '76px',
+              height: '76px',
+              borderRadius: '50%',
+              border: '3px solid transparent',
+              borderBottom: '3px solid #ec4899',
+              borderLeft: '3px solid #06b6d4',
+              animation: 'tutorialsSpinReverse 2s linear infinite'
+            }}></div>
+            
+            {/* Center video icon */}
+            <div style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: '48px',
+              height: '48px',
+              borderRadius: '50%',
+              background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 0 20px rgba(99,102,241,0.5), 0 0 40px rgba(139,92,246,0.3)',
+              animation: 'tutorialsBounce 1.5s ease-in-out infinite'
+            }}>
+              <i className="fas fa-play" style={{ color: 'white', fontSize: '18px', marginLeft: '3px' }}></i>
             </div>
           </div>
-          <p className="tutorials-loading-text">Loading tutorials...</p>
+          
+          <div style={{ textAlign: 'center' }}>
+            <p style={{ fontSize: '18px', color: '#1e293b', margin: 0, fontWeight: 600, letterSpacing: '0.5px' }}>
+              Loading Tutorials
+            </p>
+            <p style={{ fontSize: '13px', color: '#64748b', margin: '6px 0 0 0' }}>
+              Preparing your video content...
+            </p>
+          </div>
+          
+          {/* Progress dots */}
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#6366f1', animation: 'tutorialsDots 1.2s ease-in-out infinite' }}></div>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#8b5cf6', animation: 'tutorialsDots 1.2s ease-in-out 0.2s infinite' }}></div>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ec4899', animation: 'tutorialsDots 1.2s ease-in-out 0.4s infinite' }}></div>
+          </div>
         </div>
+        
+        <style>{`
+          @keyframes tutorialsSpin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+          
+          @keyframes tutorialsSpinReverse {
+            0% { transform: rotate(360deg); }
+            100% { transform: rotate(0deg); }
+          }
+          
+          @keyframes tutorialsPulse {
+            0%, 100% { opacity: 0.6; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.05); }
+          }
+          
+          @keyframes tutorialsBounce {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-50%, -50%) scale(1.08); }
+          }
+          
+          @keyframes tutorialsDots {
+            0%, 100% { opacity: 0.3; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.5); }
+          }
+        `}</style>
       </div>
     );
   }
-
   // ==================== ERROR ====================
   if (error) {
     return (
@@ -520,9 +612,24 @@ const Tutorials = () => {
             courses
           </p>
         </div>
-        <div className="header-right">
-          <button onClick={refreshTutorials} className="secondary-button">
-            <i className="fas fa-sync-alt"></i> Refresh
+               <div className="header-right">
+          <button 
+            onClick={() => {
+              if (user?.id) {
+                localStorage.removeItem(`tutorials-${user.id}`);
+                localStorage.removeItem(`tutorials-${user.email}`);
+              }
+              Object.keys(localStorage).forEach(key => {
+                if (key.startsWith('tutorials-')) {
+                  localStorage.removeItem(key);
+                }
+              });
+              refreshTutorials();
+            }}
+            className="tutorials-refresh-mini-btn"
+            title="Refresh tutorials"
+          >
+            <i className="fas fa-sync-alt"></i>
           </button>
         </div>
       </div>
@@ -840,6 +947,29 @@ const Tutorials = () => {
         .secondary-button:hover {
           background: #f8f9fa;
           border-color: #ced4da;
+        }
+                  .tutorials-refresh-mini-btn {
+          width: 28px;
+          height: 28px;
+          background: #3b82f6;
+          color: white;
+          border: none;
+          border-radius: 50%;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.2s ease;
+          font-size: 11px;
+        }
+
+        .tutorials-refresh-mini-btn:hover {
+          background: #2563eb;
+          transform: rotate(90deg);
+        }
+
+        .tutorials-refresh-mini-btn:active {
+          transform: rotate(180deg) scale(0.9);
         }
 
         /* Loading State for Video Modal */
@@ -1711,6 +1841,7 @@ const Tutorials = () => {
         .video-description::-webkit-scrollbar-thumb:hover {
           background: #a8a8a8;
         }
+    
       `}</style>
     </div>
   );
