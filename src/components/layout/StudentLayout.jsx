@@ -31,7 +31,8 @@ const menuItems = [
   { id: 'finance', label: 'Financial Statements', icon: 'fas fa-money-bill-wave', path: '/finance' },
   { id: 'tutorials', label: 'Tutorials', icon: 'fas fa-chalkboard-teacher', path: '/tutorials' },
   { id: 'notes', label: 'Notes', icon: 'fas fa-sticky-note', path: '/notes' },
-  { id: 'help', label: 'Help & Support', icon: 'fas fa-headset', path: '/help-support' }, // ← NEW
+  { id: 'module-evaluations', label: 'Module Evaluations', icon: 'fas fa-star', path: '/module-evaluations' },
+  { id: 'help', label: 'Help & Support', icon: 'fas fa-headset', path: '/help-support' },
   { id: 'chatbot', label: 'Student Assistant', icon: 'fas fa-robot', path: '/chatbot' },
   { id: 'settings', label: 'Settings', icon: 'fas fa-cog', path: '/settings' },
 ];

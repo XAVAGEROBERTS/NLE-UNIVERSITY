@@ -4,7 +4,8 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { StudentAuthProvider, useStudentAuth } from './context/StudentAuthContext';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-
+import StudentModuleEvaluations from './components/student/StudentModuleEvaluations';
+import StudentEvaluationFormFill from './components/student/StudentEvaluationFormFill';
 // Check if running on mobile
 const isNative = Capacitor.isNativePlatform();
 
@@ -228,6 +229,8 @@ const AppContent = () => {
           <Route path="notes" element={<Notes />} />
           <Route path="help-support" element={<HelpSupport />} />
           <Route path="chatbot" element={<Chatbot />} />
+          <Route path="module-evaluations" element={<StudentModuleEvaluations />} />
+          <Route path="module-evaluation/:formId" element={<StudentEvaluationFormFill />} />
           <Route path="settings" element={<Settings />} />
         </Route>
 
