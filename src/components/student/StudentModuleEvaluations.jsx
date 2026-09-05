@@ -1,4 +1,4 @@
-// student/StudentModuleEvaluations.jsx - COMPLETE WITH RESUME
+// student/StudentModuleEvaluations.jsx - WITH NOTES-STYLE REFRESH BUTTON
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../services/supabase';
 import { useNavigate } from 'react-router-dom';
@@ -15,6 +15,15 @@ const StudentModuleEvaluations = () => {
   const [error, setError] = useState(null);
   const [studentData, setStudentData] = useState(null);
   const [studentId, setStudentId] = useState(null);
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Responsive check
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 600);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
 
   // Fetch student data
   const fetchStudentData = useCallback(async () => {
@@ -49,7 +58,6 @@ const StudentModuleEvaluations = () => {
 
     setLoading(true);
     try {
-      // Get published forms for this department
       const { data: formsData, error: formsError } = await supabase
         .from('module_evaluation_forms')
         .select('*')
@@ -59,7 +67,6 @@ const StudentModuleEvaluations = () => {
 
       if (formsError) throw formsError;
 
-      // Filter forms based on student's year and semester
       let filteredForms = formsData || [];
       
       filteredForms = filteredForms.filter(form => {
@@ -72,7 +79,6 @@ const StudentModuleEvaluations = () => {
         return form.target_semester === studentData.semester;
       });
 
-      // Filter by target courses (if specified)
       if (filteredForms.length > 0) {
         const formsWithCourseCheck = await Promise.all(
           filteredForms.map(async (form) => {
@@ -101,7 +107,6 @@ const StudentModuleEvaluations = () => {
         filteredForms = formsWithCourseCheck.filter(form => form.eligible);
       }
 
-      // Get student's submitted responses
       const { data: responsesData, error: responsesError } = await supabase
         .from('module_evaluation_responses')
         .select('form_id')
@@ -112,7 +117,6 @@ const StudentModuleEvaluations = () => {
 
       const submittedFormIds = new Set(responsesData?.map(r => r.form_id) || []);
 
-      // Get draft/in-progress responses
       const { data: draftData, error: draftError } = await supabase
         .from('module_evaluation_responses')
         .select('form_id, answers')
@@ -129,7 +133,6 @@ const StudentModuleEvaluations = () => {
       });
       setDraftResponses(draftMap);
       
-      // Mark forms as completed or in-progress
       const formsWithStatus = filteredForms.map(form => ({
         ...form,
         completed: submittedFormIds.has(form.id),
@@ -154,6 +157,20 @@ const StudentModuleEvaluations = () => {
 
   const handleStartForm = (formId) => {
     navigate(`/module-evaluation/${formId}`);
+  };
+
+  const handleRefresh = () => {
+    // Clear all evaluation-related cache
+    if (user?.id) {
+      localStorage.removeItem(`module-evaluations-${user.id}`);
+      localStorage.removeItem(`module-evaluations-${user.email}`);
+    }
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith('module-evaluations-') || key.startsWith('eval-')) {
+        localStorage.removeItem(key);
+      }
+    });
+    fetchForms();
   };
 
   const getStatusBadge = (form) => {
@@ -186,67 +203,83 @@ const StudentModuleEvaluations = () => {
   });
 
   const styles = {
-    container: { padding: '20px', maxWidth: '1000px', margin: '0 auto' },
+    container: { 
+      padding: isMobile ? '12px 8px' : '20px', 
+      maxWidth: '1000px', 
+      margin: '0 auto' 
+    },
     header: {
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'center',
       flexWrap: 'wrap',
-      gap: '16px',
-      marginBottom: '24px',
-      paddingBottom: '16px',
+      gap: isMobile ? '8px' : '16px',
+      marginBottom: isMobile ? '16px' : '24px',
+      paddingBottom: isMobile ? '12px' : '16px',
       borderBottom: '2px solid #e8eaf6'
     },
     title: {
       display: 'flex',
       alignItems: 'center',
-      gap: '12px',
+      gap: isMobile ? '8px' : '12px',
       margin: 0,
-      fontSize: '24px',
+      fontSize: isMobile ? '18px' : '24px',
       fontWeight: '700',
       color: '#1a237e'
     },
     badge: {
       background: '#1976d2',
       color: 'white',
-      padding: '4px 14px',
+      padding: isMobile ? '2px 10px' : '4px 14px',
       borderRadius: '20px',
-      fontSize: '13px',
+      fontSize: isMobile ? '11px' : '13px',
       fontWeight: '600'
+    },
+    headerActions: {
+      display: 'flex',
+      gap: '8px',
+      alignItems: 'center'
+    },
+    refreshBtn: {
+      width: isMobile ? '28px' : '32px',
+      height: isMobile ? '28px' : '32px',
+      backgroundColor: '#3b82f6',
+      color: 'white',
+      border: 'none',
+      borderRadius: '50%',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      transition: 'all 0.2s ease',
+      fontSize: isMobile ? '11px' : '13px',
+      flexShrink: 0
     },
     filters: {
       display: 'flex',
-      gap: '12px',
-      marginBottom: '20px',
+      gap: isMobile ? '8px' : '12px',
+      marginBottom: isMobile ? '12px' : '20px',
       flexWrap: 'wrap',
       alignItems: 'center'
     },
     select: {
-      padding: '10px 16px',
+      padding: isMobile ? '8px 12px' : '10px 16px',
       border: '1.5px solid #d1d5db',
       borderRadius: '8px',
       background: 'white',
-      fontSize: '14px',
+      fontSize: isMobile ? '13px' : '14px',
       cursor: 'pointer',
-      minWidth: '180px'
-    },
-    refreshBtn: {
-      padding: '10px 18px',
-      background: '#f5f5f5',
-      border: '1.5px solid #d1d5db',
-      borderRadius: '8px',
-      cursor: 'pointer',
-      fontSize: '13px',
-      fontWeight: '500'
+      minWidth: isMobile ? '140px' : '180px',
+      flex: isMobile ? '1' : 'none'
     },
     grid: {
       display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))',
-      gap: '20px'
+      gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(350px, 1fr))',
+      gap: isMobile ? '12px' : '20px'
     },
     card: {
       background: 'white',
-      padding: '20px',
+      padding: isMobile ? '16px' : '20px',
       borderRadius: '12px',
       boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
       border: '1px solid #f0f0f5',
@@ -256,62 +289,93 @@ const StudentModuleEvaluations = () => {
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'flex-start',
-      marginBottom: '10px'
+      marginBottom: '8px',
+      gap: isMobile ? '8px' : '0'
     },
-    cardTitle: { margin: 0, color: '#1a237e', fontSize: '16px' },
-    cardSub: { margin: '4px 0 0 0', fontSize: '13px', color: '#666' },
-    questionsList: { margin: '8px 0', paddingLeft: '16px' },
-    questionItem: { fontSize: '13px', color: '#444', margin: '4px 0' },
+    cardTitle: { 
+      margin: 0, 
+      color: '#1a237e', 
+      fontSize: isMobile ? '15px' : '16px',
+      fontWeight: '600'
+    },
+    cardSub: { 
+      margin: '4px 0 0 0', 
+      fontSize: isMobile ? '12px' : '13px', 
+      color: '#666' 
+    },
+    questionsList: { 
+      margin: isMobile ? '6px 0' : '8px 0', 
+      paddingLeft: isMobile ? '12px' : '16px' 
+    },
+    questionItem: { 
+      fontSize: isMobile ? '12px' : '13px', 
+      color: '#444', 
+      margin: isMobile ? '2px 0' : '4px 0' 
+    },
     footer: {
       display: 'flex',
+      flexDirection: isMobile ? 'column' : 'row',
       justifyContent: 'space-between',
-      alignItems: 'center',
+      alignItems: isMobile ? 'stretch' : 'center',
       marginTop: '12px',
       paddingTop: '12px',
-      borderTop: '1px solid #f0f0f0'
+      borderTop: '1px solid #f0f0f0',
+      gap: isMobile ? '8px' : '0'
     },
     empty: {
       textAlign: 'center',
-      padding: '60px 20px',
+      padding: isMobile ? '40px 16px' : '60px 20px',
       background: 'white',
       borderRadius: '12px',
       gridColumn: '1 / -1'
     },
     startBtn: {
-      padding: '8px 20px',
+      padding: isMobile ? '10px 16px' : '8px 20px',
       background: '#1a237e',
       color: 'white',
       border: 'none',
       borderRadius: '6px',
       cursor: 'pointer',
       fontWeight: '600',
-      fontSize: '13px'
+      fontSize: isMobile ? '13px' : '13px',
+      width: isMobile ? '100%' : 'auto'
     },
     resumeBtn: {
-      padding: '8px 20px',
+      padding: isMobile ? '10px 16px' : '8px 20px',
       background: '#ff8f00',
       color: 'white',
       border: 'none',
       borderRadius: '6px',
       cursor: 'pointer',
       fontWeight: '600',
-      fontSize: '13px'
+      fontSize: isMobile ? '13px' : '13px',
+      width: isMobile ? '100%' : 'auto'
     },
     completedBtn: {
-      padding: '8px 20px',
+      padding: isMobile ? '10px 16px' : '8px 20px',
       background: '#e8f5e9',
       color: '#2e7d32',
       border: '1px solid #2e7d32',
       borderRadius: '6px',
       cursor: 'default',
       fontWeight: '600',
-      fontSize: '13px'
+      fontSize: isMobile ? '13px' : '13px',
+      width: isMobile ? '100%' : 'auto',
+      textAlign: 'center'
+    },
+    statusBadge: {
+      padding: '4px 10px',
+      borderRadius: '20px',
+      fontSize: isMobile ? '11px' : '12px',
+      fontWeight: '600',
+      whiteSpace: 'nowrap',
+      border: '1px solid currentColor'
     }
   };
 
   if (!studentData) {
     return (
-      <div style={{ textAlign: 'center', padding: '60px' }}>
+      <div style={{ textAlign: 'center', padding: isMobile ? '40px 16px' : '60px' }}>
         <p>Loading student data...</p>
       </div>
     );
@@ -323,8 +387,34 @@ const StudentModuleEvaluations = () => {
     React.createElement(
       'div',
       { style: styles.header },
-      React.createElement('h2', { style: styles.title }, '📋 Module Evaluations'),
-      React.createElement('span', { style: styles.badge }, forms.filter(f => !f.completed && !f.inProgress).length, ' Pending')
+      React.createElement('h2', { style: styles.title }, 
+        isMobile ? '📋 Evaluations' : '📋 Module Evaluations'
+      ),
+      React.createElement(
+        'div',
+        { style: styles.headerActions },
+        React.createElement('span', { style: styles.badge }, 
+          forms.filter(f => !f.completed && !f.inProgress).length, ' Pending'
+        ),
+        // Refresh button - Notes style
+        React.createElement(
+          'button',
+          {
+            onClick: handleRefresh,
+            style: styles.refreshBtn,
+            onMouseEnter: (e) => {
+              e.currentTarget.style.backgroundColor = '#2563eb';
+              e.currentTarget.style.transform = 'rotate(90deg)';
+            },
+            onMouseLeave: (e) => {
+              e.currentTarget.style.backgroundColor = '#3b82f6';
+              e.currentTarget.style.transform = 'rotate(0deg)';
+            },
+            title: 'Refresh evaluations'
+          },
+          React.createElement('i', { className: 'fas fa-sync-alt' })
+        )
+      )
     ),
     React.createElement(
       'div',
@@ -340,16 +430,11 @@ const StudentModuleEvaluations = () => {
         React.createElement('option', { value: 'pending' }, '⏳ Pending'),
         React.createElement('option', { value: 'in-progress' }, '🔄 In Progress'),
         React.createElement('option', { value: 'completed' }, '✅ Completed')
-      ),
-      React.createElement(
-        'button',
-        { style: styles.refreshBtn, onClick: fetchForms },
-        '\uD83D\uDD04 Refresh'
       )
     ),
     error && React.createElement(
       'div',
-      { style: { background: '#ffebee', color: '#c62828', padding: '12px 16px', borderRadius: '6px', marginBottom: '16px' } },
+      { style: { background: '#ffebee', color: '#c62828', padding: '10px 14px', borderRadius: '6px', marginBottom: '12px', fontSize: isMobile ? '13px' : '14px' } },
       '❌ ',
       error
     ),
@@ -358,14 +443,16 @@ const StudentModuleEvaluations = () => {
       { style: styles.grid },
       loading ? React.createElement(
         'div',
-        { style: { gridColumn: '1 / -1', textAlign: 'center', padding: '40px' } },
+        { style: { gridColumn: '1 / -1', textAlign: 'center', padding: isMobile ? '30px' : '40px' } },
         'Loading forms...'
       ) : filteredForms.length === 0 ? React.createElement(
         'div',
         { style: styles.empty },
-        React.createElement('span', { style: { fontSize: '48px', display: 'block', marginBottom: '12px' } }, '📋'),
-        React.createElement('h3', null, 'No Evaluation Forms Available'),
-        React.createElement('p', { style: { color: '#666' } }, filter === 'pending' ? 'You have completed all pending evaluations!' : 'No evaluation forms available for your program/year.')
+        React.createElement('span', { style: { fontSize: isMobile ? '36px' : '48px', display: 'block', marginBottom: '8px' } }, '📋'),
+        React.createElement('h3', { style: { fontSize: isMobile ? '16px' : '20px' } }, 'No Evaluation Forms Available'),
+        React.createElement('p', { style: { color: '#666', fontSize: isMobile ? '13px' : '14px' } }, 
+          filter === 'pending' ? 'You have completed all pending evaluations!' : 'No evaluation forms available for your program/year.'
+        )
       ) : filteredForms.map((form) => {
         const statusInfo = getStatusBadge(form);
         const hasDraft = form.inProgress;
@@ -377,72 +464,67 @@ const StudentModuleEvaluations = () => {
             { style: styles.cardHeader },
             React.createElement(
               'div',
-              null,
+              { style: { flex: 1, minWidth: 0 } },
               React.createElement('h4', { style: styles.cardTitle }, form.title),
               React.createElement('p', { style: styles.cardSub },
                 form.academic_year, ' - Sem ', form.target_semester,
                 form.target_year_of_study && React.createElement(
                   'span',
                   null,
-                  ' • Year ',
+                  ' • Yr ',
                   form.target_year_of_study
                 )
               )
             ),
             React.createElement('span', {
               style: {
+                ...styles.statusBadge,
                 background: statusInfo.bg,
-                color: statusInfo.color,
-                padding: '4px 12px',
-                borderRadius: '20px',
-                fontSize: '12px',
-                fontWeight: '600',
-                whiteSpace: 'nowrap',
-                border: '1px solid ' + statusInfo.color
+                color: statusInfo.color
               }
             }, statusInfo.label)
           ),
           form.description && React.createElement(
             'p',
-            { style: { fontSize: '14px', color: '#444', margin: '8px 0' } },
-            form.description
+            { style: { fontSize: isMobile ? '13px' : '14px', color: '#444', margin: '6px 0' } },
+            isMobile && form.description.length > 80 ? form.description.slice(0, 80) + '...' : form.description
           ),
           React.createElement(
             'div',
             { style: styles.questionsList },
-            (form.questions || []).slice(0, 3).map((q, idx) => (
+            (form.questions || []).slice(0, isMobile ? 2 : 3).map((q, idx) => (
               React.createElement('p', { key: idx, style: styles.questionItem },
                 '• ',
-                q.question,
+                q.question.length > (isMobile ? 30 : 50) ? q.question.slice(0, isMobile ? 30 : 50) + '...' : q.question,
                 ' (',
                 getTypeLabel(q.type),
                 ')'
               )
             )),
-            (form.questions || []).length > 3 && React.createElement(
+            (form.questions || []).length > (isMobile ? 2 : 3) && React.createElement(
               'p',
               { style: { fontSize: '12px', color: '#999' } },
-              '+', (form.questions || []).length - 3, ' more questions'
+              '+', (form.questions || []).length - (isMobile ? 2 : 3), ' more questions'
             )
           ),
           React.createElement(
             'div',
             { style: styles.footer },
-            React.createElement('small', { style: { color: '#999' } },
+            React.createElement('small', { style: { color: '#999', fontSize: isMobile ? '11px' : '12px', textAlign: isMobile ? 'center' : 'left' } },
               'Published: ', form.published_at ? new Date(form.published_at).toLocaleDateString() : 'N/A'
             ),
             form.completed ? React.createElement(
               'button',
               { style: styles.completedBtn },
-              '✅ Completed'
+              isMobile ? '✅ Done' : '✅ Completed'
             ) : hasDraft ? React.createElement(
               'button',
               { style: styles.resumeBtn, onClick: () => handleStartForm(form.id) },
-              '🔄 Resume'
+              isMobile ? '🔄 Resume' : '🔄 Resume'
             ) : React.createElement(
               'button',
               { style: styles.startBtn, onClick: () => handleStartForm(form.id) },
-              '📝 Start Evaluation'
+              isMobile ? '📝 Start' : '📝 Start Evaluation'
             )
           )
         );

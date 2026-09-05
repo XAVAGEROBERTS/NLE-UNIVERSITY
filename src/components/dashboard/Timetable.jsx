@@ -86,7 +86,7 @@ const Timetable = () => {
     }
 
     // ---------- Build unique time columns from real data ----------
-    const timeSet = new Map(); // key = "start-end"
+    const timeSet = new Map();
 
     slots.forEach((s) => {
       const start = String(s.start_time).slice(0, 5);
@@ -97,19 +97,16 @@ const Timetable = () => {
       }
     });
 
-    // Sort time columns by start time
     const timeColumns = Array.from(timeSet.values()).sort(
       (a, b) => timeToMinutes(a.start) - timeToMinutes(b.start)
     );
 
-    // Fixed days
     const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const allDays = dayNames.map((name, idx) => ({
       name,
-      dayOfWeek: idx + 1, // Admin uses 1=Mon … 6=Sat
+      dayOfWeek: idx + 1,
     }));
 
-    // ---------- Build matrix: matrix[dayOfWeek][timeKey] = lecture ----------
     const matrix = {};
     allDays.forEach((d) => {
       matrix[d.dayOfWeek] = {};
@@ -141,7 +138,6 @@ const Timetable = () => {
       }
     });
 
-    // ---------- Only keep days that have at least one lecture ----------
     const days = allDays.filter((day) => {
       const daySlots = matrix[day.dayOfWeek] || {};
       return Object.values(daySlots).some((lecture) => lecture !== null);
@@ -172,7 +168,6 @@ const Timetable = () => {
       <div style={{ padding: '24px', minHeight: '100vh', background: '#f8f9fa', display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px', marginTop: '10vh' }}>
           <div style={{ position: 'relative', width: '100px', height: '100px' }}>
-            {/* Outer glow */}
             <div style={{
               position: 'absolute',
               top: '-8px',
@@ -184,7 +179,6 @@ const Timetable = () => {
               animation: 'timetablePulse 2s ease-in-out infinite'
             }}></div>
             
-            {/* Outer ring */}
             <div style={{
               position: 'absolute',
               top: 0,
@@ -198,7 +192,6 @@ const Timetable = () => {
               animation: 'timetableSpin 1.5s linear infinite'
             }}></div>
             
-            {/* Inner ring */}
             <div style={{
               position: 'absolute',
               top: '12px',
@@ -212,7 +205,6 @@ const Timetable = () => {
               animation: 'timetableSpinReverse 2s linear infinite'
             }}></div>
             
-            {/* Center icon */}
             <div style={{
               position: 'absolute',
               top: '50%',
@@ -241,7 +233,6 @@ const Timetable = () => {
             </p>
           </div>
           
-          {/* Dots */}
           <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
             <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#1e88e5', animation: 'timetableDots 1.2s ease-in-out infinite' }}></div>
             <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#1976d2', animation: 'timetableDots 1.2s ease-in-out 0.2s infinite' }}></div>
@@ -287,7 +278,6 @@ const Timetable = () => {
 
   const { days: rawDays, timeColumns, matrix } = gridData;
 
-  // Extra safety: filter again on the client so even old cached data is cleaned
   const days = (rawDays || []).filter((day) => {
     const daySlots = matrix?.[day.dayOfWeek] || {};
     return Object.values(daySlots).some((lecture) => lecture !== null);
@@ -298,12 +288,12 @@ const Timetable = () => {
     <div className="content" style={{ padding: isMobile ? '12px 8px' : 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
         <div>
-          <h2 style={{ margin: 0 }}>My Time Table</h2>
-          <div style={{ color: '#666', fontSize: 14 }}>
+          <h2 style={{ margin: 0, fontSize: isMobile ? '18px' : '24px' }}>My Time Table</h2>
+          <div style={{ color: '#666', fontSize: isMobile ? '12px' : '14px' }}>
             Week of {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
           </div>
         </div>
-             <button
+        <button
           onClick={() => {
             if (user?.id) {
               localStorage.removeItem(`timetable-grid-${user.id}`);
@@ -317,8 +307,8 @@ const Timetable = () => {
             refetch();
           }}
           style={{
-            width: '28px',
-            height: '28px',
+            width: isMobile ? '24px' : '28px',
+            height: isMobile ? '24px' : '28px',
             backgroundColor: '#3b82f6',
             color: 'white',
             border: 'none',
@@ -328,7 +318,7 @@ const Timetable = () => {
             alignItems: 'center',
             justifyContent: 'center',
             transition: 'all 0.2s ease',
-            fontSize: '11px'
+            fontSize: isMobile ? '10px' : '11px'
           }}
           onMouseEnter={(e) => {
             e.currentTarget.style.backgroundColor = '#2563eb';
@@ -349,20 +339,33 @@ const Timetable = () => {
           <p>No timetable available for the current semester.</p>
         </div>
       ) : (
-        <div className="table-container" style={{ overflowX: 'auto', borderRadius: 10, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 700 }}>
+        <div className="table-container" style={{ 
+          overflowX: 'auto', 
+          borderRadius: 10, 
+          boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+          WebkitOverflowScrolling: 'touch'
+        }}>
+          <table style={{ 
+            width: '100%', 
+            borderCollapse: 'collapse',
+            minWidth: isMobile ? 'auto' : 700,
+            tableLayout: isMobile ? 'fixed' : 'auto'
+          }}>
             <thead>
               <tr>
                 <th
                   style={{
                     background: '#1e88e5',
                     color: 'white',
-                    padding: '12px 10px',
+                    padding: isMobile ? '8px 6px' : '12px 10px',
                     textAlign: 'left',
                     position: 'sticky',
                     left: 0,
                     zIndex: 2,
-                    minWidth: 100,
+                    minWidth: isMobile ? '60px' : '100px',
+                    maxWidth: isMobile ? '70px' : 'auto',
+                    fontSize: isMobile ? '11px' : '14px',
+                    wordBreak: 'break-word'
                   }}
                 >
                   Day
@@ -373,12 +376,25 @@ const Timetable = () => {
                     style={{
                       background: '#1e88e5',
                       color: 'white',
-                      padding: '12px 10px',
+                      padding: isMobile ? '8px 4px' : '12px 10px',
                       textAlign: 'center',
-                      whiteSpace: 'nowrap',
+                      whiteSpace: isMobile ? 'normal' : 'nowrap',
+                      fontSize: isMobile ? '9px' : '14px',
+                      minWidth: isMobile ? '70px' : 'auto',
+                      maxWidth: isMobile ? '80px' : 'auto',
+                      wordBreak: 'break-word',
+                      lineHeight: isMobile ? '1.2' : '1.4'
                     }}
                   >
-                    {tc.label}
+                    {isMobile ? (
+                      <>
+                        <div>{tc.label.split('-')[0]}</div>
+                        <div style={{ fontSize: '7px', opacity: 0.7 }}>to</div>
+                        <div>{tc.label.split('-')[1]}</div>
+                      </>
+                    ) : (
+                      tc.label
+                    )}
                   </th>
                 ))}
               </tr>
@@ -388,16 +404,20 @@ const Timetable = () => {
                 <tr key={day.dayOfWeek} style={{ background: dayIdx % 2 === 0 ? '#ffffff' : '#e3f2fd' }}>
                   <td
                     style={{
-                      padding: '14px 12px',
+                      padding: isMobile ? '8px 6px' : '14px 12px',
                       fontWeight: 600,
                       borderBottom: '1px solid #e0e0e0',
                       position: 'sticky',
                       left: 0,
                       background: dayIdx % 2 === 0 ? '#ffffff' : '#e3f2fd',
                       zIndex: 1,
+                      fontSize: isMobile ? '11px' : '14px',
+                      minWidth: isMobile ? '60px' : '100px',
+                      maxWidth: isMobile ? '70px' : 'auto',
+                      wordBreak: 'break-word'
                     }}
                   >
-                    {day.name}
+                    {isMobile ? day.name.slice(0, 3) : day.name}
                   </td>
 
                   {timeColumns.map((tc) => {
@@ -408,43 +428,75 @@ const Timetable = () => {
                       <td
                         key={key}
                         style={{
-                          padding: 8,
+                          padding: isMobile ? '4px 2px' : 8,
                           borderBottom: '1px solid #e0e0e0',
                           verticalAlign: 'top',
-                          minWidth: 160,
+                          minWidth: isMobile ? '70px' : '160px',
+                          maxWidth: isMobile ? '80px' : 'auto',
                         }}
                       >
                         {lecture ? (
                           <div
                             style={{
                               background: lecture.slotType === 'LAB' ? '#fff5f5' : '#f0f7ff',
-                              borderLeft: `4px solid ${lecture.slotType === 'LAB' ? '#e74c3c' : '#3498db'}`,
-                              borderRadius: 6,
-                              padding: '10px 8px',
-                              fontSize: 13,
-                              lineHeight: 1.35,
+                              borderLeft: `3px solid ${lecture.slotType === 'LAB' ? '#e74c3c' : '#3498db'}`,
+                              borderRadius: 4,
+                              padding: isMobile ? '6px 4px' : '10px 8px',
+                              fontSize: isMobile ? '8px' : '13px',
+                              lineHeight: isMobile ? '1.2' : '1.35',
                             }}
                           >
-                            <div style={{ fontWeight: 600, marginBottom: 2 }}>
+                            <div style={{ 
+                              fontWeight: 600, 
+                              marginBottom: isMobile ? 1 : 2,
+                              fontSize: isMobile ? '9px' : 'inherit'
+                            }}>
                               {lecture.courseCode}
                               {lecture.slotType && (
-                                <span style={{ color: '#e74c3c', marginLeft: 4, fontSize: 11 }}>
+                                <span style={{ 
+                                  color: '#e74c3c', 
+                                  marginLeft: isMobile ? 2 : 4, 
+                                  fontSize: isMobile ? '6px' : '11px',
+                                  display: isMobile ? 'block' : 'inline'
+                                }}>
                                   {lecture.slotType}
                                 </span>
                               )}
                             </div>
-                            <div style={{ color: '#555', fontSize: 12, marginBottom: 2 }}>
-                              {lecture.courseName}
-                            </div>
-                            <div style={{ color: '#666', fontSize: 12 }}>
-                              {lecture.lecturer}
-                            </div>
-                            <div style={{ color: '#888', fontSize: 12, marginTop: 2 }}>
-                              {lecture.room}
-                            </div>
+                            {!isMobile && (
+                              <>
+                                <div style={{ color: '#555', fontSize: 12, marginBottom: 2 }}>
+                                  {lecture.courseName}
+                                </div>
+                                <div style={{ color: '#666', fontSize: 12 }}>
+                                  {lecture.lecturer}
+                                </div>
+                                <div style={{ color: '#888', fontSize: 12, marginTop: 2 }}>
+                                  {lecture.room}
+                                </div>
+                              </>
+                            )}
+                            {isMobile && (
+                              <>
+                                <div style={{ color: '#555', fontSize: '7px', marginBottom: 1 }}>
+                                  {lecture.courseName.length > 15 ? lecture.courseName.slice(0, 15) + '…' : lecture.courseName}
+                                </div>
+                                <div style={{ color: '#666', fontSize: '7px' }}>
+                                  {lecture.lecturer.length > 12 ? lecture.lecturer.slice(0, 12) + '…' : lecture.lecturer}
+                                </div>
+                                <div style={{ color: '#888', fontSize: '7px', marginTop: 1 }}>
+                                  {lecture.room.length > 10 ? lecture.room.slice(0, 10) + '…' : lecture.room}
+                                </div>
+                              </>
+                            )}
                           </div>
                         ) : (
-                          <div style={{ color: '#ccc', textAlign: 'center', padding: 12 }}>—</div>
+                          <div style={{ 
+                            color: '#ccc', 
+                            textAlign: 'center', 
+                            padding: isMobile ? 6 : 12,
+                            fontSize: isMobile ? '8px' : '14px'
+                          }}>—</div>
                         )}
                       </td>
                     );
@@ -455,7 +507,6 @@ const Timetable = () => {
           </table>
         </div>
       )}
-
     </div>
   );
 };
