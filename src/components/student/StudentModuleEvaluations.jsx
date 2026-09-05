@@ -8,8 +8,6 @@ const StudentModuleEvaluations = () => {
   const navigate = useNavigate();
   const { user } = useStudentAuth();
   const [forms, setForms] = useState([]);
-  const [responses, setResponses] = useState([]);
-  const [draftResponses, setDraftResponses] = useState({});
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState('all');
   const [error, setError] = useState(null);
@@ -26,30 +24,30 @@ const StudentModuleEvaluations = () => {
   }, []);
 
   // Fetch student data
-  const fetchStudentData = useCallback(async () => {
-    if (!user?.email) return;
-
-    try {
-      const { data, error } = await supabase
-        .from('students')
-        .select('id, full_name, email, department_code, program, year_of_study, semester')
-        .eq('email', user.email)
-        .single();
-
-      if (error) throw error;
-      if (data) {
-        setStudentData(data);
-        setStudentId(data.id);
-      }
-    } catch (err) {
-      console.error('Error fetching student data:', err);
-      setError('Failed to load student data');
-    }
-  }, [user?.email]);
-
   useEffect(() => {
-    fetchStudentData();
-  }, [fetchStudentData]);
+    const loadStudentData = async () => {
+      if (!user?.email) return;
+
+      try {
+        const { data, error } = await supabase
+          .from('students')
+          .select('id, full_name, email, department_code, program, year_of_study, semester')
+          .eq('email', user.email)
+          .single();
+
+        if (error) throw error;
+        if (data) {
+          setStudentData(data);
+          setStudentId(data.id);
+        }
+      } catch (err) {
+        console.error('Error fetching student data:', err);
+        setError('Failed to load student data');
+      }
+    };
+
+    loadStudentData();
+  }, [user]);
 
   const fetchForms = useCallback(async () => {
     if (!studentData?.department_code || !studentId) {
@@ -131,7 +129,6 @@ const StudentModuleEvaluations = () => {
           draftMap[d.form_id] = true;
         }
       });
-      setDraftResponses(draftMap);
       
       const formsWithStatus = filteredForms.map(form => ({
         ...form,
@@ -140,20 +137,32 @@ const StudentModuleEvaluations = () => {
       }));
 
       setForms(formsWithStatus);
-      setResponses(responsesData || []);
     } catch (err) {
       console.error('Error fetching forms:', err);
       setError('Failed to load evaluation forms');
     } finally {
       setLoading(false);
     }
-  }, [studentData?.department_code, studentId, studentData?.year_of_study, studentData?.semester]);
+  }, [studentData, studentId]);
 
+  // Fetch forms when student data is ready - using a flag to prevent cascading renders
   useEffect(() => {
-    if (studentId && studentData?.department_code) {
-      fetchForms();
+    let isMounted = true;
+
+    const loadForms = async () => {
+      if (studentId && studentData?.department_code) {
+        await fetchForms();
+      }
+    };
+
+    if (isMounted) {
+      loadForms();
     }
-  }, [fetchForms, studentId, studentData?.department_code]);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [fetchForms, studentId, studentData]);
 
   const handleStartForm = (formId) => {
     navigate(`/module-evaluation/${formId}`);
